@@ -242,28 +242,26 @@ export default function App() {
         setData(prev => {
           const remoteStudents = rawStudents !== null 
             ? rawStudents.map((s, idx) => fromSupabaseStudent(s, idx)) 
-            : [];
-          const nextStudents = mergeById(prev.students, remoteStudents);
+            : prev.students;
           const nextRecords = rawRecords !== null 
             ? rawRecords 
             : (prev.examinationRecords || []);
           const remoteTeachers = rawTeachers !== null 
             ? rawTeachers.map((t, idx) => fromSupabaseTeacher(t, idx)) 
-            : [];
-          const nextTeachers = mergeById(prev.teachers, remoteTeachers);
+            : prev.teachers;
           const nextExams = rawExams !== null 
             ? rawExams.map((e, idx) => fromSupabaseExam(e, idx)) 
             : prev.exams;
 
           const updatedState: AppData = {
             ...prev,
-            students: nextStudents,
+            students: remoteStudents,
             examinationRecords: nextRecords,
-            teachers: nextTeachers,
+            teachers: remoteTeachers,
             exams: nextExams
           };
 
-          try { /* localStorage.setItem(schoolKey, JSON.stringify(updatedState)); */ } catch (e) {}
+          setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
           saveSchoolData(schoolId, updatedState).catch(e => console.warn("Firestore sync error:", e));
           return updatedState;
         });
@@ -284,15 +282,15 @@ export default function App() {
       if (firestoreSnapshot && typeof firestoreSnapshot === 'object') {
         console.log("Real-time cloud sync from Firestore!");
         setData(prev => {
-          const snapStudents = Array.isArray(firestoreSnapshot.students) ? firestoreSnapshot.students : [];
-          const snapTeachers = Array.isArray(firestoreSnapshot.teachers) ? firestoreSnapshot.teachers : [];
-          const snapExams = Array.isArray(firestoreSnapshot.exams) ? firestoreSnapshot.exams : [];
+          const snapStudents = Array.isArray(firestoreSnapshot.students) ? firestoreSnapshot.students : null;
+          const snapTeachers = Array.isArray(firestoreSnapshot.teachers) ? firestoreSnapshot.teachers : null;
+          const snapExams = Array.isArray(firestoreSnapshot.exams) ? firestoreSnapshot.exams : null;
           const snapStreams = Array.isArray(firestoreSnapshot.streamSettings) ? firestoreSnapshot.streamSettings : null;
           const snapPeriods = Array.isArray(firestoreSnapshot.periodSettings) ? firestoreSnapshot.periodSettings : null;
 
-          const useStudents = mergeById(prev.students, snapStudents);
-          const useTeachers = mergeById(prev.teachers, snapTeachers);
-          const useExams = (snapExams.length > 0 || prev.exams.length === 0) ? snapExams : prev.exams;
+          const useStudents = snapStudents !== null ? snapStudents : prev.students;
+          const useTeachers = snapTeachers !== null ? snapTeachers : prev.teachers;
+          const useExams = snapExams !== null ? snapExams : prev.exams;
           const useStreams = snapStreams !== null ? snapStreams : prev.streamSettings;
           const usePeriods = snapPeriods !== null ? snapPeriods : prev.periodSettings;
 
@@ -305,6 +303,7 @@ export default function App() {
             streamSettings: useStreams,
             periodSettings: usePeriods
           };
+          setCachedData(schoolKey, merged).catch(e => console.warn("IDB cache set error:", e));
           try { localStorage.setItem(schoolKey, JSON.stringify(merged)); } catch (e) {}
           return merged;
         });
@@ -465,13 +464,13 @@ export default function App() {
         }
 
         if (updates.timetableAssignments && Array.isArray(updates.timetableAssignments)) {
-          await saveTimetableAssignments(schoolId, updates.timetableAssignments);
+          await saveTimetableAssignments(schoolId, updates.timetableAssignments, { replace: true });
         }
       } catch (err) {
         console.warn("Supabase / Timetable upsert sync warning:", err);
       }
     } else if (updates.timetableAssignments && Array.isArray(updates.timetableAssignments)) {
-      saveTimetableAssignments(schoolId, updates.timetableAssignments).catch(e => console.warn("Local timetable save error:", e));
+      saveTimetableAssignments(schoolId, updates.timetableAssignments, { replace: true }).catch(e => console.warn("Local timetable save error:", e));
     }
   }, [userAccount]);
 

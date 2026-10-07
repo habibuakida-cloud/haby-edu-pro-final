@@ -2571,9 +2571,25 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                   <div key={ss.className} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="font-black text-sm text-slate-900">{ss.className}</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
-                        {ss.streams.length} Mikondo
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
+                          {ss.streams.length} Mikondo
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`Una uhakika unataka kufuta mchepuo/darasa lote la "${ss.className}" na mikondo yake yote?`)) {
+                              const updated = streamSettings.filter(setting => setting.className !== ss.className);
+                              onUpdateStreamSettings(updated);
+                            }
+                          }}
+                          className="px-2 py-0.5 text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded border border-rose-200 transition-colors cursor-pointer flex items-center gap-1"
+                          title={`Futa mipangilio ya darasa la ${ss.className}`}
+                        >
+                          <Trash2 className="w-2.5 h-2.5" />
+                          <span>Futa Darasa</span>
+                        </button>
+                      </div>
                     </div>
                     <div className="flex flex-wrap gap-1.5">
                       {ss.streams.map(st => (
@@ -2585,10 +2601,6 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                           <button
                             type="button"
                             onClick={() => {
-                              if (ss.streams.length <= 1) {
-                                alert(`Darasa la ${ss.className} lina mkondo mmoja tu. Huwezi kufuta mkondo wote.`);
-                                return;
-                              }
                               if (confirm(`Una uhakika unataka kufuta mkondo wa "${st}" kwenye ${ss.className}?`)) {
                                 const updated = streamSettings.map(setting => {
                                   if (setting.className === ss.className) {
@@ -2598,7 +2610,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                     };
                                   }
                                   return setting;
-                                });
+                                }).filter(setting => setting.streams.length > 0);
                                 onUpdateStreamSettings(updated);
                               }
                             }}
