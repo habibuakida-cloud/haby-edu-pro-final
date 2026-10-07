@@ -14,11 +14,19 @@ export interface SubjectPerformanceItem {
   subjectName: string;
   subjectKey: string;
   testedCount: number;
+  testedBoys: number;
+  testedGirls: number;
   meanScore: number | string;
+  meanScoreBoys: number | string;
+  meanScoreGirls: number | string;
   highest: number;
   lowest: number;
   passRate: number | string;
+  passRateBoys: number | string;
+  passRateGirls: number | string;
   grades: GradeCounts;
+  gradesBoys: GradeCounts;
+  gradesGirls: GradeCounts;
 }
 
 export interface CandidatePerformanceItem {
@@ -45,6 +53,8 @@ export interface PerformancePdfExportData {
   classAverage: string | number;
   passRate: string | number;
   gradeDistribution: GradeCounts;
+  gradeDistributionBoys: GradeCounts;
+  gradeDistributionGirls: GradeCounts;
   divisionDistribution?: {
     divI: number;
     divII: number;
@@ -185,7 +195,7 @@ export function exportGradeDistributionAndPerformancePDF(data: PerformancePdfExp
         { label: 'Grade F (0 - 29%)', count: data.gradeDistribution.F ?? 0, desc: 'Fail / Unclassified' }
       ];
 
-  const totalGraded = grades.reduce((acc, curr) => acc + (curr.count || 0), 0) || 1;
+  const totalGraded = grades.reduce((acc, curr) => acc + (typeof curr.count === 'number' ? curr.count : 0), 0) || 1;
 
   // Table Header row
   doc.setFillColor(31, 77, 139);
@@ -194,7 +204,7 @@ export function exportGradeDistributionAndPerformancePDF(data: PerformancePdfExp
   doc.setFontSize(7.5);
   doc.setTextColor(255, 255, 255);
   doc.text('Grade Range', margin + 3, y + 4.2);
-  doc.text('Classification / Standing', margin + 55, y + 4.2);
+  doc.text('Classification / Standing (M & F)', margin + 55, y + 4.2);
   doc.text('Pupils', margin + 115, y + 4.2, { align: 'right' });
   doc.text('Percentage (%)', margin + 145, y + 4.2, { align: 'right' });
   doc.text('Distribution Visual Ratio', margin + 155, y + 4.2);
@@ -206,7 +216,11 @@ export function exportGradeDistributionAndPerformancePDF(data: PerformancePdfExp
     doc.setFillColor(rowBg, rowBg, rowBg);
     doc.rect(margin, y, contentWidth, 6.2, 'F');
 
-    const pct = Number(((g.count / totalGraded) * 100).toFixed(1));
+    const totalC = typeof g.count === 'number' ? g.count : 0;
+    const gradeKey = gIdx === 0 ? 'A' : gIdx === 1 ? 'B' : gIdx === 2 ? 'C' : gIdx === 3 ? 'D' : (data.isPrimary ? 'E' : 'F');
+    const maleC = (data.gradeDistributionBoys as any)?.[gradeKey] || 0;
+    const femaleC = (data.gradeDistributionGirls as any)?.[gradeKey] || 0;
+    const pct = Number(((totalC / totalGraded) * 100).toFixed(1));
 
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
@@ -216,11 +230,11 @@ export function exportGradeDistributionAndPerformancePDF(data: PerformancePdfExp
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7);
     doc.setTextColor(...slateMuted);
-    doc.text(g.desc, margin + 55, y + 4.3);
+    doc.text(`${g.desc} (M: ${maleC}, F: ${femaleC})`, margin + 55, y + 4.3);
 
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...slateDark);
-    doc.text(String(g.count), margin + 115, y + 4.3, { align: 'right' });
+    doc.text(String(totalC), margin + 115, y + 4.3, { align: 'right' });
     doc.text(`${pct}%`, margin + 145, y + 4.3, { align: 'right' });
 
     // Mini visual bar
@@ -273,12 +287,12 @@ export function exportGradeDistributionAndPerformancePDF(data: PerformancePdfExp
   }
 
   // ==========================================
-  // 5. SUBJECT PERFORMANCE BREAKDOWN
+  // 5. SUBJECT PERFORMANCE BREAKDOWN (GENDER-WISE)
   // ==========================================
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(10);
   doc.setTextColor(...primaryNavy);
-  doc.text('2. SUBJECT MEAN PERFORMANCE & GRADE BREAKDOWN', margin, y + 4);
+  doc.text('2. SUBJECT MEAN PERFORMANCE & GRADE BREAKDOWN (BY GENDER)', margin, y + 4);
 
   y += 6;
 
@@ -288,7 +302,7 @@ export function exportGradeDistributionAndPerformancePDF(data: PerformancePdfExp
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7);
   doc.setTextColor(255, 255, 255);
-  doc.text('Subject Title', margin + 3, y + 4.2);
+  doc.text('Subject Title & Gender', margin + 3, y + 4.2);
   doc.text('Tested', margin + 58, y + 4.2, { align: 'right' });
   doc.text('Mean (%)', margin + 74, y + 4.2, { align: 'right' });
   doc.text('A', margin + 88, y + 4.2, { align: 'center' });
@@ -302,48 +316,78 @@ export function exportGradeDistributionAndPerformancePDF(data: PerformancePdfExp
 
   y += 6;
 
-  const displaySubs = data.subjectPerformances.slice(0, 11);
+  const displaySubs = data.subjectPerformances.slice(0, 8);
   displaySubs.forEach((sub, sIdx) => {
     const rowBg = sIdx % 2 === 0 ? 255 : 248;
-    doc.setFillColor(rowBg, rowBg, rowBg);
-    doc.rect(margin, y, contentWidth, 5.5, 'F');
 
+    // Boys sub-row
+    doc.setFillColor(rowBg, rowBg, rowBg);
+    doc.rect(margin, y, contentWidth, 4.8, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setTextColor(...slateDark);
-    const subTitle = sub.subjectName.length > 28 ? `${sub.subjectName.slice(0, 26)}...` : sub.subjectName;
-    doc.text(subTitle, margin + 3, y + 3.8);
+    const subTitleM = `${sub.subjectName} [Boys]`;
+    doc.text(subTitleM.length > 28 ? `${subTitleM.slice(0, 26)}...` : subTitleM, margin + 3, y + 3.4);
 
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...slateMuted);
-    doc.text(String(sub.testedCount), margin + 58, y + 3.8, { align: 'right' });
+    doc.text(String(sub.testedBoys || 0), margin + 58, y + 3.4, { align: 'right' });
 
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(37, 99, 235);
-    doc.text(`${sub.meanScore}%`, margin + 74, y + 3.8, { align: 'right' });
+    doc.text(`${sub.meanScoreBoys || 0}%`, margin + 74, y + 3.4, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...slateDark);
-    doc.text(String(sub.grades.A || 0), margin + 88, y + 3.8, { align: 'center' });
-    doc.text(String(sub.grades.B || 0), margin + 99, y + 3.8, { align: 'center' });
-    doc.text(String(sub.grades.C || 0), margin + 110, y + 3.8, { align: 'center' });
-    doc.text(String(sub.grades.D || 0), margin + 121, y + 3.8, { align: 'center' });
-    doc.text(String(data.isPrimary ? (sub.grades.E || 0) : (sub.grades.F || 0)), margin + 132, y + 3.8, { align: 'center' });
+    doc.text(String(sub.gradesBoys?.A || 0), margin + 88, y + 3.4, { align: 'center' });
+    doc.text(String(sub.gradesBoys?.B || 0), margin + 99, y + 3.4, { align: 'center' });
+    doc.text(String(sub.gradesBoys?.C || 0), margin + 110, y + 3.4, { align: 'center' });
+    doc.text(String(sub.gradesBoys?.D || 0), margin + 121, y + 3.4, { align: 'center' });
+    doc.text(String(data.isPrimary ? (sub.gradesBoys?.E || 0) : (sub.gradesBoys?.F || 0)), margin + 132, y + 3.4, { align: 'center' });
 
-    doc.text(String(sub.highest || '-'), margin + 147, y + 3.8, { align: 'right' });
-    doc.text(String(sub.lowest || '-'), margin + 160, y + 3.8, { align: 'right' });
+    doc.text(String(sub.highest || '-'), margin + 147, y + 3.4, { align: 'right' });
+    doc.text(String(sub.lowest || '-'), margin + 160, y + 3.4, { align: 'right' });
 
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(16, 185, 129);
-    doc.text(`${sub.passRate}%`, margin + 178, y + 3.8, { align: 'right' });
+    doc.text(`${sub.passRateBoys || 0}%`, margin + 178, y + 3.4, { align: 'right' });
+
+    y += 4.8;
+
+    // Girls sub-row
+    doc.setFillColor(rowBg, rowBg, rowBg);
+    doc.rect(margin, y, contentWidth, 4.8, 'F');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(190, 24, 93);
+    const subTitleF = `${sub.subjectName} [Girls]`;
+    doc.text(subTitleF.length > 28 ? `${subTitleF.slice(0, 26)}...` : subTitleF, margin + 3, y + 3.4);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...slateMuted);
+    doc.text(String(sub.testedGirls || 0), margin + 58, y + 3.4, { align: 'right' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(37, 99, 235);
+    doc.text(`${sub.meanScoreGirls || 0}%`, margin + 74, y + 3.4, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...slateDark);
+    doc.text(String(sub.gradesGirls?.A || 0), margin + 88, y + 3.4, { align: 'center' });
+    doc.text(String(sub.gradesGirls?.B || 0), margin + 99, y + 3.4, { align: 'center' });
+    doc.text(String(sub.gradesGirls?.C || 0), margin + 110, y + 3.4, { align: 'center' });
+    doc.text(String(sub.gradesGirls?.D || 0), margin + 121, y + 3.4, { align: 'center' });
+    doc.text(String(data.isPrimary ? (sub.gradesGirls?.E || 0) : (sub.gradesGirls?.F || 0)), margin + 132, y + 3.4, { align: 'center' });
+
+    doc.text('-', margin + 147, y + 3.4, { align: 'right' });
+    doc.text('-', margin + 160, y + 3.4, { align: 'right' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(16, 185, 129);
+    doc.text(`${sub.passRateGirls || 0}%`, margin + 178, y + 3.4, { align: 'right' });
 
     y += 5.5;
   });
-
-  doc.setDrawColor(...borderGray);
-  doc.line(margin, y, pageWidth - margin, y);
-
-  y += 5;
 
   // ==========================================
   // 6. TOP RANKING CANDIDATES (MERIT LIST)

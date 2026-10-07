@@ -49,6 +49,25 @@
         "isActive": { "type": "boolean" }
       },
       "required": ["schoolId", "trialStartedAt", "subscriptionExpiry", "subscriptionType", "isActive"]
+    },
+    "GatePassLog": {
+      "title": "Gate Pass Log",
+      "description": "Security gate pass check-in and check-out logs",
+      "type": "object",
+      "properties": {
+        "studentName": { "type": "string" },
+        "regNo": { "type": "string" },
+        "className": { "type": "string" },
+        "stream": { "type": "string" },
+        "type": { "type": "string", "enum": ["CHECK_IN", "CHECK_OUT"] },
+        "reason": { "type": "string" },
+        "officerName": { "type": "string" },
+        "timestamp": { "type": "string" },
+        "schoolId": { "type": "string" },
+        "status": { "type": "string" },
+        "feeStatus": { "type": "string" }
+      },
+      "required": ["studentName", "regNo", "className", "type", "reason", "officerName", "schoolId"]
     }
   },
   "firestore": {
@@ -63,6 +82,10 @@
     "/school_subscriptions/{schoolId}": {
       "schema": "SubscriptionData",
       "description": "Usajili wa shule"
+    },
+    "/gate_pass_logs/{logId}": {
+      "schema": "GatePassLog",
+      "description": "Security gate movement check-in and check-out records"
     }
   }
 }

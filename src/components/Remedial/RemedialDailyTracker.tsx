@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { format } from 'date-fns';
 import { Calendar, CheckCircle2, XCircle, Clock, Filter, User, BookOpen, AlertCircle, RefreshCw } from 'lucide-react';
 import { getRemedialTimetable, markRemedialAttendance, getRemedialAttendance } from '../../lib/remedialService';
+import { RemedialDashboardSummary } from './RemedialDashboardSummary';
 
 interface RemedialDailyTrackerProps {
   schoolId: string;
@@ -100,6 +101,11 @@ export const RemedialDailyTracker: React.FC<RemedialDailyTrackerProps> = ({ scho
           </div>
         </div>
       </div>
+
+      {/* Remedial Key Executive Dashboard Summary */}
+      <RemedialDashboardSummary
+        schoolId={schoolId}
+      />
 
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">

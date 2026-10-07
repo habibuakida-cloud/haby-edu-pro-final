@@ -58,6 +58,7 @@ import { BulkPromotionWizard } from './Students/BulkPromotionWizard';
 import { getTanzanianCarrier, formatPhoneNumber } from '../utils/phoneUtils';
 import { ClassStreamManagerModal } from './common/ClassStreamManagerModal';
 import { exportClassListPDF } from '../utils/classListPdfExport';
+import { exportRegisteredStudentsPDF } from '../utils/studentRegisterPdfExport';
 import { 
   getAllAvailableClasses, 
   getStreamsForClass, 

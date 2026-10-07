@@ -853,28 +853,116 @@ export function getDefaultPeriodSetting(): ReportCardPeriodSetting {
 }
 
 /**
- * Calculate student rank / position within their class and stream
+ * Check if two class names refer to the same class level (e.g. "Class 4", "Standard 4", "Std 4" vs "Form 4")
+ * Strictly segregates Secondary (Form 1-6) from Primary (Class 1-7) to prevent cross-class data mixing.
+ */
+export function isSameClass(c1?: string, c2?: string): boolean {
+  if (!c1 || !c2) return false;
+  const n1 = c1.trim().toLowerCase().replace(/\s+/g, ' ');
+  const n2 = c2.trim().toLowerCase().replace(/\s+/g, ' ');
+  if (n1 === n2) return true;
+
+  // Distinguish Secondary (Form 1-6) vs Primary (Standard / Class 1-7) vs Nursery
+  const isForm1 = /(?:form|kidato|f)\s*(\d+|iv|iii|ii|i|vi|v)/i.test(n1);
+  const isForm2 = /(?:form|kidato|f)\s*(\d+|iv|iii|ii|i|vi|v)/i.test(n2);
+  if (isForm1 !== isForm2) {
+    // One is secondary Form and the other is Primary Class -> NEVER MATCH!
+    return false;
+  }
+
+  if (isForm1 && isForm2) {
+    const getFormNum = (s: string) => {
+      const m = s.match(/(?:form|kidato|f)\s*(\d+|iv|iii|ii|i|vi|v)/i);
+      if (!m) return null;
+      const val = m[1].toLowerCase();
+      if (val === 'iv') return '4';
+      if (val === 'iii') return '3';
+      if (val === 'ii') return '2';
+      if (val === 'i') return '1';
+      if (val === 'vi') return '6';
+      if (val === 'v') return '5';
+      return val;
+    };
+    const f1 = getFormNum(n1);
+    const f2 = getFormNum(n2);
+    return !!f1 && !!f2 && f1 === f2;
+  }
+
+  // Primary: Class / Standard / Std / Darasa
+  const isPri1 = /(?:standard|std|class|darasa(?: la)?)\s*(\d+)/i.test(n1);
+  const isPri2 = /(?:standard|std|class|darasa(?: la)?)\s*(\d+)/i.test(n2);
+  if (isPri1 && isPri2) {
+    const getStdNum = (s: string) => {
+      const m = s.match(/(?:standard|std|class|darasa(?: la)?)\s*(\d+)/i);
+      return m ? m[1] : null;
+    };
+    const std1 = getStdNum(n1);
+    const std2 = getStdNum(n2);
+    return !!std1 && !!std2 && std1 === std2;
+  }
+
+  // Nursery / Pre-primary
+  const isNur1 = /(?:nursery|baby|middle|pre-unit|awali)/i.test(n1);
+  const isNur2 = /(?:nursery|baby|middle|pre-unit|awali)/i.test(n2);
+  if (isNur1 || isNur2) {
+    const cleanNur = (s: string) => s.toLowerCase().replace(/\s*(class|darasa|mkondo)\s*/gi, '').replace(/[-\s]/g, '').trim();
+    return cleanNur(n1) === cleanNur(n2);
+  }
+
+  return false;
+}
+
+/**
+ * Calculate student rank / position within their class and stream with tie handling (1, 2, 2, 4)
+ * Formats clearly as e.g. "1/45".
  */
 export function calculateStudentRank(
   student: Student,
   allStudents: Student[]
-): { position: number; totalStudents: number } {
+): { position: number; totalStudents: number; rankText: string } {
   const classmates = allStudents.filter(
-    s => s.className === student.className && (!student.stream || s.stream === student.stream)
+    s => isSameClass(s.className, student.className) && (!student.stream || !s.stream || s.stream === student.stream)
   );
   
-  const pool = classmates.length > 0 ? classmates : allStudents;
+  const pool = classmates.length > 0 ? classmates : (allStudents.length > 0 ? allStudents : [student]);
 
-  // Sort descending by average/total
-  const sorted = [...pool].sort((a, b) => {
-    const aScore = a.total || (a.marks ? Object.values(a.marks).reduce((acc, v) => acc + v, 0) : 0);
-    const bScore = b.total || (b.marks ? Object.values(b.marks).reduce((acc, v) => acc + v, 0) : 0);
-    return bScore - aScore;
-  });
+  const getScore = (st: Student) => {
+    if (typeof st.total === 'number' && !isNaN(st.total)) return st.total;
+    if (st.marks && typeof st.marks === 'object') {
+      const nums = Object.values(st.marks).map(Number).filter(n => !isNaN(n));
+      if (nums.length > 0) return nums.reduce((acc, v) => acc + v, 0);
+    }
+    return 0;
+  };
 
-  const idx = sorted.findIndex(s => s.id === student.id || s.regNo === student.regNo);
-  const position = idx >= 0 ? idx + 1 : 1;
+  // Sort descending by total score
+  const sorted = [...pool].sort((a, b) => getScore(b) - getScore(a));
+
+  // Calculate ranks with standard tie handling (1, 2, 2, 4)
+  let currentRank = 1;
+  let targetRank = 1;
+  let prevScore: number | null = null;
+
+  for (let i = 0; i < sorted.length; i++) {
+    const s = sorted[i];
+    const score = getScore(s);
+    
+    if (prevScore === null) {
+      currentRank = 1;
+    } else if (score < prevScore) {
+      currentRank = i + 1; // standard competition rank: skip if ties preceded (e.g. 1, 2, 2, 4)
+    }
+
+    prevScore = score;
+
+    if (String(s.id) === String(student.id) || (s.regNo && s.regNo === student.regNo)) {
+      targetRank = currentRank;
+      break;
+    }
+  }
+
   const totalStudents = sorted.length;
+  const rankText = `${targetRank}/${totalStudents}`;
 
-  return { position, totalStudents };
+  return { position: targetRank, totalStudents, rankText };
 }

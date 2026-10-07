@@ -22,8 +22,25 @@ service cloud.firestore {
     }
 
     match /schools/{schoolId} {
-      allow get: if isSignedIn() && isValidId(schoolId);
-      allow write: if isSignedIn() && isValidId(schoolId) && isValidSchool(request.resource.data);
+      allow get, list: if true;
+      allow write: if isValidId(schoolId) && isValidSchool(request.resource.data);
+    }
+
+    // Gate Pass Validation
+    function isValidGatePass(data) {
+      return data.keys().hasAll(['studentName', 'regNo', 'className', 'type', 'reason', 'officerName', 'schoolId']) &&
+             data.studentName is string &&
+             data.regNo is string &&
+             data.className is string &&
+             data.type in ['CHECK_IN', 'CHECK_OUT'] &&
+             data.reason is string &&
+             data.officerName is string &&
+             data.schoolId is string;
+    }
+
+    match /gate_pass_logs/{logId} {
+      allow get, list: if true;
+      allow create: if isValidGatePass(request.resource.data);
     }
 
     // Attendance Validation
@@ -37,10 +54,13 @@ service cloud.firestore {
     }
 
     match /period_attendance/{attendanceId} {
-      allow get, list: if isSignedIn() && (
-        resource == null || resource.data.school_id is string
-      );
-      allow create, update: if isSignedIn() && isValidId(attendanceId) && isValidAttendance(request.resource.data);
+      allow get, list: if resource == null || resource.data.school_id is string;
+      allow create, update: if isValidId(attendanceId) && isValidAttendance(request.resource.data);
+    }
+
+    match /school_subscriptions/{schoolId} {
+      allow get, list: if true;
+      allow write: if isValidId(schoolId);
     }
   }
 }

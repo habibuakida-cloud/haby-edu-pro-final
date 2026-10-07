@@ -57,7 +57,8 @@ import {
   calculatePrimaryScoreResult,
   isPrimaryOrNursery,
   getPrimarySubjectGradeInfo,
-  cleanAndFilterMarksForClass
+  cleanAndFilterMarksForClass,
+  isSameClass
 } from '../utils/reportCardUtils';
 import { 
   ALL_SCHOOL_CLASSES, 
@@ -389,7 +390,9 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   // Base list of all candidates in this class and stream (unfiltered by search/status for accurate stats)
   const allClassCandidates = useMemo(() => {
     return students.filter(s => {
-      const matchClass = !selectedClass || s.className.toLowerCase() === selectedClass.toLowerCase();
+      const matchClass = selectedClass && selectedClass !== 'ALL'
+        ? isSameClass(s.className, selectedClass)
+        : true;
       const matchStream = !selectedStream || selectedStream === 'All' || 
         (s.stream ? (
           s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === selectedStream.toUpperCase() ||
@@ -922,12 +925,13 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     let countedAvg = 0;
 
     const gradeDistribution: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = {
-      A: 0,
-      B: 0,
-      C: 0,
-      D: 0,
-      E: 0,
-      F: 0
+      A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
+    };
+    const gradeDistributionBoys: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = {
+      A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
+    };
+    const gradeDistributionGirls: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = {
+      A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
     };
 
     let passCount = 0;
@@ -941,27 +945,37 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
       else if (s.division === 'INCOMPLETE') divIncomplete++;
       else if (s.division === '0') div0++;
 
+      const isGirl = (s.gender || '').toLowerCase().startsWith('f') || s.sex === 'F';
+
       if (s.average) {
         const num = parseFloat(s.average);
         if (!isNaN(num)) {
           sumAvg += num;
           countedAvg++;
 
+          let gradeKey = 'F';
           if (isClassPrimary) {
             // Tanzanian Primary: A=81-100, B=61-80, C=41-60, D=21-40, E=0-20
-            if (num >= 81) { gradeDistribution.A++; passCount++; }
-            else if (num >= 61) { gradeDistribution.B++; passCount++; }
-            else if (num >= 41) { gradeDistribution.C++; passCount++; }
-            else if (num >= 21) { gradeDistribution.D++; failCount++; }
-            else { gradeDistribution.E++; failCount++; }
+            if (num >= 81) { gradeKey = 'A'; passCount++; }
+            else if (num >= 61) { gradeKey = 'B'; passCount++; }
+            else if (num >= 41) { gradeKey = 'C'; passCount++; }
+            else if (num >= 21) { gradeKey = 'D'; failCount++; }
+            else { gradeKey = 'E'; failCount++; }
           } else {
             // Secondary NECTA CSEE: A=75-100, B=65-74, C=45-64, D=30-44, F=0-29
-            if (num >= 75) { gradeDistribution.A++; passCount++; }
-            else if (num >= 65) { gradeDistribution.B++; passCount++; }
-            else if (num >= 45) { gradeDistribution.C++; passCount++; }
-            else if (num >= 30) { gradeDistribution.D++; passCount++; }
-            else { gradeDistribution.F++; failCount++; }
+            if (num >= 75) { gradeKey = 'A'; passCount++; }
+            else if (num >= 65) { gradeKey = 'B'; passCount++; }
+            else if (num >= 45) { gradeKey = 'C'; passCount++; }
+            else if (num >= 30) { gradeKey = 'D'; passCount++; }
+            else { gradeKey = 'F'; failCount++; }
           }
+
+          if (isGirl) {
+            gradeDistributionGirls[gradeKey as keyof typeof gradeDistributionGirls]++;
+          } else {
+            gradeDistributionBoys[gradeKey as keyof typeof gradeDistributionBoys]++;
+          }
+          gradeDistribution[gradeKey as keyof typeof gradeDistribution]++;
         }
       }
     });
@@ -995,53 +1009,112 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
 
     // Subject by Subject Performance Breakdown & Grade counts
     const subjectPerformances = activeLedgerSubjects.map(sub => {
-      let subTotal = 0;
-      let tested = 0;
-      let highest = -1;
-      let lowest = 999;
-      let passed = 0;
-      const subGrades: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = {
-        A: 0, B: 0, C: 0, D: 0, E: 0, F: 0
-      };
+      let subTotalM = 0, subTotalF = 0, testedM = 0, testedF = 0;
+      let highestM = -1, highestF = -1, lowestM = 999, lowestF = 999;
+      let passedM = 0, passedF = 0;
+      const subGrades: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
+      const subGradesBoys: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
+      const subGradesGirls: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
 
       allClassCandidates.forEach(s => {
         const sc = s.marks?.[sub.fullName] ?? s.marks?.[sub.key];
+        const isGirl = (s.gender || '').toLowerCase().startsWith('f') || s.sex === 'F';
         if (typeof sc === 'number' && !isNaN(sc)) {
-          subTotal += sc;
-          tested++;
-          if (sc > highest) highest = sc;
-          if (sc < lowest) lowest = sc;
+          if (isGirl) {
+            subTotalF += sc;
+            testedF++;
+            if (sc > highestF) highestF = sc;
+            if (sc < lowestF) lowestF = sc;
+          } else {
+            subTotalM += sc;
+            testedM++;
+            if (sc > highestM) highestM = sc;
+            if (sc < lowestM) lowestM = sc;
+          }
 
+          let gradeKey = 'F';
+          let isPassed = false;
           if (isClassPrimary) {
             const pInfo = getPrimarySubjectGradeInfo(sc);
-            subGrades[pInfo.grade as 'A' | 'B' | 'C' | 'D' | 'E']++;
-            if (sc >= 41) passed++;
+            gradeKey = pInfo.grade;
+            isPassed = sc >= 41;
           } else {
-            if (sc >= 75) { subGrades.A++; passed++; }
-            else if (sc >= 65) { subGrades.B++; passed++; }
-            else if (sc >= 45) { subGrades.C++; passed++; }
-            else if (sc >= 30) { subGrades.D++; passed++; }
-            else { subGrades.F++; }
+            if (sc >= 75) { gradeKey = 'A'; isPassed = true; }
+            else if (sc >= 65) { gradeKey = 'B'; isPassed = true; }
+            else if (sc >= 45) { gradeKey = 'C'; isPassed = true; }
+            else if (sc >= 30) { gradeKey = 'D'; isPassed = true; }
+            else { gradeKey = 'F'; }
           }
+
+          if (isGirl) {
+            subGradesGirls[gradeKey as keyof typeof subGradesGirls]++;
+            if (isPassed) passedF++;
+          } else {
+            subGradesBoys[gradeKey as keyof typeof subGradesBoys]++;
+            if (isPassed) passedM++;
+          }
+          subGrades[gradeKey as keyof typeof subGrades]++;
         }
       });
 
-      const meanScore = tested > 0 ? Number((subTotal / tested).toFixed(1)) : 0;
-      const subPassRate = tested > 0 ? Number(((passed / tested) * 100).toFixed(1)) : 0;
+      const testedCount = testedM + testedF;
+      const meanScore = testedCount > 0 ? Number(((subTotalM + subTotalF) / testedCount).toFixed(1)) : 0;
+      const meanScoreBoys = testedM > 0 ? Number((subTotalM / testedM).toFixed(1)) : 0;
+      const meanScoreGirls = testedF > 0 ? Number((subTotalF / testedF).toFixed(1)) : 0;
+      const passRate = testedCount > 0 ? Number((((passedM + passedF) / testedCount) * 100).toFixed(1)) : 0;
+      const passRateBoys = testedM > 0 ? Number(((passedM / testedM) * 100).toFixed(1)) : 0;
+      const passRateGirls = testedF > 0 ? Number(((passedF / testedF) * 100).toFixed(1)) : 0;
+      const highest = Math.max(highestM, highestF, 0);
+      const lowest = Math.min(lowestM === 999 ? 0 : lowestM, lowestF === 999 ? 0 : lowestF);
 
       return {
         subjectKey: sub.key,
         subjectName: sub.fullName,
-        testedCount: tested,
+        testedCount,
+        testedBoys: testedM,
+        testedGirls: testedF,
         meanScore,
-        highestScore: highest >= 0 ? highest : 0,
-        lowestScore: lowest <= 100 ? lowest : 0,
-        highest: highest >= 0 ? highest : 0,
-        lowest: lowest <= 100 ? lowest : 0,
-        passRate: subPassRate,
-        grades: subGrades
+        meanScoreBoys,
+        meanScoreGirls,
+        highest,
+        lowest,
+        passRate,
+        passRateBoys,
+        passRateGirls,
+        grades: subGrades,
+        gradesBoys: subGradesBoys,
+        gradesGirls: subGradesGirls
       };
     });
+
+    return {
+      totalCandidates,
+      noSubjectStudents,
+      noSubjectCount,
+      noSubjectBoys,
+      noSubjectGirls,
+      noSubjectRate,
+      satCandidates,
+      satCount,
+      satBoys,
+      satGirls,
+      satRate,
+      schoolGPA,
+      divI,
+      divII,
+      divIII,
+      divIV,
+      div0,
+      divIncomplete,
+      avgOverall,
+      passRate,
+      passCount,
+      failCount,
+      gradeDistribution,
+      gradeDistributionBoys,
+      gradeDistributionGirls,
+      subjectPerformances
+    };
 
     return {
       totalCandidates,
@@ -1086,6 +1159,8 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
       classAverage: dashboardMetrics.avgOverall,
       passRate: dashboardMetrics.passRate,
       gradeDistribution: dashboardMetrics.gradeDistribution,
+      gradeDistributionBoys: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 },
+      gradeDistributionGirls: { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 },
       divisionDistribution: {
         divI: dashboardMetrics.divI,
         divII: dashboardMetrics.divII,
@@ -2439,10 +2514,10 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                         {isClassPrimary ? sub.grades.E : sub.grades.F}
                       </td>
                       <td className="p-3 border-r border-slate-200 text-center font-mono text-slate-800">
-                        {sub.testedCount > 0 ? sub.highestScore : '-'}
+                        {sub.testedCount > 0 ? sub.highest : '-'}
                       </td>
                       <td className="p-3 text-center font-mono text-slate-800">
-                        {sub.testedCount > 0 ? sub.lowestScore : '-'}
+                        {sub.testedCount > 0 ? sub.lowest : '-'}
                       </td>
                     </tr>
                   ))}
@@ -2512,7 +2587,37 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                 <Printer className="w-3.5 h-3.5" />
                 <span>Print Report Card</span>
               </button>
+
+              <button
+                onClick={() => {
+                  if (allClassCandidates.length === 0) return;
+                  printReportCardDocument(
+                    'bulk-reports-printable-container',
+                    reportOrientation,
+                    `All Students ${selectedClass}`,
+                    schoolInfo.name
+                  );
+                }}
+                className="px-4 py-1.5 bg-indigo-700 hover:bg-indigo-800 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                title="Print all students report cards for this class, strictly one student per page without overlapping"
+              >
+                <Printer className="w-3.5 h-3.5 text-amber-300" />
+                <span>Print All Class Reports ({allClassCandidates.length})</span>
+              </button>
             </div>
+          </div>
+
+          {/* Bulk Printable Container for All Class Students - Strictly 1 student per page */}
+          <div id="bulk-reports-printable-container" className="hidden">
+            {allClassCandidates.map(cand => (
+              <ReportCardDocument
+                key={cand.id}
+                student={cand}
+                schoolInfo={schoolInfo}
+                orientation={reportOrientation}
+                allStudents={allClassCandidates}
+              />
+            ))}
           </div>
 
           {/* Report Card Printable Component */}
@@ -2522,6 +2627,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                 student={reportStudent}
                 schoolInfo={schoolInfo}
                 orientation={reportOrientation}
+                allStudents={allClassCandidates.length > 0 ? allClassCandidates : students}
               />
             </div>
           )}

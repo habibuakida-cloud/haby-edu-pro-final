@@ -450,6 +450,15 @@ export function printFormattedSection(
           margin-bottom: 16px !important;
           display: block !important;
         }
+        .report-card-single-student, .report-card-page, .page-break-always {
+          page-break-after: always !important;
+          break-after: page !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+          margin-bottom: 0 !important;
+          clear: both !important;
+          display: block !important;
+        }
         @media print {
           body { 
             padding: 0; 

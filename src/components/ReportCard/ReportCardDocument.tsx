@@ -89,11 +89,16 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
     return (
       <div 
         id={containerId}
-        className="bg-white text-slate-900 p-6 shadow-xl mx-auto text-xs"
+        className="bg-white text-slate-900 p-6 shadow-xl mx-auto text-xs report-card-single-student"
         style={{
           width: '100%',
           maxWidth: '1080px',
           boxSizing: 'border-box',
+          pageBreakAfter: 'always',
+          breakAfter: 'page',
+          pageBreakInside: 'avoid',
+          breakInside: 'avoid',
+          clear: 'both',
           border: '8px solid',
           borderImage: 'linear-gradient(135deg, #1EB53A 0% 33%, #FCD116 33% 38%, #000000 38% 62%, #FCD116 62% 67%, #00A3E0 67% 100%) 1'
         }}
@@ -347,7 +352,7 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
               <div>
                 <div className="text-[9px] uppercase font-bold text-blue-200">Class Position</div>
                 <div className="text-lg font-black text-white">
-                  {rank.position}<span className="text-xs font-normal">/{rank.totalStudents}</span>
+                  {rank.rankText || `${rank.position}/${rank.totalStudents}`}
                 </div>
                 <div className="text-[8px] text-blue-200">Rank in Class</div>
               </div>
@@ -383,11 +388,16 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
   return (
     <div 
       id={containerId}
-      className="bg-white text-slate-900 p-8 shadow-xl mx-auto space-y-4 text-xs"
+      className="bg-white text-slate-900 p-8 shadow-xl mx-auto space-y-4 text-xs report-card-single-student"
       style={{
         width: '100%',
         maxWidth: '820px',
         boxSizing: 'border-box',
+        pageBreakAfter: 'always',
+        breakAfter: 'page',
+        pageBreakInside: 'avoid',
+        breakInside: 'avoid',
+        clear: 'both',
         border: '8px solid',
         borderImage: 'linear-gradient(135deg, #1EB53A 0% 33%, #FCD116 33% 38%, #000000 38% 62%, #FCD116 62% 67%, #00A3E0 67% 100%) 1'
       }}
@@ -562,7 +572,7 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
         <div>
           <div className="text-[10px] text-blue-200 font-bold uppercase">Class Position</div>
           <div className="text-2xl font-black mt-0.5 text-white">
-            {rank.position}<span className="text-sm font-normal"> / {rank.totalStudents}</span>
+            {rank.rankText || `${rank.position}/${rank.totalStudents}`}
           </div>
           <div className="text-[9px] text-blue-200">Rank in Class</div>
         </div>

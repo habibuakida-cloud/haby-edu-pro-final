@@ -42,7 +42,7 @@ import {
   PRIMARY_CLASSES,
   SECONDARY_CLASSES
 } from '../constants/defaults';
-import { calculateOLevelDivision, calculatePrimaryScoreResult, isPrimaryOrNursery, getPrimarySubjectGradeInfo, cleanAndFilterMarksForClass } from '../utils/reportCardUtils';
+import { calculateOLevelDivision, calculatePrimaryScoreResult, isPrimaryOrNursery, getPrimarySubjectGradeInfo, cleanAndFilterMarksForClass, isSameClass } from '../utils/reportCardUtils';
 import { USALModal } from './USAL/USALModal';
 
 interface MarkEntryViewProps {
@@ -163,29 +163,25 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
   const isClassNursery = NURSERY_CLASSES.includes(selectedClass);
   const isClassLowerPrimary = selectedClass === 'Standard 1' || selectedClass === 'Standard 2';
 
-  // Subjects filtered for teacher mode and appropriate school level
+  // Subjects for appropriate school level, including all teacher subjects without limiting
   const availableSubjects = useMemo(() => {
-    let baseList = SECONDARY_SUBJECTS;
+    let baseList = [...SECONDARY_SUBJECTS];
     if (isClassNursery) {
-      baseList = NURSERY_SUBJECTS;
+      baseList = [...NURSERY_SUBJECTS];
     } else if (isClassLowerPrimary) {
-      baseList = LOWER_PRIMARY_SUBJECTS;
+      baseList = [...LOWER_PRIMARY_SUBJECTS];
     } else if (isClassPrimary) {
-      baseList = UPPER_PRIMARY_SUBJECTS;
+      baseList = [...UPPER_PRIMARY_SUBJECTS];
     }
 
-    if (currentUser?.role === 'TEACHER') {
-      const assigned = currentUser.assignedSubjects || (loggedInTeacher?.subjects) || [];
-      if (assigned.length > 0) {
-        return baseList.filter(sub => 
-          assigned.some(a => 
-            a.toLowerCase() === sub.toLowerCase() || 
-            sub.toLowerCase().includes(a.toLowerCase()) ||
-            a.toLowerCase().includes(sub.toLowerCase())
-          )
-        );
+    // Teacher sees ALL subjects for this educational level plus any specific subjects they teach
+    const assigned = currentUser?.assignedSubjects || (loggedInTeacher?.subjects) || [];
+    assigned.forEach(sub => {
+      if (!baseList.some(b => b.toLowerCase().trim() === sub.toLowerCase().trim())) {
+        baseList.push(sub);
       }
-    }
+    });
+
     return baseList;
   }, [currentUser, loggedInTeacher, isClassNursery, isClassLowerPrimary, isClassPrimary]);
 
@@ -201,10 +197,12 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
   // Local state for mark values: studentId -> score
   const [localScores, setLocalScores] = useState<Record<number, number | string>>({});
 
-  // Filter students matching class and stream
+  // Filter students matching class and stream strictly to prevent cross-class data mixing
   const filteredStudents = useMemo(() => {
     return students.filter(s => {
-      const matchClass = !selectedClass || s.className.toLowerCase() === selectedClass.toLowerCase();
+      const matchClass = selectedClass && selectedClass !== 'ALL' 
+        ? isSameClass(s.className, selectedClass) 
+        : true;
       const matchStream = !selectedStream || selectedStream === 'All' || 
         (s.stream ? (
           s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === selectedStream.toUpperCase() ||

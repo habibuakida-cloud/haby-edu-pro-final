@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Users, 
   GraduationCap, 
@@ -31,10 +31,13 @@ import {
   Search
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog } from '../types';
+import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount } from '../types';
 import { subDays, format, startOfDay } from 'date-fns';
-import { NURSERY_CLASSES, PRIMARY_CLASSES } from '../constants/defaults';
+import { NURSERY_CLASSES, PRIMARY_CLASSES, SECONDARY_CLASSES } from '../constants/defaults';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
+import { getRemedialTimetable, RemedialTimetableEntry } from '../lib/remedialService';
+import { exportRemedialTimetablePDF } from '../utils/remedialPdfExport';
+import { isSameClass } from '../utils/reportCardUtils';
 
 interface DashboardViewProps {
   students: Student[];
@@ -48,6 +51,8 @@ interface DashboardViewProps {
   schoolInfo?: SchoolInfo;
   onSelectView?: (view: string) => void;
   activityLogs: ActivityLog[];
+  schoolId?: string;
+  currentUser?: UserAccount | null;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -61,11 +66,59 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   syncToast = null,
   schoolInfo,
   onSelectView,
-  activityLogs = []
+  activityLogs = [],
+  schoolId = '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
+  currentUser
 }) => {
   const [activeLevelFilter, setActiveLevelFilter] = useState<'ALL' | 'PRIMARY' | 'PRE_PRIMARY' | 'SECONDARY'>('ALL');
   const [activityCategoryFilter, setActivityCategoryFilter] = useState<'ALL' | 'students' | 'teachers' | 'exams'>('ALL');
   const [activitySearchQuery, setActivitySearchQuery] = useState<string>('');
+
+  // Remedial Timetable Widget State
+  const [remedialEntries, setRemedialEntries] = useState<RemedialTimetableEntry[]>([]);
+  const [remedialMode, setRemedialMode] = useState<'STUDENT' | 'TEACHER' | 'ALL'>('STUDENT');
+  const [selectedRemedialClass, setSelectedRemedialClass] = useState<string>('Class 5');
+  const [selectedRemedialStream, setSelectedRemedialStream] = useState<string>('A');
+  const [selectedRemedialTeacher, setSelectedRemedialTeacher] = useState<string>('');
+
+  useEffect(() => {
+    const fetchRemedial = async () => {
+      try {
+        const { data } = await getRemedialTimetable(schoolId);
+        if (data) setRemedialEntries(data);
+      } catch (e) {
+        console.warn('Dashboard remedial fetch error:', e);
+      }
+    };
+    fetchRemedial();
+  }, [schoolId]);
+
+  useEffect(() => {
+    if (teachers.length > 0 && !selectedRemedialTeacher) {
+      const match = currentUser?.fullName && teachers.some(t => t.name.toLowerCase().includes(currentUser.fullName.toLowerCase()))
+        ? currentUser.fullName
+        : teachers[0].name;
+      setSelectedRemedialTeacher(match);
+    }
+  }, [teachers, currentUser, selectedRemedialTeacher]);
+
+  // Filtered remedial sessions for widget
+  const displayedRemedialSessions = useMemo(() => {
+    return remedialEntries.filter(item => {
+      if (remedialMode === 'STUDENT') {
+        const matchClass = isSameClass(item.class_name, selectedRemedialClass);
+        const matchStream = selectedRemedialStream === 'ALL' || 
+          item.stream === 'All Streams' || 
+          item.stream.toUpperCase() === selectedRemedialStream.toUpperCase();
+        return matchClass && matchStream;
+      }
+      if (remedialMode === 'TEACHER') {
+        return !selectedRemedialTeacher || 
+          item.teacher_name.toLowerCase().includes(selectedRemedialTeacher.toLowerCase());
+      }
+      return true;
+    }).slice(0, 6);
+  }, [remedialEntries, remedialMode, selectedRemedialClass, selectedRemedialStream, selectedRemedialTeacher]);
 
   const recentActivity = useMemo(() => {
     let filtered = [...activityLogs];
@@ -496,6 +549,196 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </button>
           </div>
         </div>
+      </div>
+
+      {/* MY REMEDIAL TIMETABLE SECTION (Class & Teacher Personalized View) */}
+      <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 to-amber-600 text-slate-950 flex items-center justify-center font-bold shadow-xs">
+              <Calendar className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h3 className="text-base font-black text-slate-900">My Remedial Timetable (Ratiba ya Masomo ya Ziada)</h3>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-100 text-amber-900 border border-amber-200">
+                  {remedialEntries.length} Sessions
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Tazama na uchapishe ratiba ya masomo ya jioni, asubuhi na wikendi kulingana na darasa au mwalimu husika.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {/* View Mode Toggle */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-xl">
+              <button
+                type="button"
+                onClick={() => setRemedialMode('STUDENT')}
+                className={`px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                  remedialMode === 'STUDENT' ? 'bg-[#1f4d8b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Mwanafunzi (Class)
+              </button>
+              <button
+                type="button"
+                onClick={() => setRemedialMode('TEACHER')}
+                className={`px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                  remedialMode === 'TEACHER' ? 'bg-[#1f4d8b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Mwalimu (Teacher)
+              </button>
+              <button
+                type="button"
+                onClick={() => setRemedialMode('ALL')}
+                className={`px-3 py-1 text-xs font-bold rounded-lg transition cursor-pointer ${
+                  remedialMode === 'ALL' ? 'bg-[#1f4d8b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Yote
+              </button>
+            </div>
+
+            {/* Print / Export Button */}
+            <button
+              type="button"
+              onClick={() => {
+                const targetEntries = remedialMode === 'STUDENT' 
+                  ? remedialEntries.filter(e => isSameClass(e.class_name, selectedRemedialClass))
+                  : displayedRemedialSessions;
+                exportRemedialTimetablePDF({
+                  entries: targetEntries.length > 0 ? targetEntries : remedialEntries,
+                  schoolInfo,
+                  className: selectedRemedialClass,
+                  streamName: selectedRemedialStream,
+                  academicYear: new Date().getFullYear().toString()
+                });
+              }}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-xs rounded-xl flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5 text-blue-700" />
+              <span>Print PDF</span>
+            </button>
+
+            {/* Go to Manager Button */}
+            <button
+              type="button"
+              onClick={() => handleNavigate('remedialtimetable')}
+              className="px-3.5 py-1.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>Panga Ratiba Mpya</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Dynamic Selector Controls */}
+        <div className="flex flex-wrap items-center gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-100 text-xs">
+          {remedialMode === 'STUDENT' && (
+            <>
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-600">Darasa:</span>
+                <select
+                  value={selectedRemedialClass}
+                  onChange={e => setSelectedRemedialClass(e.target.value)}
+                  className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg font-bold text-slate-800"
+                >
+                  <optgroup label="Pre-Primary">
+                    {NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </optgroup>
+                  <optgroup label="Primary School">
+                    {PRIMARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </optgroup>
+                  <optgroup label="Secondary School">
+                    {SECONDARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="font-bold text-slate-600">Mkondo:</span>
+                <select
+                  value={selectedRemedialStream}
+                  onChange={e => setSelectedRemedialStream(e.target.value)}
+                  className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg font-bold text-slate-800"
+                >
+                  <option value="ALL">Mikondo Yote (A, B, C, D)</option>
+                  <option value="A">Stream A</option>
+                  <option value="B">Stream B</option>
+                  <option value="C">Stream C</option>
+                  <option value="D">Stream D</option>
+                </select>
+              </div>
+            </>
+          )}
+
+          {remedialMode === 'TEACHER' && (
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-slate-600">Mwalimu:</span>
+              <select
+                value={selectedRemedialTeacher}
+                onChange={e => setSelectedRemedialTeacher(e.target.value)}
+                className="px-2.5 py-1 bg-white border border-slate-200 rounded-lg font-bold text-slate-800"
+              >
+                <option value="">-- Walimu Wote --</option>
+                {teachers.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+              </select>
+            </div>
+          )}
+
+          <div className="ml-auto text-slate-500 font-bold text-[11px]">
+            Inaonyesha vipindi {displayedRemedialSessions.length} kati ya {remedialEntries.length}
+          </div>
+        </div>
+
+        {/* Sessions Grid */}
+        {displayedRemedialSessions.length === 0 ? (
+          <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+            <Calendar className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+            <p className="font-bold text-slate-700 text-xs">Hakuna vipindi vya remedial vilivyopangwa kwa uteuzi huu.</p>
+            <p className="text-[11px] text-slate-400 mt-0.5">Bonyeza &ldquo;Panga Ratiba Mpya&rdquo; kuweka kipindi cha darasa hili.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+            {displayedRemedialSessions.map((session, idx) => (
+              <div
+                key={session.id || idx}
+                className="p-4 bg-slate-50/70 hover:bg-blue-50/50 border border-slate-200 hover:border-blue-300 rounded-2xl transition space-y-2.5 group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-900 text-[10px] font-black uppercase rounded-md">
+                    {session.day_of_week} {session.date ? `• ${session.date}` : ''}
+                  </span>
+                  <span className="text-[11px] font-mono font-black text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                    {session.start_time && session.end_time ? `${session.start_time} - ${session.end_time}` : session.period_time}
+                  </span>
+                </div>
+
+                <div>
+                  <h4 className="font-extrabold text-slate-900 text-xs group-hover:text-blue-700 transition flex items-center gap-1.5">
+                    <BookOpen className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                    <span>{session.subject}</span>
+                  </h4>
+                  <div className="text-[11px] text-slate-600 font-semibold flex items-center gap-1.5 mt-1">
+                    <GraduationCap className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                    <span>Mwl. {session.teacher_name}</span>
+                  </div>
+                </div>
+
+                <div className="pt-2 border-t border-slate-200/70 flex items-center justify-between text-[10px] font-bold text-slate-500">
+                  <span className="bg-indigo-50 text-indigo-800 px-2 py-0.5 rounded">
+                    {session.class_name} {session.stream === 'All Streams' ? '(Mikondo Yote)' : `(${session.stream})`}
+                  </span>
+                  <span>{session.room || `${session.class_name} Room`}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Level Summary Badges Bar */}

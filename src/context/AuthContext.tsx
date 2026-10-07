@@ -243,9 +243,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           email: ADMIN_EMAIL,
           fullName: 'Administrator (Mwl. Habibu Akida)',
           role: 'HEADMASTER',
-          schoolId: 'DEMO_SCHOOL',
+          schoolId: DEFAULT_PRIMARY_SCHOOL_ID,
           isSuperAdmin: true
         };
+        sessionStorage.setItem('haby_school_id', DEFAULT_PRIMARY_SCHOOL_ID);
+        localStorage.setItem('currentSchoolId', DEFAULT_PRIMARY_SCHOOL_ID);
         sessionStorage.setItem('haby_demo_user', JSON.stringify(superAdminAccount));
         setUserAccount(superAdminAccount);
         return;
@@ -350,7 +352,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
         }
 
-        let schoolId = sessionStorage.getItem('haby_school_id') || 'DEMO_SCHOOL';
+        let schoolId = sessionStorage.getItem('haby_school_id') || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
         try {
           const { data: supaUsers } = await supabase.from('users').select('*').eq('email', normalizedEmail);
           if (supaUsers && supaUsers.length > 0 && (supaUsers[0].school_id || supaUsers[0].schoolId)) {
@@ -362,6 +364,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         console.log("Current school_id:", schoolId);
         sessionStorage.setItem('haby_school_id', schoolId);
+        localStorage.setItem('currentSchoolId', schoolId);
+        localStorage.setItem('schoolId', schoolId);
 
         const adminAccount: UserAccount = {
           id: fbUser?.uid || 'admin_haby_root',
@@ -487,8 +491,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email: 'headmaster.demo@haby.com',
         fullName: 'Mwl. Peter Mwita (Headmaster Demo)',
         role: 'HEADMASTER',
-        schoolId: 'DEMO_SCHOOL',
-        school_id: 'DEMO_SCHOOL',
+        schoolId: DEFAULT_PRIMARY_SCHOOL_ID,
+        school_id: DEFAULT_PRIMARY_SCHOOL_ID,
         isSuperAdmin: false
       },
       ACADEMIC: {
@@ -496,16 +500,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email: 'academic@kiomonisec.ac.tz',
         fullName: 'David Mwakipesile (Academic Master)',
         role: 'ACADEMIC',
-        schoolId: 'DEMO_SCHOOL',
-        school_id: 'DEMO_SCHOOL'
+        schoolId: DEFAULT_PRIMARY_SCHOOL_ID,
+        school_id: DEFAULT_PRIMARY_SCHOOL_ID
       },
       TEACHER: {
         id: 'usr_teacher',
         email: 'teacher@kiomonisec.ac.tz',
         fullName: 'Grace Mchome (Staff Teacher)',
         role: 'TEACHER',
-        schoolId: 'DEMO_SCHOOL',
-        school_id: 'DEMO_SCHOOL',
+        schoolId: DEFAULT_PRIMARY_SCHOOL_ID,
+        school_id: DEFAULT_PRIMARY_SCHOOL_ID,
         assignedSubjects: ['English Language', 'ENG']
       }
     };

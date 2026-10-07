@@ -87,6 +87,8 @@ export default function App() {
           regNo={verifyReg} 
           students={data.students} 
           schoolInfo={data.schoolInfo}
+          examinationRecords={data.examinationRecords}
+          exams={data.exams}
           onBackToMain={() => {
             window.location.href = window.location.pathname;
           }} 
@@ -1237,6 +1239,8 @@ export default function App() {
               schoolInfo={data.schoolInfo}
               onSelectView={view => setActiveView(view as any)}
               activityLogs={data.activityLogs || []}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              currentUser={userAccount}
             />
           )}
 
@@ -1521,6 +1525,17 @@ export default function App() {
             <RemedialTimetableSetup
               schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
               teachers={data.teachers}
+              schoolInfo={data.schoolInfo}
+              students={data.students}
+              onAddActivityLog={log => {
+                const activityLogs = logActivity(
+                  log.action,
+                  log.category,
+                  log.title,
+                  log.description
+                );
+                updateRemoteData({ activityLogs });
+              }}
             />
           )}
 
