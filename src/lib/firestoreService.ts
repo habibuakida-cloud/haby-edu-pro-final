@@ -44,6 +44,18 @@ export const getSchoolData = async (schoolId: string) => {
   return docSnap.exists() ? docSnap.data() : null;
 };
 
+export const measureFirestoreLatency = async (schoolId: string): Promise<{ latencyMs: number; ok: boolean; error?: string }> => {
+  const start = performance.now();
+  try {
+    const docRef = doc(db, 'schools', schoolId || 'health_check');
+    await getDoc(docRef);
+    const end = performance.now();
+    return { latencyMs: Math.round(end - start), ok: true };
+  } catch (err: any) {
+    return { latencyMs: -1, ok: false, error: err?.message || 'Firestore connection error' };
+  }
+};
+
 export const subscribeSchoolData = (schoolId: string, callback: (data: any) => void) => {
   if (!schoolId) return () => {};
   const docRef = doc(db, 'schools', schoolId);

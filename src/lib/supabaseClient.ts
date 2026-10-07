@@ -94,6 +94,20 @@ export async function checkSupabaseHealth(): Promise<{
   }
 }
 
+export async function measureSupabaseLatency(): Promise<{ latencyMs: number; ok: boolean; error?: string }> {
+  const start = performance.now();
+  try {
+    const { error } = await supabase.from('schools').select('id').limit(1);
+    if (error) {
+      return { latencyMs: -1, ok: false, error: error.message };
+    }
+    const end = performance.now();
+    return { latencyMs: Math.round(end - start), ok: true };
+  } catch (err: any) {
+    return { latencyMs: -1, ok: false, error: err?.message || 'Supabase request failed' };
+  }
+}
+
 // Student Serializers (maps between React App model and Supabase table schema)
 export const toSupabaseStudent = (s: any, schoolId: string) => {
   const row: Record<string, any> = {

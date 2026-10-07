@@ -23,7 +23,7 @@ import {
   StreamSetting, 
   TimetableAssignment 
 } from '../../types';
-import { DAYS_OF_WEEK } from '../../constants/defaults';
+import { DAYS_OF_WEEK, INITIAL_PERIOD_SETTINGS, INITIAL_STREAM_SETTINGS } from '../../constants/defaults';
 import { getTeacherColor, getSubjectColor } from '../../utils/colors';
 import { generateHeuristicTimetable } from '../../utils/timetableHeuristic';
 
@@ -133,14 +133,14 @@ export const AITimetableGeneratorModal: React.FC<AITimetableGeneratorModalProps>
           teachingStreams: t.teachingStreams,
           maxPeriodsPerWeek: t.maxPeriodsPerWeek
         })),
-        periodSettings: periodSettings.map(p => ({
+        periodSettings: (periodSettings.length > 0 ? periodSettings : INITIAL_PERIOD_SETTINGS).map(p => ({
           id: p.id,
           day: p.day,
           name: p.name,
           start: p.start,
           end: p.end
         })),
-        streamSettings: streamSettings.map(s => ({
+        streamSettings: (streamSettings.length > 0 ? streamSettings : INITIAL_STREAM_SETTINGS).map(s => ({
           className: s.className,
           streams: s.streams
         })),

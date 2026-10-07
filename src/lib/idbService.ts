@@ -60,3 +60,42 @@ export const deleteCachedData = async (key: string) => {
     console.warn('IndexedDB delete error:', err);
   }
 };
+
+export const clearAllCachedData = async () => {
+  try {
+    const db = await getDB();
+    if (db) {
+      const tx = db.transaction(STORE_NAME, 'readwrite');
+      await tx.objectStore(STORE_NAME).clear();
+      await tx.done;
+    }
+    // Also clean localStorage cache keys starting with haby_
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k && (k.startsWith('haby_') || k.startsWith('school_data_') || k.includes('cached'))) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => localStorage.removeItem(k));
+    }
+  } catch (err) {
+    console.warn('IndexedDB clearAll error:', err);
+  }
+};
+
+export const measureIDBLatency = async (): Promise<{ latencyMs: number; ok: boolean }> => {
+  const start = performance.now();
+  try {
+    const testKey = '__health_ping__';
+    await setCachedData(testKey, { ping: Date.now() });
+    await getCachedData(testKey);
+    await deleteCachedData(testKey);
+    const end = performance.now();
+    return { latencyMs: Math.round(end - start), ok: true };
+  } catch (err) {
+    return { latencyMs: -1, ok: false };
+  }
+};
+

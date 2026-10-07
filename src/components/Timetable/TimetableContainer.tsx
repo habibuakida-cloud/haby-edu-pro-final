@@ -794,11 +794,46 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
         </div>
 
-        <div className="flex items-center gap-2 pr-1 shrink-0">
+        <div className="flex items-center gap-2 pr-1 shrink-0 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setAiGeneratorModalOpen(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black text-xs rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95 border border-blue-500"
+            title="Tengeneza ratiba mpya isiyo na migongano kwa madarasa yote au darasa maalumu"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+            <span>⚡ Tengeneza Ratiba (Auto-Generate)</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIntegrityReportModalOpen(true)}
+            className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
+            title="Kagua na utatue migongano yote ya walimu (Resolve Clashes)"
+          >
+            <ShieldAlert className="w-3.5 h-3.5" />
+            <span>Tatua Migongano ({integrityReport.criticalCount || totalConflicts})</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              if (window.confirm("Je, una uhakika unataka kusafisha (kuweka upya) ratiba yote ya masomo? Mabadiliko haya yatafuta vipindi vyote vilivyopo kwenye ratiba.")) {
+                onUpdateAssignments([]);
+                alert("Ratiba imesafishwa na kuwekwa upya kikamilifu! Unaweza kutumia '⚡ Tengeneza Ratiba' kutengeneza mpya.");
+              }
+            }}
+            className="px-3 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700 font-bold text-xs rounded-lg flex items-center gap-1.5 border border-slate-200 shadow-2xs transition-all cursor-pointer active:scale-95"
+            title="Safisha na uweke upya masomo yote kwenye ratiba"
+          >
+            <RefreshCw className="w-3.5 h-3.5" />
+            <span>Weka Upya (Reset)</span>
+          </button>
+
           <button
             type="button"
             onClick={handlePrintActiveTimetableGrid}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-lg flex items-center gap-2 shadow-xs transition-all cursor-pointer active:scale-95 border border-blue-500"
+            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-lg flex items-center gap-2 shadow-xs transition-all cursor-pointer active:scale-95 border border-blue-500"
             title="Print current generated timetable grid using browser print"
           >
             <Printer className="w-4 h-4" />

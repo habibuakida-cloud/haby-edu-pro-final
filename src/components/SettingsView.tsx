@@ -13,6 +13,7 @@ import {
 } from '../types';
 import { PeriodSettingsManager } from './Timetable/PeriodSettingsManager';
 import { ClassStreamManagerModal } from './common/ClassStreamManagerModal';
+import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
 import { INITIAL_STREAM_SETTINGS } from '../constants/defaults';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
@@ -69,7 +70,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   activityLogs = [],
   onClearActivityLogs
 }) => {
-  const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'users' | 'audit' | 'network' | 'github' | 'backup'>('periods');
+  const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'users' | 'audit' | 'network' | 'github' | 'backup' | 'dbhealth'>('periods');
   const [allSchools, setAllSchools] = useState<SchoolType[]>([]);
   const { switchSchool } = useAuth();
   const [schoolsLoading, setSchoolsLoading] = useState(false);
@@ -780,6 +781,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               <Download className="w-4 h-4" />
               Project Source Backup
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('dbhealth')}
+              className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
+                activeTab === 'dbhealth'
+                  ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+                  : 'bg-white text-amber-900 hover:bg-amber-50 border border-amber-200'
+              }`}
+            >
+              <Activity className="w-4 h-4 text-amber-600" />
+              Database Health & Diagnostics
             </button>
           </>
         )}
@@ -2341,6 +2355,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <span>Vite/React Structure</span>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* TAB: DATABASE HEALTH & LATENCY DIAGNOSTICS */}
+      {activeTab === 'dbhealth' && (
+        <div className="space-y-6">
+          <DatabaseHealthWidget
+            schoolId={currentUser?.schoolId || '02dff10d-78fb-4af6-ab5a-db1d275d7e06'}
+            currentUserRole={currentUser?.role}
+          />
         </div>
       )}
     </div>

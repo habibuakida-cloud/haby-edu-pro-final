@@ -38,6 +38,7 @@ import { HabyEduProLogo } from './common/HabyEduProLogo';
 import { getRemedialTimetable, RemedialTimetableEntry } from '../lib/remedialService';
 import { exportRemedialTimetablePDF } from '../utils/remedialPdfExport';
 import { isSameClass } from '../utils/reportCardUtils';
+import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
 
 interface DashboardViewProps {
   students: Student[];
@@ -402,6 +403,13 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Database Latency & Health Diagnostic Widget */}
+      <DatabaseHealthWidget
+        schoolId={schoolId}
+        onForceRefreshSync={onForceRefreshSync}
+        currentUserRole={currentUser?.role}
+      />
 
       {/* Academic Overview Section */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
