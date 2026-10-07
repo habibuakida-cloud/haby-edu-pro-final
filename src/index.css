@@ -6,11 +6,6 @@
       size: auto;
       margin: 8mm 8mm;
     }
-    
-    @page :landscape {
-      size: landscape;
-      margin: 6mm 6mm;
-    }
 
     *, *::before, *::after {
       text-shadow: none !important;

@@ -1550,6 +1550,7 @@ export default function App() {
             <RemedialDailyTracker
               schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
               currentUser={userAccount}
+              students={data.students}
             />
           )}
 

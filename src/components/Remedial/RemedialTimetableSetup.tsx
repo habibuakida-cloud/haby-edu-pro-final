@@ -83,6 +83,20 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
 
+  // Standalone Auto Generator State
+  const [isAutoModalOpen, setIsAutoModalOpen] = useState(false);
+  const [generatingAuto, setGeneratingAuto] = useState(false);
+  const [autoConfig, setAutoConfig] = useState({
+    class_name: 'Class 5',
+    stream: 'A',
+    slot_type: 'EVENING', // 'MORNING' (06:30-07:30), 'EVENING' (16:00-17:30), 'WEEKEND' (Saturday 08:30-11:30)
+    weeks_count: 4,
+    start_date: new Date().toISOString().split('T')[0],
+    selected_subjects: [] as string[],
+    term: 'Term 1',
+    academic_year: new Date().getFullYear().toString()
+  });
+
   // Filters
   const [classFilter, setClassFilter] = useState<string>('ALL');
   const [streamFilter, setStreamFilter] = useState<string>('ALL');
@@ -334,6 +348,114 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
     });
   };
 
+  // Standalone Auto Generator for Remedial Timetable
+  const handleRunAutoGenerator = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setGeneratingAuto(true);
+    setAlertNotice(null);
+
+    try {
+      const targetClass = autoConfig.class_name;
+      const targetStream = autoConfig.stream;
+      const subjectsToSchedule = autoConfig.selected_subjects.length > 0 
+        ? autoConfig.selected_subjects 
+        : dynamicSubjects;
+
+      if (subjectsToSchedule.length === 0) {
+        setAlertNotice({ type: 'warning', message: 'Tafadhali chagua angalau somo moja la kuzuia au kutengenezea remedial.' });
+        setGeneratingAuto(false);
+        return;
+      }
+
+      const generatedEntries: RemedialTimetableEntry[] = [];
+      const startDate = new Date(autoConfig.start_date || new Date());
+      const totalDays = autoConfig.weeks_count * 7;
+      let subjectIndex = 0;
+
+      // Determine time bounds based on slot_type
+      let startTime = '16:00';
+      let endTime = '17:30';
+      if (autoConfig.slot_type === 'MORNING') {
+        startTime = '06:30';
+        endTime = '07:30';
+      } else if (autoConfig.slot_type === 'WEEKEND') {
+        startTime = '08:30';
+        endTime = '11:30';
+      }
+
+      const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+      for (let d = 0; d < totalDays; d++) {
+        const currentDate = new Date(startDate);
+        currentDate.setDate(startDate.getDate() + d);
+        const dayOfWeekNum = currentDate.getDay();
+
+        if (autoConfig.slot_type === 'WEEKEND') {
+          if (dayOfWeekNum !== 6) continue; // Saturday only
+        } else {
+          if (dayOfWeekNum === 0 || dayOfWeekNum === 6) continue; // Weekdays Mon-Fri
+        }
+
+        const dateStr = currentDate.toISOString().split('T')[0];
+        const dayName = dayNames[dayOfWeekNum];
+        const currentSubject = subjectsToSchedule[subjectIndex % subjectsToSchedule.length];
+        subjectIndex++;
+
+        // Find a teacher for the subject
+        const matchedTeacher = teachers.find(t => 
+          t.subjects && t.subjects.some((s: string) => s.toLowerCase().includes(currentSubject.toLowerCase()) || currentSubject.toLowerCase().includes(s.toLowerCase()))
+        ) || teachers[subjectIndex % Math.max(1, teachers.length)];
+
+        const teacherName = matchedTeacher?.name || teachers[0]?.name || 'Mwalimu wa Somo';
+
+        const entry: RemedialTimetableEntry = {
+          class_name: targetClass,
+          stream: targetStream,
+          subject: currentSubject,
+          teacher_name: teacherName,
+          date: dateStr,
+          day_of_week: dayName,
+          start_time: startTime,
+          end_time: endTime,
+          period_time: `${startTime}-${endTime}`,
+          room: `${targetClass} Room`,
+          term: autoConfig.term,
+          academic_year: autoConfig.academic_year,
+          notify_students: true
+        };
+
+        // Conflict check against existing and newly generated remedial entries
+        const conflict = checkRemedialConflict([...entries, ...generatedEntries], entry);
+        if (!conflict.hasConflict) {
+          generatedEntries.push(entry);
+        }
+      }
+
+      if (generatedEntries.length === 0) {
+        setAlertNotice({ 
+          type: 'warning', 
+          message: 'Hakuna vipindi vipya vilivyoweza kutengenezwa (huenda tayari vipo au kuna migongano ya walimu kwa muda huu).' 
+        });
+      } else {
+        for (const item of generatedEntries) {
+          await saveRemedialTimetable(schoolId, item);
+        }
+
+        setAlertNotice({
+          type: 'success',
+          message: `Ratiba ya Remedial ya ${targetClass} (${targetStream}) imetengenezwa kiotomatiki kwa vipindi ${generatedEntries.length} bila kuingiliana na Ratiba Kuu!`
+        });
+        setIsAutoModalOpen(false);
+        loadTimetable();
+      }
+    } catch (err: any) {
+      console.error("Auto generation error:", err);
+      setAlertNotice({ type: 'error', message: err.message || 'Hitilafu imetokea wakati wa kutengeneza ratiba kiotomatiki.' });
+    } finally {
+      setGeneratingAuto(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Header Banner */}
@@ -344,24 +466,32 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
               <Calendar className="w-6 h-6 text-amber-300" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <h2 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-white">
                   REMEDIAL TIMETABLE SETUP
                 </h2>
-                <span className="px-2.5 py-0.5 bg-amber-400 text-slate-900 font-extrabold text-[10px] rounded-full uppercase">
-                  Class &amp; Stream Specific
+                <span className="px-2.5 py-0.5 bg-emerald-400 text-slate-950 font-black text-[10px] rounded-full uppercase tracking-wider">
+                  Mfumo Huru (Standalone)
                 </span>
               </div>
               <p className="text-xs text-blue-200 mt-1 font-medium max-w-2xl">
-                Sanidi ratiba ya masomo ya ziada asubuhi na jioni kwa kila darasa na mkondo wake kuzuia migongano ya walimu na kurahisisha malipo.
+                Tengeneza na sanidi ratiba ya masomo ya ziada (Remedial) inayojitegemea kikamilifu. Mfumo huu hauchanganyi wala kutoa vipindi kwenye Ratiba Kuu ya Masomo.
               </p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
             <button
+              onClick={() => setIsAutoModalOpen(true)}
+              className="px-4 py-2.5 bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 font-black text-xs rounded-xl shadow-md hover:from-amber-300 hover:to-amber-400 flex items-center gap-2 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+              title="Tengeneza ratiba ya remedial kiotomatiki bila kuingiliana na ratiba kuu"
+            >
+              <Sparkles className="w-4 h-4 text-slate-950 fill-slate-950" />
+              <span>⚡ Auto-Generate Remedial</span>
+            </button>
+            <button
               onClick={handleExportPDF}
-              className="px-4 py-2 bg-white text-slate-800 hover:bg-slate-100 font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
+              className="px-4 py-2.5 bg-white text-slate-800 hover:bg-slate-100 font-bold text-xs rounded-xl shadow-xs flex items-center gap-2 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
               title="Download or Print official Remedial Timetable PDF for selected class"
             >
               <Download className="w-4 h-4 text-blue-700" />
@@ -962,6 +1092,226 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
                     <CheckCircle2 className="w-4 h-4" />
                   )}
                   <span>Hifadhi Mabadiliko</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* AUTO GENERATOR MODAL (STANDALONE REMEDIAL ENGINE) */}
+      {isAutoModalOpen && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden my-8">
+            <div className="bg-gradient-to-r from-[#0f2948] to-[#1f4d8b] text-white p-5 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <Sparkles className="w-5 h-5 text-amber-400 fill-amber-400" />
+                <div>
+                  <h3 className="font-black text-sm uppercase tracking-wide">
+                    Tengeneza Ratiba ya Remedial Kiotomatiki (Auto Generator)
+                  </h3>
+                  <p className="text-[11px] text-blue-200 font-medium">
+                    Mfumo huru wa kutoa vipindi vya masomo ya ziada bila kutoa wala kuingiliana na Ratiba Kuu.
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAutoModalOpen(false)}
+                className="text-white/70 hover:text-white cursor-pointer p-1 rounded-lg hover:bg-white/10"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleRunAutoGenerator} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Chagua Darasa */}
+                <div>
+                  <label className="block text-xs font-black text-slate-700 uppercase mb-1">
+                    Chagua Darasa <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={autoConfig.class_name}
+                    onChange={e => setAutoConfig({ ...autoConfig, class_name: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    <optgroup label="Pre-Primary / Nursery">
+                      {REMEDIAL_NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
+                    <optgroup label="Primary School">
+                      {REMEDIAL_PRIMARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
+                    <optgroup label="Secondary School">
+                      {REMEDIAL_SECONDARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Chagua Mkondo */}
+                <div>
+                  <label className="block text-xs font-black text-slate-700 uppercase mb-1">
+                    Chagua Mkondo (Stream) <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={autoConfig.stream}
+                    onChange={e => setAutoConfig({ ...autoConfig, stream: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                    required
+                  >
+                    {STREAM_OPTIONS.map(s => (
+                      <option key={s} value={s}>
+                        {s === 'All Streams' ? 'Mikondo Yote (All Streams)' : `Stream ${s}`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Slot / Shift Selection */}
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase mb-1">
+                  Muda / Shift ya Masomo ya Remedial <span className="text-rose-500">*</span>
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setAutoConfig({ ...autoConfig, slot_type: 'EVENING' })}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition ${
+                      autoConfig.slot_type === 'EVENING'
+                        ? 'bg-blue-50 border-blue-600 text-blue-900 ring-2 ring-blue-500/20'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="text-xs font-black uppercase">Jioni (Evening)</div>
+                    <div className="text-[10px] font-mono font-bold text-blue-700 mt-0.5">16:00 - 17:30</div>
+                    <div className="text-[10px] text-slate-500">Jumatatu - Ijumaa</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAutoConfig({ ...autoConfig, slot_type: 'MORNING' })}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition ${
+                      autoConfig.slot_type === 'MORNING'
+                        ? 'bg-blue-50 border-blue-600 text-blue-900 ring-2 ring-blue-500/20'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="text-xs font-black uppercase">Asubuhi (Pre-Prep)</div>
+                    <div className="text-[10px] font-mono font-bold text-blue-700 mt-0.5">06:30 - 07:30</div>
+                    <div className="text-[10px] text-slate-500">Jumatatu - Ijumaa</div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setAutoConfig({ ...autoConfig, slot_type: 'WEEKEND' })}
+                    className={`p-3 rounded-xl border text-left cursor-pointer transition ${
+                      autoConfig.slot_type === 'WEEKEND'
+                        ? 'bg-blue-50 border-blue-600 text-blue-900 ring-2 ring-blue-500/20'
+                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <div className="text-xs font-black uppercase">Jumamosi (Weekend)</div>
+                    <div className="text-[10px] font-mono font-bold text-blue-700 mt-0.5">08:30 - 11:30</div>
+                    <div className="text-[10px] text-slate-500">Weekend Tuition</div>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Tarehe ya Kuanzia */}
+                <div>
+                  <label className="block text-xs font-black text-slate-700 uppercase mb-1">
+                    Tarehe ya Kuanzia <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="date"
+                    value={autoConfig.start_date}
+                    onChange={e => setAutoConfig({ ...autoConfig, start_date: e.target.value })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                    required
+                  />
+                </div>
+
+                {/* Idadi ya Wiki */}
+                <div>
+                  <label className="block text-xs font-black text-slate-700 uppercase mb-1">
+                    Idadi ya Wiki za Kuratibu
+                  </label>
+                  <select
+                    value={autoConfig.weeks_count}
+                    onChange={e => setAutoConfig({ ...autoConfig, weeks_count: Number(e.target.value) })}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value={1}>Wiki 1 (Wiki moja)</option>
+                    <option value={2}>Wiki 2 (Wiki mbili)</option>
+                    <option value={4}>Wiki 4 (Mwezi mmoja)</option>
+                    <option value={8}>Wiki 8 (Miezi mewili)</option>
+                    <option value={12}>Wiki 12 (Muhula mzima)</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Chagua Masomo yatakayohusika */}
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase mb-1">
+                  Chagua Masomo Yatakayopangiwa Remedial
+                </label>
+                <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl max-h-36 overflow-y-auto grid grid-cols-2 gap-2">
+                  {dynamicSubjects.map(subj => {
+                    const isChecked = autoConfig.selected_subjects.includes(subj);
+                    return (
+                      <label key={subj} className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={e => {
+                            if (e.target.checked) {
+                              setAutoConfig({
+                                ...autoConfig,
+                                selected_subjects: [...autoConfig.selected_subjects, subj]
+                              });
+                            } else {
+                              setAutoConfig({
+                                ...autoConfig,
+                                selected_subjects: autoConfig.selected_subjects.filter(s => s !== subj)
+                              });
+                            }
+                          }}
+                          className="w-3.5 h-3.5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
+                        />
+                        <span className="truncate">{subj}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <span className="text-[10px] text-slate-500 mt-1 block">
+                  {autoConfig.selected_subjects.length === 0 
+                    ? 'Ikiwa hukuchagua masomo, masomo yote ya darasa hili yatazungushwa kwa zamu.' 
+                    : `Masomo ${autoConfig.selected_subjects.length} yamechaguliwa.`}
+                </span>
+              </div>
+
+              {/* Auto Generator Footer Buttons */}
+              <div className="flex items-center justify-end gap-3 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsAutoModalOpen(false)}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+                >
+                  Ghairi (Cancel)
+                </button>
+                <button
+                  type="submit"
+                  disabled={generatingAuto}
+                  className="px-5 py-2.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-md cursor-pointer flex items-center gap-2"
+                >
+                  {generatingAuto ? (
+                    <div className="w-4 h-4 border-2 border-slate-900/30 border-t-slate-900 rounded-full animate-spin" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 text-slate-950 fill-slate-950" />
+                  )}
+                  <span>⚡ Anzisha Auto-Generate Remedial</span>
                 </button>
               </div>
             </form>

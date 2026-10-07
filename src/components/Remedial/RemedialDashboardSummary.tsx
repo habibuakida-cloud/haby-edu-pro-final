@@ -166,6 +166,47 @@ export const RemedialDashboardSummary: React.FC<RemedialDashboardSummaryProps> =
     return Math.min(100, Math.round((actualTaught / totalExpectedSessions) * 100));
   }, [todaySessionsCount, todayTaughtCount, timetable, monthlyTaughtRecords, today]);
 
+  // STATISTIC 3B: Remedial Student Attendance Percentage Summary
+  const studentAttendanceSummary = useMemo(() => {
+    let totalPresent = 0;
+    let totalExpected = 0;
+    let recordedSessions = 0;
+
+    // Check today's attendance logs
+    Object.values(todayAttendance).forEach((record: any) => {
+      if (record.total_students && record.total_students > 0) {
+        recordedSessions++;
+        totalPresent += record.present_count || 0;
+        totalExpected += record.total_students || 0;
+      }
+    });
+
+    // Also check monthly logs
+    monthlyTaughtRecords.forEach((record: any) => {
+      if (record.total_students && record.total_students > 0 && !todayAttendance[record.id]) {
+        recordedSessions++;
+        totalPresent += record.present_count || 0;
+        totalExpected += record.total_students || 0;
+      }
+    });
+
+    if (totalExpected === 0) {
+      return {
+        pct: attendancePercentage,
+        totalPresent: 0,
+        totalExpected: 0,
+        recordedSessions: 0
+      };
+    }
+
+    return {
+      pct: Math.min(100, Math.round((totalPresent / totalExpected) * 100)),
+      totalPresent,
+      totalExpected,
+      recordedSessions
+    };
+  }, [todayAttendance, monthlyTaughtRecords, attendancePercentage]);
+
   // STATISTIC 4: Active Remedial Teachers & Classes
   const uniqueTeachersCount = useMemo(() => {
     const teacherNames = new Set(timetable.map(t => t.teacher_name.trim().toLowerCase()));
@@ -259,39 +300,47 @@ export const RemedialDashboardSummary: React.FC<RemedialDashboardSummaryProps> =
           </div>
         </div>
 
-        {/* CARD 3: Remedial Attendance Percentage */}
+        {/* CARD 3: Remedial Student Attendance Percentage */}
         <div className="bg-white border border-slate-200/80 rounded-2xl p-4 sm:p-5 shadow-xs hover:shadow-md transition-all duration-300 relative overflow-hidden group">
           <div className="absolute top-0 right-0 w-24 h-24 bg-indigo-500/5 rounded-bl-full pointer-events-none group-hover:scale-110 transition-transform" />
           
           <div className="flex items-center justify-between mb-3">
             <span className="text-[10px] font-black uppercase text-indigo-800 bg-indigo-50 border border-indigo-100 px-2.5 py-1 rounded-lg">
-              Attendance & Delivery
+              Student Attendance
             </span>
             <div className="p-2.5 bg-gradient-to-tr from-indigo-600 to-purple-700 text-white rounded-xl shadow-xs">
-              <CheckCircle2 className="w-4 h-4" />
+              <Users className="w-4 h-4" />
             </div>
           </div>
 
           <div className="space-y-1">
             <div className="flex items-baseline gap-2">
               <span className="text-3xl font-black text-slate-900 tracking-tight font-mono">
-                {loading ? '...' : `${attendancePercentage}%`}
+                {loading ? '...' : `${studentAttendanceSummary.pct}%`}
               </span>
-              <span className="text-xs font-bold text-emerald-600">
-                {attendancePercentage >= 85 ? 'High Rate' : 'Moderate'}
+              <span className={`text-xs font-bold ${studentAttendanceSummary.pct >= 85 ? 'text-emerald-600' : 'text-amber-600'}`}>
+                {studentAttendanceSummary.pct >= 85 ? 'High Rate' : 'Moderate'}
               </span>
             </div>
-            <p className="text-[11px] font-bold text-slate-600">Remedial Attendance Percentage</p>
+            <p className="text-[11px] font-bold text-slate-600">Student Attendance Percentage</p>
           </div>
 
-          {/* Mini Percentage Progress Bar */}
+          {/* Mini Percentage Progress Bar and Count Summary */}
           <div className="mt-3 pt-3 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between text-[10px] font-bold text-slate-500">
+              <span>Delivery: {attendancePercentage}%</span>
+              <span>
+                {studentAttendanceSummary.totalExpected > 0
+                  ? `${studentAttendanceSummary.totalPresent}/${studentAttendanceSummary.totalExpected} Students`
+                  : 'All Sessions Logged'}
+              </span>
+            </div>
             <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
               <div 
-                style={{ width: `${attendancePercentage}%` }}
+                style={{ width: `${studentAttendanceSummary.pct}%` }}
                 className={`h-full rounded-full transition-all duration-700 ${
-                  attendancePercentage >= 90 ? 'bg-emerald-500' :
-                  attendancePercentage >= 70 ? 'bg-blue-500' : 'bg-amber-500'
+                  studentAttendanceSummary.pct >= 90 ? 'bg-emerald-500' :
+                  studentAttendanceSummary.pct >= 70 ? 'bg-blue-500' : 'bg-amber-500'
                 }`}
               />
             </div>
@@ -396,10 +445,16 @@ export const RemedialDashboardSummary: React.FC<RemedialDashboardSummaryProps> =
                     <span className="bg-indigo-50 text-indigo-800 px-1.5 py-0.2 rounded">
                       {session.class_name} {session.stream === 'All Streams' ? '(Mikondo Yote)' : `(${session.stream})`}
                     </span>
-                    <span className="flex items-center gap-1">
-                      <Building className="w-3 h-3 text-slate-400" />
-                      {session.room || `${session.class_name} Room`}
-                    </span>
+                    {att && att.student_attendance_pct !== undefined ? (
+                      <span className="text-[10px] font-black text-indigo-700 bg-indigo-100 px-1.5 py-0.5 rounded">
+                        👥 {att.student_attendance_pct}% ({att.present_count}/{att.total_students})
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        <Building className="w-3 h-3 text-slate-400" />
+                        {session.room || `${session.class_name} Room`}
+                      </span>
+                    )}
                   </div>
                 </div>
               );

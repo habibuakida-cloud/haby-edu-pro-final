@@ -807,6 +807,16 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </div>
       </div>
 
+      {/* Autonomous Remedial Info Banner */}
+      <div className="bg-amber-50/80 border border-amber-200/80 rounded-xl p-3 text-xs text-amber-950 font-semibold flex items-center justify-between gap-3 no-print">
+        <div className="flex items-center gap-2.5">
+          <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
+          <span>
+            <strong>Ratiba Kuu ya Shule (General Timetable):</strong> Inasimamia masomo ya kawaida (08:00 - 14:00). Masomo ya Ziada (Remedial) yana mfumo wake huru unaojitegemea (<strong>REMEDIAL PROGRAM -&gt; Remedial Timetable</strong>) na hayatoki au kuingiliana na ratiba hii.
+          </span>
+        </div>
+      </div>
+
       {/* Conflict Bar Alert (if any teacher is double-booked or conflicts exist) */}
       {(totalConflicts > 0 || integrityReport.criticalCount > 0) && (
         <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-rose-900 shadow-xs animate-in fade-in flex-wrap gap-3">
