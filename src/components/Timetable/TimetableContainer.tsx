@@ -70,6 +70,8 @@ import {
   printFormattedSection 
 } from '../../utils/export';
 import { exportTimetablePDF } from '../../utils/timetablePdfExport';
+import { isSameClass } from '../../utils/reportCardUtils';
+import { isSameStream } from '../../lib/timetableService';
 import { detectTimetableConflicts } from '../../utils/conflicts';
 import { generateTimetableIntegrityReport } from '../../utils/timetableIntegrity';
 import { 
@@ -330,10 +332,10 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     // Check if target already has an assignment
     const targetExisting = assignments.find(
       a =>
-        a.className === targetClass &&
-        a.stream === targetStream &&
+        isSameClass(a.className, targetClass) &&
+        isSameStream(a.stream, targetStream) &&
         a.day === targetDay &&
-        a.period === targetPeriod
+        (a.period === targetPeriod || a.periodName === targetPeriod || a.period.startsWith(targetPeriod.split(' (')[0]))
     );
 
     let updated: TimetableAssignment[];
@@ -422,10 +424,10 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       // Apply to single slot
       const existing = assignments.find(
         a =>
-          a.className === data.className &&
-          a.stream === data.stream &&
+          isSameClass(a.className, data.className) &&
+          isSameStream(a.stream, data.stream) &&
           a.day === data.day &&
-          a.period === data.period
+          (a.period === data.period || a.periodName === data.period || a.period.startsWith(data.period.split(' (')[0]))
       );
 
       if (existing) {
@@ -1257,10 +1259,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                         const periodKey = `${period.name} (${period.start}-${period.end})`;
                                         const assignment = assignments.find(
                                           a =>
-                                            a.className.toLowerCase() === className.toLowerCase() &&
-                                            (a.stream === stream || 
-                                             a.stream.toLowerCase() === stream.toLowerCase() || 
-                                             a.stream.replace(/^stream\s*/i, '').trim().toLowerCase() === stream.replace(/^stream\s*/i, '').trim().toLowerCase()) &&
+                                            isSameClass(a.className, className) &&
+                                            isSameStream(a.stream, stream) &&
                                             a.day.toLowerCase() === day.toLowerCase() &&
                                             (a.period === periodKey || a.period === period.name || (a.periodName && a.periodName === period.name))
                                         );
@@ -1691,8 +1691,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                 const pNameOnly = periodKey.split(' (')[0];
                                 const assignment = assignments.find(
                                   a =>
-                                    a.className === selectedClassFilter &&
-                                    a.stream === stream &&
+                                    isSameClass(a.className, selectedClassFilter) &&
+                                    isSameStream(a.stream, stream) &&
                                     a.day === day &&
                                     (a.period === periodKey || a.period === pNameOnly || (a.periodName && a.periodName === pNameOnly))
                                 );

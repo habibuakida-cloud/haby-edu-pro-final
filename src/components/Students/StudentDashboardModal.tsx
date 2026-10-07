@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { 
   X, 
   User, 
@@ -21,7 +21,10 @@ import {
   Check,
   FileText,
   Calendar,
-  Building
+  Building,
+  RefreshCw,
+  Layers,
+  MapPin
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -39,12 +42,14 @@ import {
   Legend, 
   ReferenceLine 
 } from 'recharts';
-import { Student, SchoolInfo, DisciplineRecord, ExaminationRecord } from '../../types';
+import { Student, SchoolInfo, DisciplineRecord, ExaminationRecord, TimetableAssignment } from '../../types';
 import { HabyEduProLogo } from '../common/HabyEduProLogo';
 import { printFormattedSection } from '../../utils/export';
 import { getRemedialTimetable, RemedialTimetableEntry } from '../../lib/remedialService';
 import { exportRemedialTimetablePDF } from '../../utils/remedialPdfExport';
+import { fetchTimetable, isSameStream } from '../../lib/timetableService';
 import { isSameClass } from '../../utils/reportCardUtils';
+import { getSubjectColor } from '../../utils/colors';
 
 export interface StudentDashboardModalProps {
   isOpen: boolean;
@@ -73,32 +78,87 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
 }) => {
   if (!isOpen || !student) return null;
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'academics' | 'attendance' | 'behavior' | 'remedial'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'academics' | 'timetable' | 'remedial' | 'attendance' | 'behavior'>('overview');
+  const [classTimetable, setClassTimetable] = useState<TimetableAssignment[]>([]);
   const [remedialTimetable, setRemedialTimetable] = useState<RemedialTimetableEntry[]>([]);
+  const [isLoadingClassTimetable, setIsLoadingClassTimetable] = useState<boolean>(true);
+  const [isLoadingRemedial, setIsLoadingRemedial] = useState<boolean>(true);
+  const [selectedDayFilter, setSelectedDayFilter] = useState<string>('ALL');
+
+  const loadTimetables = useCallback(async () => {
+    if (!student) return;
+    setIsLoadingClassTimetable(true);
+    setIsLoadingRemedial(true);
+
+    console.log(`[Student View] Fetching timetable for student: ${student.name} | Class: "${student.className}" | Stream: "${student.stream || ''}" | School: ${schoolId}`);
+
+    try {
+      const [ttRes, remRes] = await Promise.all([
+        fetchTimetable({
+          schoolId,
+          className: student.className,
+          stream: student.stream
+        }),
+        getRemedialTimetable(schoolId, student.className)
+      ]);
+
+      if (ttRes.success && ttRes.data) {
+        console.log(`[Student View] Timetable API returned ${ttRes.data.length} periods for class="${student.className}" stream="${student.stream}"`);
+        setClassTimetable(ttRes.data);
+      }
+      if (remRes && remRes.data) {
+        setRemedialTimetable(remRes.data);
+      }
+    } catch (e) {
+      console.error('[Student View] Error fetching timetables:', e);
+    } finally {
+      setIsLoadingClassTimetable(false);
+      setIsLoadingRemedial(false);
+    }
+  }, [schoolId, student]);
 
   useEffect(() => {
-    const fetchTimetable = async () => {
-      try {
-        const { data } = await getRemedialTimetable(schoolId);
-        if (data) setRemedialTimetable(data);
-      } catch (e) {
-        console.warn('Error loading remedial in student modal:', e);
-      }
-    };
-    fetchTimetable();
-  }, [schoolId]);
+    loadTimetables();
+  }, [loadTimetables]);
 
-  // Student specific remedial sessions
+  // Student specific regular timetable periods (WHERE class = selected AND stream = selected)
+  const studentClassPeriods = useMemo(() => {
+    return classTimetable.filter(item => {
+      const matchClass = isSameClass(item.className, student.className);
+      const matchStream = isSameStream(item.stream, student.stream);
+      return matchClass && matchStream;
+    });
+  }, [classTimetable, student]);
+
+  // Student specific remedial sessions (WHERE class = selected AND stream = selected)
   const studentRemedialSessions = useMemo(() => {
     return remedialTimetable.filter(item => {
       const matchClass = isSameClass(item.class_name, student.className);
-      const matchStream = !item.stream || 
-        item.stream === 'All Streams' || 
-        !student.stream || 
-        item.stream.toUpperCase() === student.stream.toUpperCase();
+      const matchStream = isSameStream(item.stream, student.stream);
       return matchClass && matchStream;
     });
   }, [remedialTimetable, student]);
+
+  // Group regular periods by day of week
+  const groupedClassPeriods = useMemo(() => {
+    const daysOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const groups: Record<string, TimetableAssignment[]> = {};
+    
+    daysOrder.forEach(d => { groups[d] = []; });
+    
+    studentClassPeriods.forEach(p => {
+      const dayKey = p.day ? (p.day.charAt(0).toUpperCase() + p.day.slice(1).toLowerCase()) : 'Monday';
+      if (!groups[dayKey]) groups[dayKey] = [];
+      groups[dayKey].push(p);
+    });
+
+    // Sort periods inside each day
+    Object.keys(groups).forEach(d => {
+      groups[d].sort((a, b) => (a.period || '').localeCompare(b.period || '', undefined, { numeric: true }));
+    });
+
+    return groups;
+  }, [studentClassPeriods]);
 
   // 1. Academic Performance Data for Recharts
   const subjectMarksData = useMemo(() => {
@@ -132,7 +192,7 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
     });
   }, [student]);
 
-  // 1b. Academic Trendline Data (Improvement across terms)
+  // 1b. Academic Trendline Data
   const academicTrendData = useMemo(() => {
     const studentRecords = examinationRecords.filter(r => r.studentId === student.id);
     if (studentRecords.length === 0) return [];
@@ -159,7 +219,7 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
   const classRank = useMemo(() => {
     if (!allStudentsInClass || allStudentsInClass.length === 0) return null;
     const sameClassStudents = allStudentsInClass.filter(
-      s => s.className?.toLowerCase() === student.className?.toLowerCase()
+      s => isSameClass(s.className, student.className)
     );
     if (sameClassStudents.length === 0) return null;
 
@@ -171,7 +231,7 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
     };
   }, [allStudentsInClass, student]);
 
-  // 3. Attendance Statistics & Pie Data for Recharts
+  // 3. Attendance Statistics
   const attendanceStats = useMemo(() => {
     let presentCount = 0;
     let absentCount = 0;
@@ -210,7 +270,7 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
     };
   }, [dailyAttendance, student]);
 
-  // 4. Behavioral & Discipline History
+  // 4. Behavioral Logs
   const studentDisciplineLogs = useMemo(() => {
     return disciplineRecords.filter(d => 
       d.studentId === student.id || 
@@ -223,6 +283,14 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
     printFormattedSection(
       'student-dashboard-print-content',
       `Student Academic & Behavioral Profile - ${student.name}`,
+      schoolInfo?.name || 'HABY EDU PRO'
+    );
+  };
+
+  const handlePrintClassTimetable = () => {
+    printFormattedSection(
+      'student-class-timetable-content',
+      `Ratiba ya Vipindi - ${student.name} (${student.className} Mkondo ${student.stream || 'A'})`,
       schoolInfo?.name || 'HABY EDU PRO'
     );
   };
@@ -247,7 +315,7 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-blue-200">
-                Official Academic Grades, Attendance Records &amp; Behavioral History Summary
+                Official Academic Grades, Timetable Schedules &amp; Attendance Records
               </p>
             </div>
           </div>
@@ -288,6 +356,30 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('timetable')}
+            className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'timetable'
+                ? 'bg-blue-700 text-white shadow-xs font-black'
+                : 'text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5 text-blue-500" />
+            <span>Ratiba ya Vipindi ({studentClassPeriods.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('remedial')}
+            className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
+              activeTab === 'remedial'
+                ? 'bg-amber-600 text-white shadow-xs font-black'
+                : 'text-slate-600 hover:bg-slate-200'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Remedial Timetable ({studentRemedialSessions.length})</span>
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('academics')}
             className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
               activeTab === 'academics'
@@ -308,7 +400,7 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
             }`}
           >
             <CalendarCheck className="w-3.5 h-3.5" />
-            <span>Attendance Status ({attendanceStats.rate}%)</span>
+            <span>Attendance ({attendanceStats.rate}%)</span>
           </button>
           <button
             type="button"
@@ -320,19 +412,7 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
             }`}
           >
             <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Behavior &amp; Conduct ({studentDisciplineLogs.length})</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('remedial')}
-            className={`px-3.5 py-1.5 rounded-xl transition cursor-pointer flex items-center gap-1.5 shrink-0 ${
-              activeTab === 'remedial'
-                ? 'bg-amber-600 text-white shadow-xs font-black'
-                : 'text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            <Clock className="w-3.5 h-3.5" />
-            <span>Remedial Timetable ({studentRemedialSessions.length})</span>
+            <span>Discipline ({studentDisciplineLogs.length})</span>
           </button>
         </div>
 
@@ -368,250 +448,206 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
                 </div>
 
                 <p className="text-xs text-slate-600 font-bold">
-                  Class: <span className="text-blue-700">{student.className}</span> {student.stream ? `• Stream ${student.stream.replace(/^STREAM\s+/i, '')}` : ''}
+                  {student.className} {student.stream ? `• Mkondo / Stream ${student.stream}` : ''} • Gender: {student.gender || 'N/A'}
                 </p>
 
-                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 font-medium pt-1">
-                  <span>Gender: <strong>{student.gender || 'N/A'}</strong></span>
-                  {(student.parentPhone || student.phone) && (
-                    <span className="flex items-center gap-1 text-emerald-800 font-bold">
-                      <Phone className="w-3.5 h-3.5 text-emerald-600" />
-                      {student.parentPhone || student.phone}
-                    </span>
-                  )}
-                  {student.parentName && (
-                    <span>Parent: <strong>{student.parentName}</strong></span>
-                  )}
-                </div>
+                {student.parentPhone && (
+                  <p className="text-xs text-slate-500 flex items-center gap-1.5 pt-0.5">
+                    <Phone className="w-3 h-3 text-slate-400" />
+                    <span>Parent: <span className="font-mono font-semibold">{student.parentPhone}</span> ({student.parentName || 'Primary Contact'})</span>
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Overall Performance Badge */}
-            <div className="flex sm:flex-col items-center sm:items-end justify-between w-full sm:w-auto pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
-              <span className="text-[10px] font-black uppercase text-slate-400">Overall Academic Grade</span>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="text-2xl font-black text-[#1f4d8b]">
-                  {student.division ? student.division : (student.average ? `${student.average}%` : 'N/A')}
+            {/* Quick KPI Badges */}
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-3 sm:pt-0 border-slate-100">
+              <div className="text-center bg-blue-50/60 border border-blue-100 rounded-xl px-3 py-2">
+                <span className="text-[10px] uppercase font-bold text-blue-600 block">Class Rank</span>
+                <span className="text-base font-black text-blue-950">
+                  {classRank ? `#${classRank.position} / ${classRank.total}` : 'N/A'}
                 </span>
-                {classRank && (
-                  <span className="px-2 py-1 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-xs font-black">
-                    Rank #{classRank.position}/{classRank.total}
-                  </span>
-                )}
+              </div>
+
+              <div className="text-center bg-emerald-50/60 border border-emerald-100 rounded-xl px-3 py-2">
+                <span className="text-[10px] uppercase font-bold text-emerald-600 block">Vipindi vya Ratiba</span>
+                <span className="text-base font-black text-emerald-950">
+                  {isLoadingClassTimetable ? '...' : studentClassPeriods.length}
+                </span>
+              </div>
+
+              <div className="text-center bg-amber-50/60 border border-amber-100 rounded-xl px-3 py-2">
+                <span className="text-[10px] uppercase font-bold text-amber-600 block">Remedial Sessions</span>
+                <span className="text-base font-black text-amber-950">
+                  {isLoadingRemedial ? '...' : studentRemedialSessions.length}
+                </span>
               </div>
             </div>
           </div>
 
-          {/* TAB 1: OVERVIEW & KPIS */}
-          {(activeTab === 'overview' || activeTab === 'academics') && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between text-slate-400 text-xs">
-                    <span className="font-bold">Total Marks</span>
-                    <Award className="w-4 h-4 text-blue-500" />
+          {/* TAB: MY CLASS TIMETABLE (RATIBA YA VIPINDI) */}
+          {(activeTab === 'overview' || activeTab === 'timetable') && (
+            <div id="student-class-timetable-content" className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 bg-blue-100 text-blue-700 rounded-xl">
+                    <Calendar className="w-5 h-5" />
                   </div>
-                  <div className="text-xl font-black text-slate-900">{student.total || 0}</div>
-                  <p className="text-[10px] text-slate-500 font-medium">Across all enrolled subjects</p>
-                </div>
-
-                <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between text-slate-400 text-xs">
-                    <span className="font-bold">Average Score</span>
-                    <TrendingUp className="w-4 h-4 text-emerald-500" />
-                  </div>
-                  <div className="text-xl font-black text-emerald-700">{student.average || 0}%</div>
-                  <p className="text-[10px] text-slate-500 font-medium">Class pass mark: 45%</p>
-                </div>
-
-                <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between text-slate-400 text-xs">
-                    <span className="font-bold">Attendance Rate</span>
-                    <CalendarCheck className="w-4 h-4 text-indigo-500" />
-                  </div>
-                  <div className="text-xl font-black text-indigo-700">{attendanceStats.rate}%</div>
-                  <p className="text-[10px] text-slate-500 font-medium">{attendanceStats.present} days present</p>
-                </div>
-
-                <div className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs space-y-1">
-                  <div className="flex items-center justify-between text-slate-400 text-xs">
-                    <span className="font-bold">Discipline Status</span>
-                    <ShieldCheck className="w-4 h-4 text-rose-500" />
-                  </div>
-                  <div className="text-xl font-black text-slate-900">
-                    {studentDisciplineLogs.length === 0 ? 'Exemplary' : `${studentDisciplineLogs.length} Log(s)`}
-                  </div>
-                  <p className="text-[10px] text-slate-500 font-medium">Conduct Grade: <strong>A</strong></p>
-                </div>
-              </div>
-
-              {/* Subject Marks Recharts Visualizer */}
-              <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                  <div className="flex items-center gap-2">
-                    <BarChart2 className="w-4 h-4 text-purple-600" />
-                    <h4 className="font-black text-slate-900 text-sm">Subject Marks &amp; Grades Distribution</h4>
-                  </div>
-                  <span className="text-xs text-slate-400 font-bold">{subjectMarksData.length} Subjects Graded</span>
-                </div>
-
-                {subjectMarksData.length === 0 ? (
-                  <div className="py-10 text-center text-slate-400 italic text-xs">
-                    No academic exam marks recorded yet for this student.
-                  </div>
-                ) : (
-                  <div className="h-64 w-full">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart data={subjectMarksData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                        <XAxis dataKey="subject" tick={{ fontSize: 10, fill: '#64748b' }} interval={0} angle={-25} textAnchor="end" />
-                        <YAxis domain={[0, 100]} tick={{ fontSize: 10, fill: '#64748b' }} />
-                        <Tooltip
-                          content={({ active, payload }) => {
-                            if (active && payload && payload.length) {
-                              const data = payload[0].payload;
-                              return (
-                                <div className="bg-slate-900 text-white p-2.5 rounded-xl text-xs space-y-1 shadow-lg border border-slate-700">
-                                  <p className="font-black">{data.fullSubject}</p>
-                                  <p className="text-emerald-400 font-bold">Mark: {data.mark} / 100</p>
-                                  <p className="text-amber-300 font-mono text-[10px]">Grade: {data.grade}</p>
-                                </div>
-                              );
-                            }
-                            return null;
-                          }}
-                        />
-                        <ReferenceLine y={45} stroke="#ef4444" strokeDasharray="3 3" label={{ value: 'Pass (45)', fill: '#ef4444', fontSize: 9 }} />
-                        <Bar dataKey="mark" radius={[6, 6, 0, 0]}>
-                          {subjectMarksData.map((entry, idx) => (
-                            <Cell key={`cell-${idx}`} fill={entry.color} />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* TAB 2: ATTENDANCE RECHARTS & SUMMARY */}
-          {(activeTab === 'overview' || activeTab === 'attendance') && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <PieIcon className="w-4 h-4 text-emerald-600" />
-                  <h4 className="font-black text-slate-900 text-sm">Attendance Summary &amp; Reliability</h4>
-                </div>
-                {attendanceStats.isRisk && (
-                  <span className="px-2 py-0.5 bg-rose-100 text-rose-800 text-[10px] font-black rounded-full uppercase animate-pulse">
-                    🚩 Auto-Flagged: 3+ Absences
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-center">
-                <div className="h-56 w-full flex items-center justify-center">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <PieChart>
-                      <Pie
-                        data={attendanceStats.pieData}
-                        cx="50%"
-                        cy="50%"
-                        innerRadius={50}
-                        outerRadius={75}
-                        paddingAngle={4}
-                        dataKey="value"
-                      >
-                        {attendanceStats.pieData.map((entry, index) => (
-                          <Cell key={`cell-${index}`} fill={entry.color} />
-                        ))}
-                      </Pie>
-                      <Tooltip />
-                      <Legend verticalAlign="bottom" height={36} iconType="circle" wrapperStyle={{ fontSize: 11 }} />
-                    </PieChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="space-y-2.5">
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-700">Days Present</span>
-                    <span className="font-mono font-black text-emerald-600">{attendanceStats.present} Day(s)</span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-700">Days Late</span>
-                    <span className="font-mono font-black text-amber-600">{attendanceStats.late} Day(s)</span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-700">Days Absent</span>
-                    <span className="font-mono font-black text-rose-600">{attendanceStats.absent} Day(s)</span>
-                  </div>
-                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-                    <span className="font-bold text-slate-700">Excused Absence</span>
-                    <span className="font-mono font-black text-blue-600">{attendanceStats.excused} Day(s)</span>
+                  <div>
+                    <h4 className="font-black text-slate-900 text-sm flex items-center gap-2">
+                      <span>Ratiba ya Vipindi (Class Timetable)</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-blue-100 text-blue-800">
+                        {student.className} {student.stream ? `• Mkondo ${student.stream}` : ''}
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500 font-medium">
+                      Ratiba kamili ya vipindi vya kila wiki kulingana na darasa na mkondo wako
+                    </p>
                   </div>
                 </div>
-              </div>
-            </div>
-          )}
 
-          {/* TAB 3: BEHAVIOR & DISCIPLINE HISTORY */}
-          {(activeTab === 'overview' || activeTab === 'behavior') && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                <div className="flex items-center gap-2">
-                  <ShieldAlert className="w-4 h-4 text-rose-600" />
-                  <h4 className="font-black text-slate-900 text-sm">Behavioral &amp; Discipline Logs</h4>
-                </div>
-                {onNavigateToDiscipline && (
+                <div className="flex items-center gap-2 w-full sm:w-auto justify-between sm:justify-end">
                   <button
                     type="button"
-                    onClick={() => {
-                      onNavigateToDiscipline(student);
-                      onClose();
-                    }}
-                    className="text-xs font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                    onClick={loadTimetables}
+                    disabled={isLoadingClassTimetable}
+                    className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer"
+                    title="Refresh Timetable"
                   >
-                    + Log New Incident
+                    <RefreshCw className={`w-3.5 h-3.5 ${isLoadingClassTimetable ? 'animate-spin text-blue-600' : ''}`} />
+                    <span className="hidden sm:inline">Refresh</span>
                   </button>
-                )}
+
+                  <button
+                    type="button"
+                    onClick={handlePrintClassTimetable}
+                    className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-xs"
+                  >
+                    <Printer className="w-3.5 h-3.5" />
+                    <span>Print Ratiba</span>
+                  </button>
+                </div>
               </div>
 
-              {studentDisciplineLogs.length === 0 ? (
-                <div className="p-6 bg-emerald-50/50 rounded-xl border border-emerald-100 flex items-center gap-3 text-emerald-900 text-xs">
-                  <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
-                  <div>
-                    <p className="font-bold">Clean Conduct Record</p>
-                    <p className="text-emerald-700 text-[11px]">No formal disciplinary warnings or incidents recorded for {student.name}.</p>
+              {/* Day Filter Chips */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                {['ALL', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].map(day => (
+                  <button
+                    key={day}
+                    type="button"
+                    onClick={() => setSelectedDayFilter(day)}
+                    className={`px-3 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                      selectedDayFilter === day
+                        ? 'bg-blue-600 text-white shadow-2xs'
+                        : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    {day === 'ALL' ? 'Siku Zote (All Days)' : day}
+                  </button>
+                ))}
+              </div>
+
+              {/* Loading State: Inapakia ratiba... */}
+              {isLoadingClassTimetable ? (
+                <div className="flex flex-col items-center justify-center p-10 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+                  <div className="w-8 h-8 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                  <div className="text-center">
+                    <p className="text-sm font-black text-slate-800 animate-pulse">Inapakia ratiba...</p>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Inachakata vipindi vya {student.className} Mkondo {student.stream || 'A'} kutoka kwenye seva
+                    </p>
                   </div>
                 </div>
+              ) : studentClassPeriods.length === 0 ? (
+                <div className="p-8 bg-slate-50 rounded-2xl border border-dashed border-slate-200 text-center space-y-2">
+                  <Calendar className="w-8 h-8 text-slate-300 mx-auto" />
+                  <p className="font-bold text-slate-700 text-sm">
+                    Hakuna vipindi vya ratiba vilivyopangwa kwa {student.className} ({student.stream ? `Mkondo ${student.stream}` : 'Mkondo wote'}) kwa sasa.
+                  </p>
+                  <p className="text-xs text-slate-400 max-w-md mx-auto">
+                    Mwalimu mkuu au mratibu wa ratiba akitenga vipindi kwenye mfumo kwa darasa na mkondo huu, vitaonekana hapa papo hapo.
+                  </p>
+                </div>
               ) : (
-                <div className="space-y-2">
-                  {studentDisciplineLogs.map((log, i) => (
-                    <div key={log.id || i} className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-start justify-between gap-3 text-xs">
-                      <div className="space-y-0.5">
-                        <div className="flex items-center gap-2">
-                          <span className="font-black text-slate-900">{log.title || log.category || 'Discipline Notice'}</span>
-                          <span className="px-2 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
-                            {log.category || log.status || 'Warning'}
-                          </span>
+                <div className="space-y-4">
+                  {(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const)
+                    .filter(d => selectedDayFilter === 'ALL' || selectedDayFilter === d)
+                    .map(day => {
+                      const dayPeriods = groupedClassPeriods[day] || [];
+                      if (dayPeriods.length === 0 && selectedDayFilter !== 'ALL') {
+                        return (
+                          <div key={day} className="p-4 bg-slate-50 rounded-xl text-center text-xs text-slate-400">
+                            Hakuna vipindi vilivyopangwa siku ya {day}.
+                          </div>
+                        );
+                      }
+                      if (dayPeriods.length === 0) return null;
+
+                      return (
+                        <div key={day} className="border border-slate-200 rounded-xl overflow-hidden shadow-2xs">
+                          <div className="bg-slate-800 text-white px-4 py-2 flex items-center justify-between">
+                            <span className="font-black text-xs uppercase tracking-wider">{day}</span>
+                            <span className="text-[11px] font-bold text-blue-200">
+                              {dayPeriods.length} {dayPeriods.length === 1 ? 'Kipindi' : 'Vipindi'}
+                            </span>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2.5 p-3 bg-slate-50/50">
+                            {dayPeriods.map((p, pIdx) => {
+                              const subColor = getSubjectColor(p.subject);
+                              return (
+                                <div
+                                  key={p.id || pIdx}
+                                  style={{ backgroundColor: subColor.bg, borderColor: subColor.border }}
+                                  className="p-3 rounded-xl border text-xs shadow-2xs space-y-1.5 flex flex-col justify-between"
+                                >
+                                  <div>
+                                    <div className="flex items-center justify-between gap-1 text-[10px] font-mono font-bold text-slate-600 mb-1">
+                                      <span className="bg-white/80 px-1.5 py-0.5 rounded border border-slate-200">
+                                        {p.period || `Kipindi ${pIdx + 1}`}
+                                      </span>
+                                      <span className="bg-blue-50 text-blue-800 px-1.5 py-0.5 rounded font-bold">
+                                        {p.stream === 'All Streams' ? 'Mikondo Yote' : p.stream}
+                                      </span>
+                                    </div>
+                                    <div className="font-black text-slate-900 text-sm flex items-center gap-1.5">
+                                      <BookOpen className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                      <span className="truncate">{p.subject}</span>
+                                    </div>
+                                  </div>
+
+                                  <div className="pt-1.5 border-t border-slate-200/60 flex items-center justify-between text-[11px] text-slate-600">
+                                    <span className="font-semibold flex items-center gap-1 truncate">
+                                      <User className="w-3 h-3 text-slate-400 shrink-0" />
+                                      <span className="truncate">{('teacher' in p ? (p as any).teacher : '') || (p.teacherId ? `Mwl. #${p.teacherId}` : 'Mwalimu')}</span>
+                                    </span>
+                                    {p.room && (
+                                      <span className="text-[10px] font-bold text-slate-500 flex items-center gap-0.5 shrink-0 bg-white/60 px-1.5 py-0.5 rounded">
+                                        <MapPin className="w-2.5 h-2.5" />
+                                        {p.room}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                        <p className="text-slate-600">{log.description || 'Behavioral misconduct warning logged.'}</p>
-                        <p className="text-[10px] text-slate-400 font-mono">Date: {log.date || 'N/A'} • Action: {log.actionTaken || 'Counseling'}</p>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })}
                 </div>
               )}
             </div>
           )}
 
-          {/* TAB 4: MY REMEDIAL TIMETABLE */}
+          {/* TAB: MY REMEDIAL TIMETABLE */}
           {(activeTab === 'overview' || activeTab === 'remedial') && (
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-amber-600" />
+                  <div className="p-2 bg-amber-100 text-amber-700 rounded-xl">
+                    <Clock className="w-5 h-5 text-amber-600" />
+                  </div>
                   <div>
                     <h4 className="font-black text-slate-900 text-sm">
                       My Remedial Timetable ({student.className} {student.stream ? `Stream ${student.stream}` : ''})
@@ -640,7 +676,12 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
                 </button>
               </div>
 
-              {studentRemedialSessions.length === 0 ? (
+              {isLoadingRemedial ? (
+                <div className="flex flex-col items-center justify-center p-8 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                  <div className="w-6 h-6 border-3 border-amber-600 border-t-transparent rounded-full animate-spin"></div>
+                  <p className="text-xs font-bold text-slate-700 animate-pulse">Inapakia ratiba...</p>
+                </div>
+              ) : studentRemedialSessions.length === 0 ? (
                 <div className="p-6 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center text-xs text-slate-500">
                   <Calendar className="w-6 h-6 text-slate-300 mx-auto mb-1.5" />
                   <p className="font-bold text-slate-700">Hakuna ratiba ya remedial iliyopangwa kwa darasa hili kwa sasa.</p>
@@ -689,11 +730,204 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
             </div>
           )}
 
+          {/* TAB: ACADEMICS PERFORMANCE WITH RECHARTS */}
+          {(activeTab === 'overview' || activeTab === 'academics') && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm">
+                    Subject Performance Breakdown (Marks out of 100)
+                  </h4>
+                  <p className="text-[11px] text-slate-500 font-medium">
+                    Continuous Assessment &amp; Final Exam Subject Comparison
+                  </p>
+                </div>
+                <span className="text-xs font-black text-purple-600 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200">
+                  {subjectMarksData.length} Subjects Evaluated
+                </span>
+              </div>
+
+              {subjectMarksData.length === 0 ? (
+                <div className="p-8 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-center text-xs text-slate-500">
+                  <BarChart2 className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                  <p className="font-bold text-slate-700">No subject marks registered for this student yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  <div className="h-64 w-full">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={subjectMarksData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                        <XAxis dataKey="subject" tick={{ fontSize: 10, fontWeight: 700 }} angle={-25} textAnchor="end" />
+                        <YAxis domain={[0, 100]} tick={{ fontSize: 10 }} />
+                        <Tooltip content={({ active, payload }) => {
+                          if (active && payload && payload.length) {
+                            const data = payload[0].payload;
+                            return (
+                              <div className="bg-slate-900 text-white p-2.5 rounded-xl shadow-lg text-xs space-y-1">
+                                <p className="font-bold">{data.fullSubject}</p>
+                                <p className="text-blue-300">Score: <span className="font-black text-white">{data.mark} / 100</span></p>
+                                <p className="text-amber-300 font-bold">Grade: {data.grade}</p>
+                              </div>
+                            );
+                          }
+                          return null;
+                        }} />
+                        <ReferenceLine y={50} stroke="#ef4444" strokeDasharray="3 3" />
+                        <Bar dataKey="mark" radius={[6, 6, 0, 0]}>
+                          {subjectMarksData.map((entry, index) => (
+                            <Cell key={`cell-${index}`} fill={entry.color} />
+                          ))}
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  {/* Summary Grid of Subject Badges */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-100">
+                    {subjectMarksData.map((subj, i) => (
+                      <div key={i} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
+                        <span className="text-xs font-bold text-slate-700 truncate" title={subj.fullSubject}>{subj.fullSubject}</span>
+                        <span 
+                          style={{ backgroundColor: `${subj.color}15`, color: subj.color, borderColor: `${subj.color}30` }}
+                          className="px-2 py-0.5 rounded-md text-xs font-black border"
+                        >
+                          {subj.mark}% ({subj.grade})
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* TAB: ATTENDANCE ANALYSIS WITH RECHARTS */}
+          {(activeTab === 'overview' || activeTab === 'attendance') && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm">Attendance Analysis &amp; Status</h4>
+                  <p className="text-[11px] text-slate-500 font-medium">Daily register metrics and consistency tracking</p>
+                </div>
+                <span className={`px-2.5 py-1 rounded-lg text-xs font-black ${
+                  attendanceStats.rate >= 85 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200'
+                }`}>
+                  {attendanceStats.rate}% Overall Presence
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 items-center">
+                <div className="h-44 flex items-center justify-center">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={attendanceStats.pieData}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={45}
+                        outerRadius={65}
+                        paddingAngle={4}
+                        dataKey="value"
+                      >
+                        {attendanceStats.pieData.map((entry, index) => (
+                          <Cell key={`cell-${index}`} fill={entry.color} />
+                        ))}
+                      </Pie>
+                      <Tooltip />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="md:col-span-2 grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-emerald-700 uppercase">Present</span>
+                    <span className="text-xl font-black text-emerald-900 block mt-0.5">{attendanceStats.present}</span>
+                    <span className="text-[10px] text-emerald-600 font-semibold">Days in class</span>
+                  </div>
+
+                  <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-amber-700 uppercase">Late</span>
+                    <span className="text-xl font-black text-amber-900 block mt-0.5">{attendanceStats.late}</span>
+                    <span className="text-[10px] text-amber-600 font-semibold">Tardiness</span>
+                  </div>
+
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-rose-700 uppercase">Absent</span>
+                    <span className="text-xl font-black text-rose-900 block mt-0.5">{attendanceStats.absent}</span>
+                    <span className="text-[10px] text-rose-600 font-semibold">Unexcused</span>
+                  </div>
+
+                  <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-center">
+                    <span className="text-[10px] font-bold text-blue-700 uppercase">Excused</span>
+                    <span className="text-xl font-black text-blue-900 block mt-0.5">{attendanceStats.excused}</span>
+                    <span className="text-[10px] text-blue-600 font-semibold">Authorized</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: BEHAVIOR & CONDUCT */}
+          {(activeTab === 'overview' || activeTab === 'behavior') && (
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                <div>
+                  <h4 className="font-black text-slate-900 text-sm">Discipline &amp; Character Conduct History</h4>
+                  <p className="text-[11px] text-slate-500 font-medium">Recorded merits, warnings, and behavioral actions</p>
+                </div>
+                {onNavigateToDiscipline && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClose();
+                      onNavigateToDiscipline(student);
+                    }}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <span>Add Incident</span>
+                  </button>
+                )}
+              </div>
+
+              {studentDisciplineLogs.length === 0 ? (
+                <div className="p-6 bg-emerald-50/60 border border-emerald-200 rounded-xl flex items-center gap-3 text-emerald-900">
+                  <ShieldCheck className="w-8 h-8 text-emerald-600 shrink-0" />
+                  <div>
+                    <p className="font-extrabold text-xs">Exemplary Character Conduct</p>
+                    <p className="text-[11px] text-emerald-700">No active disciplinary infractions or incidents logged on record.</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {studentDisciplineLogs.map((log, idx) => (
+                    <div
+                      key={log.id || idx}
+                      className="p-3 bg-slate-50 rounded-xl border border-slate-200 flex items-start gap-3"
+                    >
+                      <ShieldAlert className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                      <div className="flex-1 space-y-0.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-xs text-slate-900">{log.category || 'Incident'}</span>
+                          <span className="px-2 py-0.2 rounded text-[10px] font-black uppercase bg-amber-100 text-amber-800">
+                            {log.status || 'RECORDED'}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600">{log.description || log.title}</p>
+                        <p className="text-[10px] text-slate-400 font-mono">Date: {log.date || 'N/A'} • Action: {log.actionTaken || 'Counseling'}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
         {/* Footer */}
         <div className="p-4 bg-slate-100 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500">
-          <span>Haby Edu Pro • Student Comprehensive Profile View</span>
+          <span>Haby Edu Pro • Student Profile &amp; Timetable Engine</span>
           <button
             type="button"
             onClick={onClose}

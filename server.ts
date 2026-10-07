@@ -8,6 +8,12 @@ import { simpleGit } from 'simple-git';
 import AdmZip from 'adm-zip';
 import { generateAITimetable } from './src/server/timetableAILogic.ts';
 import { normalizeTzPhone, sendBeemSMS } from './src/server/smsUtils.ts';
+import {
+  queryTimetable,
+  saveTimetable,
+  deleteTimetableAssignment,
+  ServerTimetableAssignment
+} from './src/server/timetableStore.ts';
 
 dotenv.config();
 
@@ -194,6 +200,73 @@ app.post('/api/sms/send-announcement', async (req, res) => {
   } catch (error: any) {
     console.error('Error in /api/sms/send-announcement:', error);
     res.status(500).json({ success: false, error: error.message || 'Hitilafu wakati wa kutuma matangazo' });
+  }
+});
+
+// TIMETABLE REST API (Fetch, Save, Delete with Class + Stream filtering)
+app.get('/api/timetable', (req, res) => {
+  try {
+    const { schoolId, class: className, stream, teacherId, day } = req.query as Record<string, string>;
+
+    console.log(`[Timetable API] Fetching timetable for school: ${schoolId || 'DEFAULT'} | class: ${className || 'ALL'} | stream: ${stream || 'ALL'} | teacher: ${teacherId || 'ALL'}`);
+
+    const results = queryTimetable({
+      schoolId,
+      className,
+      stream,
+      teacherId,
+      day
+    });
+
+    console.log(`[Timetable API] Found ${results.length} periods for class="${className}" stream="${stream}"`);
+
+    res.json({
+      success: true,
+      count: results.length,
+      data: results,
+      periods: results
+    });
+  } catch (error: any) {
+    console.error('Error in GET /api/timetable:', error);
+    res.status(500).json({ success: false, error: error.message || 'Error fetching timetable' });
+  }
+});
+
+app.post('/api/timetable', (req, res) => {
+  try {
+    const { schoolId = 'DEFAULT_PRIMARY_SCHOOL_ID', assignments, replace = false, className, stream } = req.body;
+
+    if (!Array.isArray(assignments) && !req.body.entry) {
+      return res.status(400).json({ success: false, error: 'assignments array or entry object required' });
+    }
+
+    const toSave: ServerTimetableAssignment[] = Array.isArray(assignments)
+      ? assignments
+      : [req.body.entry];
+
+    console.log(`[Timetable API] Saving ${toSave.length} periods for school: ${schoolId} (replace: ${replace}, class: ${className}, stream: ${stream})`);
+
+    const updated = saveTimetable(schoolId, toSave, { replace, className, stream });
+
+    res.json({
+      success: true,
+      count: updated.length,
+      data: updated
+    });
+  } catch (error: any) {
+    console.error('Error in POST /api/timetable:', error);
+    res.status(500).json({ success: false, error: error.message || 'Error saving timetable' });
+  }
+});
+
+app.delete('/api/timetable', (req, res) => {
+  try {
+    const { schoolId = 'DEFAULT_PRIMARY_SCHOOL_ID', id, className, stream, day, period } = req.body;
+    const deleted = deleteTimetableAssignment(schoolId, { id, className, stream, day, period });
+    res.json({ success: true, deleted });
+  } catch (error: any) {
+    console.error('Error in DELETE /api/timetable:', error);
+    res.status(500).json({ success: false, error: error.message || 'Error deleting timetable' });
   }
 });
 

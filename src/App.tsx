@@ -49,6 +49,7 @@ import {
   checkSupabaseHealth 
 } from './lib/supabaseClient';
 import { saveSchoolData, getSchoolData, subscribeSchoolData } from './lib/firestoreService';
+import { saveTimetableAssignments } from './lib/timetableService';
 import { Loader2, Shield, Menu, RotateCw, Check } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
 import { db } from './lib/firebase';
@@ -456,9 +457,15 @@ export default function App() {
             );
           }
         }
+
+        if (updates.timetableAssignments && Array.isArray(updates.timetableAssignments)) {
+          await saveTimetableAssignments(schoolId, updates.timetableAssignments);
+        }
       } catch (err) {
-        console.warn("Supabase upsert sync warning:", err);
+        console.warn("Supabase / Timetable upsert sync warning:", err);
       }
+    } else if (updates.timetableAssignments && Array.isArray(updates.timetableAssignments)) {
+      saveTimetableAssignments(schoolId, updates.timetableAssignments).catch(e => console.warn("Local timetable save error:", e));
     }
   }, [userAccount]);
 

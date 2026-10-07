@@ -68,7 +68,7 @@ const ALL_REMEDIAL_CLASSES = [
   ...REMEDIAL_SECONDARY_CLASSES
 ];
 
-const STREAM_OPTIONS = ['A', 'B', 'C', 'D', 'All Streams'];
+const STREAM_OPTIONS = ['A', 'B', 'C', 'D', 'E', 'All Streams'];
 
 export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({ 
   schoolId, 
@@ -275,6 +275,7 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
         message: `Ratiba ya Remedial ya ${formData.class_name} (${formData.stream}) imehifadhiwa kikamilifu!`
       });
       setIsModalOpen(false);
+      resetForm();
       loadTimetable();
     } catch (err: any) {
       console.error("Save remedial error:", err);
@@ -345,14 +346,14 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-xl sm:text-2xl font-black uppercase tracking-tight text-white">
-                  Remedial Timetable Management
+                  REMEDIAL TIMETABLE SETUP
                 </h2>
                 <span className="px-2.5 py-0.5 bg-amber-400 text-slate-900 font-extrabold text-[10px] rounded-full uppercase">
-                  Class Specific
+                  Class &amp; Stream Specific
                 </span>
               </div>
               <p className="text-xs text-blue-200 mt-1 font-medium max-w-2xl">
-                Panga ratiba ya masomo ya ziada (Remedial) kwa kila darasa na mkondo wake kuzuia migongano ya walimu na kutoa taarifa sahihi.
+                Sanidi ratiba ya masomo ya ziada asubuhi na jioni kwa kila darasa na mkondo wake kuzuia migongano ya walimu na kurahisisha malipo.
               </p>
             </div>
           </div>
@@ -366,14 +367,6 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
               <Download className="w-4 h-4 text-blue-700" />
               <span>Print Timetable PDF</span>
             </button>
-
-            <button
-              onClick={handleOpenAdd}
-              className="px-4 py-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 font-black text-xs rounded-xl shadow-md flex items-center gap-2 cursor-pointer transition-all hover:scale-[1.02] active:scale-[0.98]"
-            >
-              <Plus className="w-4 h-4 text-slate-950" />
-              <span>Add New Timetable (Weka Mpya)</span>
-            </button>
           </div>
         </div>
       </div>
@@ -381,7 +374,9 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
       {/* Remedial Key Executive Dashboard Summary */}
       <RemedialDashboardSummary
         schoolId={schoolId}
-        onQuickAddSchedule={handleOpenAdd}
+        onQuickAddSchedule={() => {
+          window.scrollTo({ top: 300, behavior: 'smooth' });
+        }}
       />
 
       {/* Alert / Toast message */}
@@ -403,19 +398,75 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
         </div>
       )}
 
-      {/* Big Filter & Search Bar */}
-      <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs space-y-3">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div className="flex flex-wrap items-center gap-2.5 flex-1">
-            {/* Filter by Darasa */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Darasa:</span>
+      {/* MAIN TWO-COLUMN WORKSPACE: LEFT FORM & RIGHT TIMETABLE TABLE */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        
+        {/* LEFT COLUMN: + ONGEZA KIPINDI KIPYA (Direct Form with Chagua Mkondo) */}
+        <div className="lg:col-span-4 bg-white border border-slate-200 rounded-2xl shadow-xs p-5 space-y-4">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
+            <Plus className="w-4 h-4 text-blue-700" />
+            <h3 className="font-black text-sm uppercase text-slate-900 tracking-tight">
+              + ONGEZA KIPINDI KIPYA
+            </h3>
+          </div>
+
+          <form onSubmit={handleSave} className="space-y-3.5">
+            {/* SIKU YA WIKI & TAREHE */}
+            <div>
+              <label className="block text-[11px] font-black text-slate-700 uppercase mb-1">
+                TAREHE NA SIKU YA WIKI <span className="text-rose-500">*</span>
+              </label>
+              <input
+                type="date"
+                value={formData.date}
+                onChange={e => setFormData({ ...formData, date: e.target.value })}
+                className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                required
+              />
+              <span className="text-[10px] text-blue-700 font-bold mt-0.5 block">
+                Siku: {selectedDayOfWeek}
+              </span>
+            </div>
+
+            {/* MUDA WA KIPINDI (START & END) */}
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="block text-[11px] font-black text-slate-700 uppercase mb-1">
+                  MUDA KUANZA <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="time"
+                  value={formData.start_time}
+                  onChange={e => setFormData({ ...formData, start_time: e.target.value })}
+                  className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold font-mono text-slate-800 focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-black text-slate-700 uppercase mb-1">
+                  MUDA KUICHA <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="time"
+                  value={formData.end_time}
+                  onChange={e => setFormData({ ...formData, end_time: e.target.value })}
+                  className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold font-mono text-slate-800 focus:ring-2 focus:ring-blue-500"
+                  required
+                />
+              </div>
+            </div>
+
+            {/* KIDATO / DARASA */}
+            <div>
+              <label className="block text-[11px] font-black text-slate-700 uppercase mb-1">
+                KIDATO (CLASS) / DARASA <span className="text-rose-500">*</span>
+              </label>
               <select
-                value={classFilter}
-                onChange={e => setClassFilter(e.target.value)}
-                className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                value={formData.class_name}
+                onChange={e => setFormData({ ...formData, class_name: e.target.value })}
+                className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                required
               >
-                <option value="ALL">All Classes (Madarasa Yote)</option>
                 <optgroup label="Pre-Primary / Nursery">
                   {REMEDIAL_NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
                 </optgroup>
@@ -428,174 +479,304 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
               </select>
             </div>
 
-            {/* Filter by Mkondo */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Mkondo:</span>
+            {/* CHAGUA MKONDO (STREAM) - PROMINENT & EXPLICIT */}
+            <div className="p-3 bg-blue-50/60 border border-blue-200 rounded-xl space-y-1">
+              <label className="block text-[11px] font-black text-blue-950 uppercase flex items-center justify-between">
+                <span>CHAGUA MKONDO (STREAM) <span className="text-rose-500">*</span></span>
+                <span className="text-[10px] text-blue-700 font-bold">Class-Specific</span>
+              </label>
               <select
-                value={streamFilter}
-                onChange={e => setStreamFilter(e.target.value)}
-                className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                value={formData.stream}
+                onChange={e => setFormData({ ...formData, stream: e.target.value })}
+                className="w-full p-2 bg-white border border-blue-300 rounded-lg text-xs font-black text-slate-900 focus:ring-2 focus:ring-blue-500"
+                required
               >
-                <option value="ALL">All Streams (Mikondo Yote)</option>
-                {STREAM_OPTIONS.map(s => <option key={s} value={s}>Stream {s}</option>)}
+                {STREAM_OPTIONS.map(s => (
+                  <option key={s} value={s}>
+                    {s === 'All Streams' ? 'Mikondo Yote (All Streams: A, B, C, D)' : `Stream ${s} (Mkondo ${s})`}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[10px] text-blue-800 font-semibold block mt-1">
+                {formData.stream === 'All Streams'
+                  ? `Inahifadhiwa kwa mikondo yote ya ${formData.class_name}.`
+                  : `Inahifadhiwa tu kwa ${formData.class_name} Mkondo ${formData.stream}, sio shule nzima.`}
+              </span>
+            </div>
+
+            {/* SOMO (SUBJECT) */}
+            <div>
+              <label className="block text-[11px] font-black text-slate-700 uppercase mb-1">
+                SOMO (SUBJECT) <span className="text-rose-500">*</span>
+              </label>
+              <select
+                value={formData.subject}
+                onChange={e => setFormData({ ...formData, subject: e.target.value })}
+                className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                required
+              >
+                {dynamicSubjects.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
             </div>
 
-            {/* Filter by Date */}
-            <div className="flex items-center gap-1.5">
-              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Tarehe:</span>
+            {/* MWALIMU (TEACHER) */}
+            <div>
+              <label className="block text-[11px] font-black text-slate-700 uppercase mb-1">
+                MWALIMU (TEACHER) <span className="text-rose-500">*</span>
+              </label>
+              <select
+                value={formData.teacher_name}
+                onChange={e => setFormData({ ...formData, teacher_name: e.target.value })}
+                className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                required
+              >
+                <option value="">-- Chagua Mwalimu --</option>
+                {teachers.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+              </select>
+            </div>
+
+            {/* CHUMBA / ROOM */}
+            <div>
+              <label className="block text-[11px] font-black text-slate-700 uppercase mb-1">
+                CHUMBA / VENUE (OPTIONAL)
+              </label>
               <input
-                type="date"
-                value={dateFilter}
-                onChange={e => setDateFilter(e.target.value)}
-                className="px-3 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                type="text"
+                placeholder="e.g. Room 5A, Hall 1"
+                value={formData.room}
+                onChange={e => setFormData({ ...formData, room: e.target.value })}
+                className="w-full p-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
               />
-              {dateFilter && (
-                <button
-                  onClick={() => setDateFilter('')}
-                  className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
-                >
-                  Clear
-                </button>
+            </div>
+
+            {/* TUMA NOTIFICATION */}
+            <div className="p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="inline_notify_students"
+                checked={formData.notify_students}
+                onChange={e => setFormData({ ...formData, notify_students: e.target.checked })}
+                className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+              />
+              <label htmlFor="inline_notify_students" className="text-[11px] font-bold text-slate-700 cursor-pointer flex items-center gap-1">
+                <Bell className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                <span>Tuma arifa kwa wanafunzi wa {formData.class_name} ({formData.stream})</span>
+              </label>
+            </div>
+
+            {/* SUBMIT BUTTON */}
+            <button
+              type="submit"
+              disabled={saving}
+              className="w-full py-2.5 bg-gradient-to-r from-blue-700 to-indigo-800 hover:from-blue-800 hover:to-indigo-900 text-white font-black text-xs rounded-xl shadow-md cursor-pointer transition flex items-center justify-center gap-2"
+            >
+              {saving ? (
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              ) : (
+                <CheckCircle2 className="w-4 h-4" />
               )}
+              <span>+ HIFADHI KWENYE RATIBA</span>
+            </button>
+          </form>
+        </div>
+
+        {/* RIGHT COLUMN: RATIBA YA REMEDIAL ILIYOPO */}
+        <div className="lg:col-span-8 space-y-4">
+          {/* Big Filter & Search Bar */}
+          <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-xs space-y-3">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2 flex-1">
+                {/* Filter by Darasa */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Darasa:</span>
+                  <select
+                    value={classFilter}
+                    onChange={e => setClassFilter(e.target.value)}
+                    className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ALL">Madarasa Yote</option>
+                    <optgroup label="Pre-Primary / Nursery">
+                      {REMEDIAL_NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
+                    <optgroup label="Primary School">
+                      {REMEDIAL_PRIMARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
+                    <optgroup label="Secondary School">
+                      {REMEDIAL_SECONDARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    </optgroup>
+                  </select>
+                </div>
+
+                {/* Filter by Mkondo */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Mkondo:</span>
+                  <select
+                    value={streamFilter}
+                    onChange={e => setStreamFilter(e.target.value)}
+                    className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ALL">Mikondo Yote</option>
+                    {STREAM_OPTIONS.map(s => <option key={s} value={s}>Stream {s}</option>)}
+                  </select>
+                </div>
+
+                {/* Filter by Date */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Tarehe:</span>
+                  <input
+                    type="date"
+                    value={dateFilter}
+                    onChange={e => setDateFilter(e.target.value)}
+                    className="px-2.5 py-1.5 bg-slate-50 border border-slate-300 rounded-lg text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                  />
+                  {dateFilter && (
+                    <button
+                      onClick={() => setDateFilter('')}
+                      className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Search Input */}
+              <div className="relative w-full md:w-56">
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                <input
+                  type="text"
+                  placeholder="Search subject, teacher..."
+                  value={searchQuery}
+                  onChange={e => setSearchQuery(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
             </div>
           </div>
 
-          {/* Search Input */}
-          <div className="relative w-full md:w-64">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-            <input
-              type="text"
-              placeholder="Search teacher, subject, room..."
-              value={searchQuery}
-              onChange={e => setSearchQuery(e.target.value)}
-              className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-        </div>
-      </div>
+          {/* Main Big Timetable Table */}
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+            <div className="p-4 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Clock className="w-4 h-4 text-blue-600" />
+                <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 uppercase">
+                  RATIBA YA REMEDIAL ILIYOPO ({filteredEntries.length} VIPINDI)
+                </h3>
+              </div>
 
-      {/* Main Big Timetable Table */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-xs overflow-hidden">
-        <div className="p-4 border-b border-slate-200 bg-slate-50/70 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Clock className="w-4 h-4 text-blue-600" />
-            <h3 className="font-extrabold text-xs sm:text-sm text-slate-900 uppercase">
-              Orodha ya Ratiba za Remedial ({filteredEntries.length} Vipindi)
-            </h3>
-          </div>
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                <span>Viewing:</span>
+                <span className="px-2 py-0.5 bg-blue-100 text-blue-800 font-bold rounded">
+                  {classFilter !== 'ALL' ? classFilter : 'All Classes'} {streamFilter !== 'ALL' ? `(Stream ${streamFilter})` : ''}
+                </span>
+              </div>
+            </div>
 
-          <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
-            <span>Viewing:</span>
-            <span className="px-2 py-0.5 bg-blue-100 text-blue-800 font-bold rounded">
-              {classFilter !== 'ALL' ? classFilter : 'All Classes'} {streamFilter !== 'ALL' ? `(${streamFilter})` : ''}
-            </span>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse text-left text-xs">
-            <thead className="bg-slate-100/80 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
-              <tr>
-                <th className="p-3 border-r border-slate-200 w-10 text-center">#</th>
-                <th className="p-3 border-r border-slate-200">Siku &amp; Tarehe</th>
-                <th className="p-3 border-r border-slate-200">Muda (Time)</th>
-                <th className="p-3 border-r border-slate-200">Darasa &amp; Mkondo</th>
-                <th className="p-3 border-r border-slate-200">Somo (Subject)</th>
-                <th className="p-3 border-r border-slate-200">Mwalimu (Teacher)</th>
-                <th className="p-3 border-r border-slate-200">Chumba / Venue</th>
-                <th className="p-3 text-center w-28">Hatua (Actions)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {loading ? (
-                <tr>
-                  <td colSpan={8} className="p-8 text-center text-slate-400 font-bold">
-                    Inapakia ratiba ya remedial...
-                  </td>
-                </tr>
-              ) : filteredEntries.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="p-12 text-center text-slate-400">
-                    <Calendar className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <p className="font-bold text-slate-600">Hakuna vipindi vya remedial vilivyopatikana.</p>
-                    <p className="text-xs text-slate-400 mt-1">Bonyeza &ldquo;Add New Timetable&rdquo; kuanzisha ratiba mpya ya darasa.</p>
-                  </td>
-                </tr>
-              ) : (
-                filteredEntries.map((item, idx) => (
-                  <tr key={item.id || idx} className="hover:bg-blue-50/40 transition-colors">
-                    <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-400">
-                      {idx + 1}
-                    </td>
-                    <td className="p-3 border-r border-slate-200">
-                      <div className="font-extrabold text-[#1f4d8b] uppercase">{item.day_of_week}</div>
-                      <div className="text-[11px] text-slate-500 font-mono">{item.date || '-'}</div>
-                    </td>
-                    <td className="p-3 border-r border-slate-200">
-                      <span className="px-2 py-0.5 bg-blue-50 text-blue-900 border border-blue-200 rounded font-mono font-bold text-xs">
-                        {item.start_time && item.end_time ? `${item.start_time} - ${item.end_time}` : item.period_time}
-                      </span>
-                    </td>
-                    <td className="p-3 border-r border-slate-200">
-                      <div className="font-extrabold text-slate-900">{item.class_name}</div>
-                      <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
-                        {item.stream === 'All Streams' ? 'All Streams (A,B,C,D)' : `Stream ${item.stream}`}
-                      </span>
-                    </td>
-                    <td className="p-3 border-r border-slate-200">
-                      <div className="font-extrabold text-slate-900 flex items-center gap-1.5">
-                        <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                        <span>{item.subject}</span>
-                      </div>
-                    </td>
-                    <td className="p-3 border-r border-slate-200">
-                      <div className="font-bold text-slate-800 flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-slate-500" />
-                        <span>{item.teacher_name}</span>
-                      </div>
-                    </td>
-                    <td className="p-3 border-r border-slate-200">
-                      <span className="text-slate-600 font-medium">
-                        {item.room || `${item.class_name} Room`}
-                      </span>
-                    </td>
-                    <td className="p-3 text-center">
-                      <div className="flex items-center justify-center gap-1.5">
-                        <button
-                          onClick={() => handleOpenEdit(item)}
-                          className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
-                          title="Edit this remedial session"
-                        >
-                          <Edit3 className="w-4 h-4" />
-                        </button>
-                        <button
-                          onClick={() => handleDelete(item.id)}
-                          className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
-                          title="Delete this remedial session"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-left text-xs">
+                <thead className="bg-slate-100/80 border-b border-slate-200 text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                  <tr>
+                    <th className="p-3 border-r border-slate-200 w-10 text-center">#</th>
+                    <th className="p-3 border-r border-slate-200">Siku &amp; Tarehe</th>
+                    <th className="p-3 border-r border-slate-200">Muda (Time)</th>
+                    <th className="p-3 border-r border-slate-200">Darasa &amp; Mkondo</th>
+                    <th className="p-3 border-r border-slate-200">Somo (Subject)</th>
+                    <th className="p-3 border-r border-slate-200">Mwalimu (Teacher)</th>
+                    <th className="p-3 border-r border-slate-200">Chumba</th>
+                    <th className="p-3 text-center w-24">Hatua</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {loading ? (
+                    <tr>
+                      <td colSpan={8} className="p-8 text-center text-slate-400 font-bold">
+                        Inapakia ratiba ya remedial...
+                      </td>
+                    </tr>
+                  ) : filteredEntries.length === 0 ? (
+                    <tr>
+                      <td colSpan={8} className="p-12 text-center text-slate-400">
+                        <Calendar className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                        <p className="font-bold text-slate-600">Hakuna vipindi vilivyopangwa bado.</p>
+                        <p className="text-xs text-slate-400 mt-1">Tumia fomu ya kushoto kuweka kipindi kipya cha darasa na mkondo wake.</p>
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredEntries.map((item, idx) => (
+                      <tr key={item.id || idx} className="hover:bg-blue-50/40 transition-colors">
+                        <td className="p-3 border-r border-slate-200 text-center font-bold text-slate-400">
+                          {idx + 1}
+                        </td>
+                        <td className="p-3 border-r border-slate-200">
+                          <div className="font-extrabold text-[#1f4d8b] uppercase">{item.day_of_week}</div>
+                          <div className="text-[11px] text-slate-500 font-mono">{item.date || '-'}</div>
+                        </td>
+                        <td className="p-3 border-r border-slate-200">
+                          <span className="px-2 py-0.5 bg-blue-50 text-blue-900 border border-blue-200 rounded font-mono font-bold text-xs">
+                            {item.start_time && item.end_time ? `${item.start_time} - ${item.end_time}` : item.period_time}
+                          </span>
+                        </td>
+                        <td className="p-3 border-r border-slate-200">
+                          <div className="font-extrabold text-slate-900">{item.class_name}</div>
+                          <span className="text-[10px] font-black text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-200">
+                            {item.stream === 'All Streams' ? 'Mikondo Yote' : `Mkondo ${item.stream}`}
+                          </span>
+                        </td>
+                        <td className="p-3 border-r border-slate-200">
+                          <div className="font-extrabold text-slate-900 flex items-center gap-1.5">
+                            <BookOpen className="w-3.5 h-3.5 text-blue-600" />
+                            <span>{item.subject}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 border-r border-slate-200">
+                          <div className="font-bold text-slate-800 flex items-center gap-1.5">
+                            <User className="w-3.5 h-3.5 text-slate-500" />
+                            <span>{item.teacher_name}</span>
+                          </div>
+                        </td>
+                        <td className="p-3 border-r border-slate-200">
+                          <span className="text-slate-600 font-medium">
+                            {item.room || `${item.class_name} Room`}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center">
+                          <div className="flex items-center justify-center gap-1">
+                            <button
+                              onClick={() => handleOpenEdit(item)}
+                              className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-lg transition cursor-pointer"
+                              title="Edit"
+                            >
+                              <Edit3 className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => handleDelete(item.id)}
+                              className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition cursor-pointer"
+                              title="Delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
         </div>
+
       </div>
 
-      {/* ADD / EDIT REMEDIAL TIMETABLE MODAL */}
+      {/* EDIT MODAL */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto animate-in fade-in duration-200">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-xl overflow-hidden my-8">
-            {/* Modal Header */}
             <div className="bg-[#1f4d8b] text-white p-5 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Calendar className="w-5 h-5 text-amber-400" />
                 <h3 className="font-black text-sm uppercase tracking-wide">
-                  {editingEntryId ? 'Edit Remedial Session' : 'Weka Ratiba Mpya ya Remedial (Add New)'}
+                  {editingEntryId ? 'Hariri Kipindi cha Remedial (Edit Session)' : 'Weka Ratiba Mpya ya Remedial'}
                 </h3>
               </div>
               <button
@@ -606,7 +787,6 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
               </button>
             </div>
 
-            {/* Modal Form */}
             <form onSubmit={handleSave} className="p-6 space-y-4">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 {/* Chagua Darasa */}
@@ -751,12 +931,12 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
               <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl flex items-center gap-2.5">
                 <input
                   type="checkbox"
-                  id="notify_students"
+                  id="modal_notify_students"
                   checked={formData.notify_students}
                   onChange={e => setFormData({ ...formData, notify_students: e.target.checked })}
                   className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
                 />
-                <label htmlFor="notify_students" className="text-xs font-bold text-blue-900 cursor-pointer flex items-center gap-1.5">
+                <label htmlFor="modal_notify_students" className="text-xs font-bold text-blue-900 cursor-pointer flex items-center gap-1.5">
                   <Bell className="w-3.5 h-3.5 text-blue-600" />
                   <span>Tuma taarifa kwa wanafunzi wa {formData.class_name} ({formData.stream}) ratiba inapowekwa</span>
                 </label>
@@ -781,7 +961,7 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
                   ) : (
                     <CheckCircle2 className="w-4 h-4" />
                   )}
-                  <span>{editingEntryId ? 'Hifadhi Mabadiliko' : 'Hifadhi Ratiba (Save Session)'}</span>
+                  <span>Hifadhi Mabadiliko</span>
                 </button>
               </div>
             </form>
@@ -791,3 +971,4 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
     </div>
   );
 };
+

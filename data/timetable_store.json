@@ -1,0 +1,176 @@
+{
+  "TEST_SCHOOL_123": [
+    {
+      "id": 101,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 1 (08:00-08:40)",
+      "subject": "Mathematics",
+      "teacherId": 1
+    },
+    {
+      "id": 102,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 2 (08:40-09:20)",
+      "subject": "English",
+      "teacherId": 2
+    },
+    {
+      "id": 103,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 3 (09:20-10:00)",
+      "subject": "Kiswahili",
+      "teacherId": 3
+    },
+    {
+      "id": 104,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 4 (10:20-11:00)",
+      "subject": "Science",
+      "teacherId": 1
+    },
+    {
+      "id": 105,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Tuesday",
+      "period": "Period 1 (08:00-08:40)",
+      "subject": "Social Studies",
+      "teacherId": 4
+    },
+    {
+      "id": 106,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Tuesday",
+      "period": "Period 2 (08:40-09:20)",
+      "subject": "Civics",
+      "teacherId": 2
+    },
+    {
+      "id": 107,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Tuesday",
+      "period": "Period 3 (09:20-10:00)",
+      "subject": "Mathematics",
+      "teacherId": 1
+    },
+    {
+      "id": 108,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Tuesday",
+      "period": "Period 4 (10:20-11:00)",
+      "subject": "Vocational Skills",
+      "teacherId": 5
+    },
+    {
+      "id": 201,
+      "className": "Class 5",
+      "stream": "STREAM A",
+      "day": "Monday",
+      "period": "Period 1 (08:00-08:40)",
+      "subject": "Geography",
+      "teacherId": 6
+    },
+    {
+      "id": 202,
+      "className": "Class 6",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 1 (08:00-08:40)",
+      "subject": "History",
+      "teacherId": 7
+    }
+  ],
+  "DEFAULT_PRIMARY_SCHOOL_ID": [
+    {
+      "id": 1001,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 1 (08:00-08:40)",
+      "subject": "Mathematics",
+      "teacherId": 1,
+      "room": "Room 5A"
+    },
+    {
+      "id": 1002,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 2 (08:40-09:20)",
+      "subject": "English Language",
+      "teacherId": 2,
+      "room": "Room 5A"
+    },
+    {
+      "id": 1003,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 3 (09:20-10:00)",
+      "subject": "Kiswahili",
+      "teacherId": 3,
+      "room": "Room 5A"
+    },
+    {
+      "id": 1004,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Monday",
+      "period": "Period 4 (10:20-11:00)",
+      "subject": "Science & Technology",
+      "teacherId": 1,
+      "room": "Room 5A"
+    },
+    {
+      "id": 1005,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Tuesday",
+      "period": "Period 1 (08:00-08:40)",
+      "subject": "Social Studies",
+      "teacherId": 4,
+      "room": "Room 5A"
+    },
+    {
+      "id": 1006,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Tuesday",
+      "period": "Period 2 (08:40-09:20)",
+      "subject": "Civic & Moral Education",
+      "teacherId": 2,
+      "room": "Room 5A"
+    },
+    {
+      "id": 1007,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Tuesday",
+      "period": "Period 3 (09:20-10:00)",
+      "subject": "Mathematics",
+      "teacherId": 1,
+      "room": "Room 5A"
+    },
+    {
+      "id": 1008,
+      "className": "Class 5",
+      "stream": "Mkondo Lebona",
+      "day": "Tuesday",
+      "period": "Period 4 (10:20-11:00)",
+      "subject": "Vocational Skills",
+      "teacherId": 5,
+      "room": "Room 5A"
+    }
+  ]
+}
