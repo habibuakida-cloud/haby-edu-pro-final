@@ -1,0 +1,68 @@
+{
+  "entities": {
+    "School": {
+      "title": "School Snapshot",
+      "description": "Full snapshot of school data for cross-device sync",
+      "type": "object",
+      "properties": {
+        "schoolInfo": { "type": "object" },
+        "students": { "type": "array" },
+        "teachers": { "type": "array" },
+        "exams": { "type": "array" },
+        "timetableAssignments": { "type": "array" },
+        "periodSettings": { "type": "array" },
+        "streamSettings": { "type": "array" },
+        "disciplineRecords": { "type": "array" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["updatedAt"]
+    },
+    "Attendance": {
+      "title": "Period Attendance",
+      "description": "Daily record of a specific teaching period",
+      "type": "object",
+      "properties": {
+        "school_id": { "type": "string", "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "date": { "type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$" },
+        "day_of_week": { "type": "string" },
+        "period_number": { "type": "integer" },
+        "class_name": { "type": "string" },
+        "stream": { "type": "string" },
+        "subject": { "type": "string" },
+        "teacher_name": { "type": "string" },
+        "status": { "type": "string", "enum": ["taught", "not_taught"] },
+        "reason": { "type": "string" },
+        "marked_at": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["school_id", "date", "period_number", "class_name", "status", "updatedAt"]
+    },
+    "SubscriptionData": {
+      "title": "SubscriptionData",
+      "description": "Taarifa za usajili na muda wa majaribio wa shule",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "trialStartedAt": { "type": "string", "format": "date-time" },
+        "subscriptionExpiry": { "type": "string", "format": "date-time" },
+        "subscriptionType": { "type": "string" },
+        "isActive": { "type": "boolean" }
+      },
+      "required": ["schoolId", "trialStartedAt", "subscriptionExpiry", "subscriptionType", "isActive"]
+    }
+  },
+  "firestore": {
+    "/schools/{schoolId}": {
+      "schema": "School",
+      "description": "Snapshots of school academic data"
+    },
+    "/period_attendance/{attendanceId}": {
+      "schema": "Attendance",
+      "description": "Individual period attendance records"
+    },
+    "/school_subscriptions/{schoolId}": {
+      "schema": "SubscriptionData",
+      "description": "Usajili wa shule"
+    }
+  }
+}

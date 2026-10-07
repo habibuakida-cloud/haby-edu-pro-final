@@ -1,0 +1,6 @@
+{
+  "name": "HABY EDU PRO - School Timetable & Management",
+  "description": "Comprehensive school timetable generator, teaching schedule editor with drag-and-drop rescheduling, invigilation manager, student records, and CSV/PDF export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

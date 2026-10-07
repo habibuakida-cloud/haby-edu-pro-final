@@ -1,0 +1,196 @@
+@import "tailwindcss";
+
+@layer utilities {
+  @media print {
+    @page {
+      size: auto;
+      margin: 8mm 8mm;
+    }
+    
+    @page :landscape {
+      size: landscape;
+      margin: 6mm 6mm;
+    }
+
+    *, *::before, *::after {
+      text-shadow: none !important;
+      box-shadow: none !important;
+      filter: none !important;
+      backdrop-filter: none !important;
+    }
+
+    html, body {
+      background: #ffffff !important;
+      color: #000000 !important;
+      font-size: 10pt !important;
+      line-height: 1.3 !important;
+      -webkit-print-color-adjust: exact !important;
+      print-color-adjust: exact !important;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    /* Completely hide all non-printable chrome, navigation, headers, footers, and modal overlays */
+    .no-print, 
+    header, 
+    nav, 
+    aside, 
+    footer,
+    button:not(.printable-button),
+    input[type="button"],
+    input[type="submit"],
+    .mobile-header,
+    .bubble-container,
+    .toast,
+    .modal-backdrop,
+    [class*="backdrop-blur"],
+    [class*="bg-slate-900/"],
+    [class*="bg-black/"],
+    .print\:hidden {
+      display: none !important;
+      visibility: hidden !important;
+      height: 0 !important;
+      width: 0 !important;
+      margin: 0 !important;
+      padding: 0 !important;
+    }
+
+    #official-class-journal-printable {
+      display: block !important;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+      overflow: visible !important;
+      font-family: 'Inter', system-ui, sans-serif !important;
+    }
+
+    #official-class-journal-printable table {
+      font-size: 8pt !important;
+      line-height: 1.2 !important;
+      border: 1px solid #000000 !important;
+    }
+
+    #official-class-journal-printable th {
+      background-color: #f1f5f9 !important;
+      color: #000000 !important;
+      border: 1px solid #000000 !important;
+      padding: 4px !important;
+    }
+
+    #official-class-journal-printable td {
+      border: 1px solid #000000 !important;
+      padding: 4px !important;
+    }
+
+    /* Unclip and elevate all printable containers for clean full-page printing */
+    .print-area,
+    #registered-students-print-table,
+    #results-pdf-print-area,
+    #report-card-print-area,
+    #sitting-plan-print,
+    #timetable-print,
+    #student-id-print-area,
+    #teaching-tracker-print,
+    #parent-report-print,
+    .printable-modal-content {
+      position: static !important;
+      display: block !important;
+      width: 100% !important;
+      margin: 0 !important;
+      padding: 0 !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+      overflow: visible !important;
+      z-index: auto !important;
+    }
+
+    /* High-contrast crisp tables with solid black borders and clear typography */
+    table,
+    table.printable-records-table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      page-break-inside: auto !important;
+      break-inside: auto !important;
+      font-size: 8.5pt !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+      margin-top: 4px !important;
+      margin-bottom: 4px !important;
+    }
+
+    thead {
+      display: table-header-group !important;
+      background-color: #f1f5f9 !important;
+    }
+
+    thead th {
+      background-color: #f1f5f9 !important;
+      color: #000000 !important;
+      font-weight: 800 !important;
+      border: 1px solid #000000 !important;
+      padding: 3px 4px !important;
+      text-transform: uppercase !important;
+      text-align: center !important;
+    }
+
+    tbody tr {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+    }
+
+    td {
+      border: 1px solid #000000 !important;
+      padding: 3px 4px !important;
+      color: #000000 !important;
+      background: #ffffff !important;
+    }
+
+    /* Ultra-compact broadsheet ledger styling */
+    table.printable-records-table th, 
+    table.printable-records-table td {
+      border: 1px solid #000000 !important;
+      padding: 2px 3px !important;
+      font-size: 7.5pt !important;
+      line-height: 1.15 !important;
+    }
+
+    /* High-contrast text & badges */
+    span, p, h1, h2, h3, h4, h5, h6, div {
+      color: #000000 !important;
+    }
+
+    /* Keep official letterheads, headers & signatures clearly structured */
+    .print\:block {
+      display: block !important;
+    }
+
+    .print\:inline-block {
+      display: inline-block !important;
+    }
+
+    .print\:flex {
+      display: flex !important;
+    }
+
+    /* Pagination controls */
+    .page-break,
+    .print\:page-break-after {
+      page-break-after: always !important;
+      break-after: page !important;
+    }
+
+    .avoid-break,
+    .print\:avoid-break,
+    .id-card-print-badge,
+    .id-card-badge,
+    .sitting-plan-card,
+    .report-card-container {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
+      border: 1px solid #000000 !important;
+    }
+  }
+}

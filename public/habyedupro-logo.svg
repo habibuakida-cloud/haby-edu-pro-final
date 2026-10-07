@@ -1,0 +1,101 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 280" width="100%" height="100%">
+  <defs>
+    <!-- Gradients for 3D stylized H -->
+    <linearGradient id="blueStemGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#19488a"/>
+      <stop offset="40%" stop-color="#10366b"/>
+      <stop offset="100%" stop-color="#0a2144"/>
+    </linearGradient>
+    <linearGradient id="blueStemLight" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#2a5ea7"/>
+      <stop offset="100%" stop-color="#153e77"/>
+    </linearGradient>
+    <linearGradient id="goldCapTop" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fed766"/>
+      <stop offset="45%" stop-color="#f59e0b"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="goldCapSide" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#e69500"/>
+      <stop offset="100%" stop-color="#b45309"/>
+    </linearGradient>
+    <linearGradient id="goldTrace" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#fde047"/>
+      <stop offset="100%" stop-color="#eab308"/>
+    </linearGradient>
+    <filter id="shadow3d" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="3" dy="8" stdDeviation="6" flood-color="#08182b" flood-opacity="0.35"/>
+    </filter>
+    <filter id="glowGold" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="1.5" result="glow"/>
+      <feComposite in="SourceGraphic" in2="glow" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- Left Icon: 3D Cap + Tech H -->
+  <g transform="translate(30, 20)" filter="url(#shadow3d)">
+    <!-- 3D Bevel Base & Drop Shadow of H -->
+    <path d="M 64 85 L 86 85 L 86 142 L 124 142 L 124 85 L 146 85 L 146 225 L 124 225 L 124 165 L 86 165 L 86 225 L 64 225 Z" fill="#071933" opacity="0.4" transform="translate(4, 6)"/>
+
+    <!-- Left Pillar of H -->
+    <path d="M 60 80 L 88 80 L 88 220 L 60 220 Z" fill="url(#blueStemGrad)" stroke="#1e5196" stroke-width="1.5"/>
+    <!-- Left Pillar 3D Side Bevel -->
+    <path d="M 88 80 L 93 84 L 93 224 L 88 220 Z" fill="#0d284f"/>
+
+    <!-- Horizontal Bar of H -->
+    <path d="M 88 135 L 122 135 L 122 165 L 88 165 Z" fill="url(#blueStemLight)" stroke="#1e5196" stroke-width="1"/>
+    <!-- Horizontal Bar Under Shadow -->
+    <path d="M 88 165 L 122 165 L 125 169 L 91 169 Z" fill="#091d38"/>
+
+    <!-- Right Pillar of H -->
+    <path d="M 122 80 L 150 80 L 150 220 L 122 220 Z" fill="url(#blueStemGrad)" stroke="#1e5196" stroke-width="1.5"/>
+    <!-- Right Pillar 3D Side Bevel -->
+    <path d="M 150 80 L 155 84 L 155 224 L 150 220 Z" fill="#0d284f"/>
+
+    <!-- Tech Circuit Traces (Gold Nodes & Lines on H) -->
+    <g stroke="url(#goldTrace)" stroke-width="2.5" stroke-linecap="round" fill="none">
+      <!-- Left Stem Circuit -->
+      <path d="M 74 195 L 74 140 L 82 132 L 82 110"/>
+      <circle cx="74" cy="195" r="3.5" fill="#fde047" stroke="#b45309" stroke-width="1"/>
+      <circle cx="82" cy="110" r="3" fill="#fde047" stroke="#b45309" stroke-width="1"/>
+      <path d="M 68 170 L 74 164"/>
+      <circle cx="68" cy="170" r="2.5" fill="#fde047" stroke="#b45309" stroke-width="0.8"/>
+
+      <!-- Right Stem Circuit -->
+      <path d="M 136 100 L 136 155 L 142 162 L 142 185"/>
+      <circle cx="136" cy="100" r="3.5" fill="#fde047" stroke="#b45309" stroke-width="1"/>
+      <circle cx="142" cy="185" r="3" fill="#fde047" stroke="#b45309" stroke-width="1"/>
+      <path d="M 130 135 L 136 141"/>
+      <circle cx="130" cy="135" r="2.5" fill="#fde047" stroke="#b45309" stroke-width="0.8"/>
+    </g>
+
+    <!-- 3D Graduation Cap Base (Band around top of H) -->
+    <path d="M 80 82 C 80 72, 130 72, 130 82 L 128 92 C 128 97, 82 97, 82 92 Z" fill="#0a2347" stroke="#1d4d8a" stroke-width="1"/>
+
+    <!-- 3D Mortarboard Diamond Top (Yellow/Gold) -->
+    <!-- Lower shadow/lip of mortarboard -->
+    <polygon points="105,28 175,54 105,80 35,54" fill="url(#goldCapSide)" transform="translate(0, 7)"/>
+    <!-- Top yellow cap face -->
+    <polygon points="105,26 175,52 105,78 35,52" fill="url(#goldCapTop)" stroke="#fed766" stroke-width="1.5"/>
+
+    <!-- Golden Cap Center Button -->
+    <ellipse cx="105" cy="52" rx="6" ry="3.5" fill="#fef08a" stroke="#ca8a04" stroke-width="1"/>
+
+    <!-- Cap Tassel (Drooping on Right) -->
+    <path d="M 105 53 Q 140 56 154 75 Q 158 88 156 105" fill="none" stroke="#d97706" stroke-width="2.5" stroke-linecap="round"/>
+    <ellipse cx="156" cy="107" rx="3.5" ry="6" fill="#f59e0b" stroke="#92400e" stroke-width="0.8"/>
+  </g>
+
+  <!-- Brand Typography -->
+  <g transform="translate(230, 40)">
+    <!-- HabyEduPro (Main Text in Navy Blue) -->
+    <text x="0" y="125" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="82" font-weight="900" fill="#11294d" letter-spacing="-1.5px">
+      Haby<tspan fill="#163765">Edu</tspan><tspan fill="#0f2948">Pro</tspan>
+    </text>
+
+    <!-- habyedupro.co.tz (Domain in Golden Amber) -->
+    <text x="5" y="172" font-family="system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif" font-size="34" font-weight="700" fill="#eab308" letter-spacing="3.5px">
+      habyedupro.co.tz
+    </text>
+  </g>
+</svg>

@@ -1,0 +1,46 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // School Snapshot Validation
+    function isValidSchool(data) {
+      return data.keys().hasAll(['updatedAt']) &&
+             data.updatedAt is timestamp;
+    }
+
+    match /schools/{schoolId} {
+      allow get: if isSignedIn() && isValidId(schoolId);
+      allow write: if isSignedIn() && isValidId(schoolId) && isValidSchool(request.resource.data);
+    }
+
+    // Attendance Validation
+    function isValidAttendance(data) {
+      return data.keys().hasAll(['school_id', 'date', 'period_number', 'class_name', 'status', 'updatedAt']) &&
+             data.school_id is string &&
+             data.date is string &&
+             data.period_number is int &&
+             data.status in ['taught', 'not_taught'] &&
+             data.updatedAt is timestamp;
+    }
+
+    match /period_attendance/{attendanceId} {
+      allow get, list: if isSignedIn() && (
+        resource == null || resource.data.school_id is string
+      );
+      allow create, update: if isSignedIn() && isValidId(attendanceId) && isValidAttendance(request.resource.data);
+    }
+  }
+}
