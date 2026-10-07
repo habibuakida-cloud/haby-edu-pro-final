@@ -80,6 +80,7 @@ export const AITimetableGeneratorModal: React.FC<AITimetableGeneratorModalProps>
   const [preventClashes, setPreventClashes] = useState(true);
   const [balanceWorkload, setBalanceWorkload] = useState(true);
   const [preserveExtraCurricular, setPreserveExtraCurricular] = useState(true);
+  const [preserveManualSlots, setPreserveManualSlots] = useState(true);
   const [allocationMode, setAllocationMode] = useState<'fill_empty' | 'full_replace'>('full_replace');
   const [customPrompt, setCustomPrompt] = useState('');
 
@@ -194,18 +195,41 @@ export const AITimetableGeneratorModal: React.FC<AITimetableGeneratorModalProps>
     if (!generationResult) return;
 
     if (allocationMode === 'full_replace') {
-      // If targetClass is ALL, replace all matching target days, or merge selectively
-      if (targetClass === 'ALL') {
-        onApplyAssignments(generationResult.generatedAssignments, 'replace');
+      if (preserveManualSlots) {
+        // Retain manual assignments so Auto mode never clashes with or wipes out manual periods
+        const manualSlots = currentAssignments.filter(a => a.isManual || a.isLocked || a.allocationMode === 'manual');
+        const manualKeySet = new Set(manualSlots.map(m => `${m.className}|${m.stream}|${m.day}|${m.period}`));
+        
+        // Auto slots that do not clash with manual positions
+        const nonClashingAuto = generationResult.generatedAssignments
+          .filter(a => !manualKeySet.has(`${a.className}|${a.stream}|${a.day}|${a.period}`))
+          .map(a => ({ ...a, isManual: false, allocationMode: 'auto' as const }));
+
+        if (targetClass === 'ALL') {
+          onApplyAssignments([...manualSlots, ...nonClashingAuto], 'replace');
+        } else {
+          // Replace only targeted class/stream non-manual slots
+          const otherClassSlots = currentAssignments.filter(a => {
+            if (a.className !== targetClass) return true;
+            if (targetStream !== 'ALL' && a.stream !== targetStream) return true;
+            if (!selectedDays.includes(a.day)) return true;
+            return a.isManual || a.isLocked || a.allocationMode === 'manual';
+          });
+          onApplyAssignments([...otherClassSlots, ...nonClashingAuto], 'replace');
+        }
       } else {
-        // Replace only slots for this targetClass / targetStream
-        const kept = currentAssignments.filter(a => {
-          if (a.className !== targetClass) return true;
-          if (targetStream !== 'ALL' && a.stream !== targetStream) return true;
-          if (!selectedDays.includes(a.day)) return true;
-          return false;
-        });
-        onApplyAssignments([...kept, ...generationResult.generatedAssignments], 'replace');
+        // Standard full replace
+        if (targetClass === 'ALL') {
+          onApplyAssignments(generationResult.generatedAssignments, 'replace');
+        } else {
+          const kept = currentAssignments.filter(a => {
+            if (a.className !== targetClass) return true;
+            if (targetStream !== 'ALL' && a.stream !== targetStream) return true;
+            if (!selectedDays.includes(a.day)) return true;
+            return false;
+          });
+          onApplyAssignments([...kept, ...generationResult.generatedAssignments], 'replace');
+        }
       }
     } else {
       // Merge: fill empty slots
@@ -413,6 +437,26 @@ export const AITimetableGeneratorModal: React.FC<AITimetableGeneratorModalProps>
                       <span className="text-xs font-bold text-slate-800 block">Preserve Fixed Special Periods</span>
                       <span className="text-[11px] text-slate-500 block leading-tight mt-0.5">
                         Keep Sports (Wednesdays), Religion (Fridays), Breaks, and Assemblies intact.
+                      </span>
+                    </div>
+                  </label>
+
+                  <label className={`flex items-start gap-3 p-3 border rounded-xl cursor-pointer transition-colors ${
+                    preserveManualSlots ? 'bg-emerald-50/70 border-emerald-300' : 'bg-white border-slate-200 hover:border-blue-400'
+                  }`}>
+                    <input
+                      type="checkbox"
+                      checked={preserveManualSlots}
+                      onChange={e => setPreserveManualSlots(e.target.checked)}
+                      className="mt-0.5 rounded text-emerald-600 focus:ring-emerald-500 w-4 h-4"
+                    />
+                    <div>
+                      <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
+                        <span>🔒 Linda Vipindi vya Mkono (Lock Manual Slots)</span>
+                        <span className="px-1.5 py-0.2 rounded bg-emerald-200 text-emerald-900 text-[10px] font-black uppercase">Zero Clash</span>
+                      </span>
+                      <span className="text-[11px] text-slate-600 block leading-tight mt-0.5">
+                        Haitafuta wala kuingilia vipindi vilivyopangwa kwa mkono. Walimu watalindwa wasipangiwe vipindi viwili.
                       </span>
                     </div>
                   </label>

@@ -172,6 +172,9 @@ export interface TimetableAssignment {
   room?: string;
   activityType?: ActivityType;
   customNote?: string;
+  isManual?: boolean;
+  isLocked?: boolean;
+  allocationMode?: 'manual' | 'auto';
 }
 
 export interface InvigilationSession {

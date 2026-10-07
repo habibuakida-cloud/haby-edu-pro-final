@@ -25,6 +25,9 @@ interface EditSlotModalProps {
     activityType: ActivityType;
     customNote?: string;
     applySchoolWide?: boolean;
+    isManual?: boolean;
+    isLocked?: boolean;
+    allocationMode?: 'manual' | 'auto';
   }) => void;
   onDelete?: (id: number) => void;
   onClose: () => void;
@@ -45,6 +48,7 @@ export const EditSlotModal: React.FC<EditSlotModalProps> = ({
   const [room, setRoom] = useState(existing?.room || '');
   const [customNote, setCustomNote] = useState(existing?.customNote || '');
   const [applySchoolWide, setApplySchoolWide] = useState(false);
+  const [isLocked, setIsLocked] = useState(existing?.isLocked ?? true);
 
   const handleActivitySelect = (act: typeof EXTRA_CURRICULAR_ACTIVITIES[0]) => {
     setSubject(act.name);
@@ -86,7 +90,10 @@ export const EditSlotModal: React.FC<EditSlotModalProps> = ({
       room,
       activityType,
       customNote,
-      applySchoolWide
+      applySchoolWide,
+      isManual: true,
+      isLocked,
+      allocationMode: 'manual'
     });
     onClose();
   };
@@ -263,6 +270,24 @@ export const EditSlotModal: React.FC<EditSlotModalProps> = ({
                 className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+          </div>
+
+          {/* Lock / Manual Protection Checkbox */}
+          <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="isLockedPeriod"
+              checked={isLocked}
+              onChange={e => setIsLocked(e.target.checked)}
+              className="mt-1 w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+            />
+            <label htmlFor="isLockedPeriod" className="text-xs text-emerald-950 cursor-pointer">
+              <span className="font-bold block flex items-center gap-1.5">
+                <span>🔒 Linda Kipindi hiki dhidi ya Auto-Generator (Lock from Auto-Generate)</span>
+                <span className="px-1.5 py-0.2 rounded bg-emerald-200 text-emerald-900 text-[10px] font-black uppercase">Manual Protection</span>
+              </span>
+              Kipindi hiki kitalindwa na hakitafutwa wala kuingiliwa unapofanya Auto-Generate au AI scheduling.
+            </label>
           </div>
 
           {/* Apply School Wide Checkbox */}

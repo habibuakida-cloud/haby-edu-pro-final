@@ -32,7 +32,8 @@ import {
   ShieldAlert,
   Share2,
   Zap,
-  Sliders
+  Sliders,
+  Edit3
 } from 'lucide-react';
 import { 
   TimetableAssignment, 
@@ -195,6 +196,17 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   // Timetable Integrity Report Modal state
   const [integrityReportModalOpen, setIntegrityReportModalOpen] = useState(false);
 
+  // Scheduling Mode: Manual vs Auto (Zero-Clash Isolation)
+  const [schedulingMode, setSchedulingMode] = useState<'MANUAL' | 'AUTO'>('MANUAL');
+
+  const manualAssignmentsCount = useMemo(() => {
+    return assignments.filter(a => a.isManual || a.isLocked || a.allocationMode === 'manual').length;
+  }, [assignments]);
+
+  const autoAssignmentsCount = useMemo(() => {
+    return assignments.filter(a => a.allocationMode === 'auto' || (!a.isManual && !a.isLocked)).length;
+  }, [assignments]);
+
   const handleShareTimetableWhatsApp = (scope: string) => {
     const text = `*HABY EDUPRO TIMETABLE (RATIBA YA MASOMO)*
 Shule: ${schoolName}
@@ -203,6 +215,23 @@ Tarehe: ${new Date().toLocaleDateString()}
 Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     const url = `https://wa.me/?text=${encodeURIComponent(text)}`;
     window.open(url, '_blank');
+  };
+
+  const handlePrintActiveTimetableGrid = () => {
+    if (activeTab === 'general') {
+      const scopeLabel = selectedGeneralClass === 'All' ? 'Whole School' : selectedGeneralClass;
+      const streamLabel = selectedGeneralStream !== 'All' ? selectedGeneralStream : '';
+      printFormattedSection('general-printable-view', `General Teaching Timetable - ${scopeLabel} ${streamLabel}`.trim(), schoolName, { orientation: printOrientation });
+    } else if (activeTab === 'class') {
+      printFormattedSection('class-printable-view', `${selectedClassFilter} Timetable`, schoolName, { orientation: 'landscape' });
+    } else if (activeTab === 'teacher') {
+      const currentTeacher = teachers.find(t => t.id === selectedTeacherFilter);
+      printFormattedSection('teacher-printable-view', `${currentTeacher?.name || 'Teacher'} Teaching Timetable`, schoolName, { orientation: 'landscape' });
+    } else if (activeTab === 'journal') {
+      printFormattedSection('official-class-journal-printable', `Official Class Journal`, schoolName, { orientation: 'landscape' });
+    } else {
+      window.print();
+    }
   };
 
   // Comprehensive Timetable Integrity Analysis
@@ -607,7 +636,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
   return (
     <div className="space-y-6">
       {/* Sub Navigation */}
-      <div className="bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs flex flex-wrap gap-1">
+      <div className="bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs flex flex-wrap items-center justify-between gap-2 no-print">
+        <div className="flex flex-wrap gap-1 items-center flex-1">
         <button
           onClick={() => setActiveTab('general')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
@@ -762,6 +792,19 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             {integrityReport.score}% Score
           </span>
         </button>
+        </div>
+
+        <div className="flex items-center gap-2 pr-1 shrink-0">
+          <button
+            type="button"
+            onClick={handlePrintActiveTimetableGrid}
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-lg flex items-center gap-2 shadow-xs transition-all cursor-pointer active:scale-95 border border-blue-500"
+            title="Print current generated timetable grid using browser print"
+          >
+            <Printer className="w-4 h-4" />
+            <span>Print Timetable</span>
+          </button>
+        </div>
       </div>
 
       {/* Conflict Bar Alert (if any teacher is double-booked or conflicts exist) */}
@@ -804,6 +847,145 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           </div>
         </div>
       )}
+
+      {/* SCHEDULING MODE SELECTION BAR (MANUAL vs AUTO ISOLATION) */}
+      <div className="bg-white border-2 border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="p-1.5 rounded-lg bg-blue-100 text-blue-800">
+                <Layers className="w-5 h-5" />
+              </span>
+              <div>
+                <h3 className="text-base font-black text-slate-900 flex flex-wrap items-center gap-2">
+                  <span>Mbinu ya Kupanga Ratiba (Scheduling Mode)</span>
+                  <span className="text-[11px] px-2.5 py-0.5 rounded-full font-extrabold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                    <span>🔒</span>
+                    <span>Zero-Clash Isolation Active</span>
+                  </span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Chagua kutengeneza ratiba kwa mkono (Manual) au kiotomatiki na AI (Auto). Mifumo hii imetenganishwa ili isingiliane.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* Segmented Mode Switcher */}
+          <div className="flex items-center bg-slate-100 p-1.5 rounded-xl border border-slate-200 shrink-0">
+            <button
+              type="button"
+              onClick={() => setSchedulingMode('MANUAL')}
+              className={`px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
+                schedulingMode === 'MANUAL'
+                  ? 'bg-blue-600 text-white shadow-md'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              <span className="text-sm">✋</span>
+              <span>Manual Mode (Kupanga kwa Mkono)</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-mono">
+                {manualAssignmentsCount}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSchedulingMode('AUTO')}
+              className={`px-4 py-2 rounded-lg text-xs font-black flex items-center gap-2 transition-all cursor-pointer ${
+                schedulingMode === 'AUTO'
+                  ? 'bg-gradient-to-r from-indigo-600 to-blue-700 text-white shadow-md'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+              <span>Auto / AI Mode (Kiotomatiki)</span>
+              <span className="px-2 py-0.5 rounded-full bg-white/20 text-white text-[10px] font-mono">
+                {autoAssignmentsCount}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        {/* Active Mode Details Banner */}
+        {schedulingMode === 'MANUAL' ? (
+          <div className="p-3.5 bg-blue-50/80 border border-blue-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start gap-2.5">
+              <div className="p-2 bg-blue-600 text-white rounded-lg shrink-0 mt-0.5 sm:mt-0">
+                <Edit3 className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-extrabold text-blue-950 block text-sm flex items-center gap-2">
+                  <span>Hali ya Kupanga kwa Mkono (Manual Schedule Mode)</span>
+                  <span className="px-2 py-0.2 rounded-full bg-blue-200 text-blue-900 text-[10px] font-mono font-bold">
+                    {manualAssignmentsCount} Vipindi Vimelindwa (Locked)
+                  </span>
+                </span>
+                <span className="text-blue-800 text-[11px] block mt-0.5">
+                  Bofya kisanduku (slot) chochote kwenye jedwali chini kumpangia mwalimu na somo. Vipindi unavyoweka hapa vinalindwa kiotomatiki (🔒 Locked) na haviingiliwi wala kufutwa na generator ya kiotomatiki.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingSlot({
+                    className: selectedClassFilter,
+                    stream: getStreamsForClass(selectedClassFilter)[0] || 'STREAM A',
+                    day: 'Monday',
+                    period: periodSettings[0] ? `${periodSettings[0].name} (${periodSettings[0].start}-${periodSettings[0].end})` : 'Period 1 (08:00-08:40)'
+                  });
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Panga Kipindi cha Mkono</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="p-3.5 bg-gradient-to-r from-indigo-50 via-blue-50 to-purple-50 border border-indigo-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
+            <div className="flex items-start gap-2.5">
+              <div className="p-2 bg-indigo-600 text-white rounded-lg shrink-0 mt-0.5 sm:mt-0">
+                <Zap className="w-4 h-4 text-amber-300 fill-amber-300" />
+              </div>
+              <div>
+                <span className="font-extrabold text-indigo-950 block text-sm flex flex-wrap items-center gap-2">
+                  <span>Hali ya Kupanga Kiotomatiki na AI (Auto-Generate Engine)</span>
+                  <span className="px-2 py-0.2 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black border border-emerald-300">
+                    🔒 Zero-Clash Isolation Active
+                  </span>
+                </span>
+                <span className="text-indigo-800 text-[11px] block mt-0.5">
+                  AI inazalisha ratiba kamili kwa ngazi au darasa maalum kwa kufuata sera za shule. Vipindi vyote vya mkono vinalindwa na walimu wao hawawezi kupangiwa vipindi viwili kwa wakati mmoja.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setAiByLevelModalOpen(true)}
+                className="px-3.5 py-2 bg-gradient-to-r from-indigo-700 to-blue-800 hover:brightness-110 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95 border border-indigo-500"
+              >
+                <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
+                <span>Auto-Generate kwa Ngazi (Level)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAiGeneratorModalOpen(true)}
+                className="px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-slate-950 rounded-xl font-black text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95 border border-amber-300"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-slate-950 fill-amber-600" />
+                <span>Auto Darasa Moja (Single Class)</span>
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Quick Add Extra-Curricular Bar (Editable Times) */}
       <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white p-4 rounded-xl shadow-md border border-slate-800">

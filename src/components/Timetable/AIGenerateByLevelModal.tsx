@@ -60,8 +60,15 @@ export const AIGenerateByLevelModal: React.FC<AIGenerateByLevelModalProps> = ({
   const [generatedAssignments, setGeneratedAssignments] = useState<TimetableAssignment[] | null>(null);
   const [selectedStreamPreview, setSelectedStreamPreview] = useState<string>('');
   const [applyMode, setApplyMode] = useState<'replace_level' | 'merge'>('replace_level');
+  const [preserveManualSlots, setPreserveManualSlots] = useState<boolean>(true);
 
   if (!isOpen) return null;
+
+  // Count manual slots in current assignments
+  const manualSlotsInLevel = currentAssignments.filter(a => {
+    const isMan = a.isManual || a.isLocked || a.allocationMode === 'manual';
+    return isMan;
+  });
 
   // Level classes
   const targetClasses = selectedLevel === 'NURSERY'
@@ -98,6 +105,28 @@ export const AIGenerateByLevelModal: React.FC<AIGenerateByLevelModalProps> = ({
       const streamSubjectDailyTracker = new Map<string, number>();
       // teacherDailyLoadTracker: `${day}_${teacherId}` -> count
       const teacherDailyLoadTracker = new Map<string, number>();
+
+      // Index manual slots for protection
+      const manualSlotMap = new Map<string, TimetableAssignment>();
+      if (preserveManualSlots) {
+        currentAssignments.forEach(a => {
+          const isMan = a.isManual || a.isLocked || a.allocationMode === 'manual';
+          if (isMan) {
+            const pName = a.periodName || a.period.split(' (')[0];
+            manualSlotMap.set(`${a.className}_${a.stream}_${a.day}_${a.period}`, a);
+            manualSlotMap.set(`${a.className}_${a.stream}_${a.day}_${pName}`, a);
+
+            // Pre-reserve teacher time slot so auto-generator NEVER clashes with manual assignment
+            if (a.teacherId) {
+              const pMatch = pName.match(/\d+/);
+              const pNum = pMatch ? parseInt(pMatch[0], 10) : 1;
+              teacherClashTracker.add(`${a.day}_${pNum}_${a.teacherId}`);
+              const curLoad = teacherDailyLoadTracker.get(`${a.day}_${a.teacherId}`) || 0;
+              teacherDailyLoadTracker.set(`${a.day}_${a.teacherId}`, curLoad + 1);
+            }
+          }
+        });
+      }
 
       // Filter allocations & teacher assignments for this level
       const levelAllocations = subjectPeriodAllocations.filter(a => a.level === selectedLevel);
@@ -167,6 +196,16 @@ export const AIGenerateByLevelModal: React.FC<AIGenerateByLevelModalProps> = ({
               ? `${pSetting.name} (${pSetting.start}-${pSetting.end})`
               : `Period ${periodNum} (${8 + Math.floor((periodNum - 1) * 0.7)}:00-${8 + Math.floor(periodNum * 0.7)}:00)`;
 
+            // Check if slot was manually locked/created
+            const existingManual = preserveManualSlots 
+              ? (manualSlotMap.get(`${className}_${stream}_${day}_${periodString}`) || manualSlotMap.get(`${className}_${stream}_${day}_Period ${periodNum}`))
+              : undefined;
+
+            if (existingManual) {
+              results.push(existingManual);
+              continue;
+            }
+
             // Select next subject from queue that has not exceeded today's quota
             let chosenSubject = 'Study & Revision';
             for (let qIdx = 0; qIdx < subjectQueue.length; qIdx++) {
@@ -197,7 +236,10 @@ export const AIGenerateByLevelModal: React.FC<AIGenerateByLevelModalProps> = ({
               periodName: `Period ${periodNum}`,
               teacherId: teacher?.id,
               subject: chosenSubject,
-              room: `Room ${className.replace(/\D/g, '') || '1'}${stream.charAt(stream.length - 1)}`
+              room: `Room ${className.replace(/\D/g, '') || '1'}${stream.charAt(stream.length - 1)}`,
+              isManual: false,
+              isLocked: false,
+              allocationMode: 'auto'
             });
           }
         });
@@ -322,6 +364,34 @@ export const AIGenerateByLevelModal: React.FC<AIGenerateByLevelModalProps> = ({
               <div className="p-2.5 bg-white rounded-xl border border-slate-200">
                 <span className="text-[10px] text-slate-400 block font-bold">Teacher Daily Limit:</span>
                 <span className="font-black text-slate-900 text-sm">Max {maxTeacherDaily}/day</span>
+              </div>
+            </div>
+
+            {/* Manual vs Auto Conflict Isolation Card */}
+            <div className={`p-3.5 rounded-xl border transition-all ${
+              preserveManualSlots ? 'bg-emerald-50/80 border-emerald-300' : 'bg-amber-50 border-amber-300'
+            }`}>
+              <div className="flex items-start gap-3">
+                <input
+                  type="checkbox"
+                  id="preserveManualLevel"
+                  checked={preserveManualSlots}
+                  onChange={e => setPreserveManualSlots(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500"
+                />
+                <label htmlFor="preserveManualLevel" className="text-xs cursor-pointer flex-1">
+                  <span className="font-bold text-slate-900 block flex items-center gap-1.5">
+                    <span>🔒 Linda Vipindi Vilivyowekwa kwa Mkono (Lock & Preserve Manual Slots)</span>
+                    <span className="px-2 py-0.2 rounded-full text-[10px] font-black uppercase bg-emerald-200 text-emerald-900">
+                      {manualSlotsInLevel.length} Vipindi vya Mkono
+                    </span>
+                  </span>
+                  <span className="text-slate-600 block mt-0.5">
+                    {preserveManualSlots 
+                      ? 'AI haitafuta wala kugusa vipindi vilivyopangwa kwa mkono. Walimu wao hawatawekewa vipindi vingine muda huo huo (Zero Conflict Guarantee).' 
+                      : 'Onyo: AI itabadilisha vipindi vyote vya ngazi hii ikiwemo vilivyowekwa kwa mkono.'}
+                  </span>
+                </label>
               </div>
             </div>
           </div>
