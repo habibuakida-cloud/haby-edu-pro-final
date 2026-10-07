@@ -13,7 +13,8 @@ import {
   Award,
   ChevronRight,
   ClipboardCopy,
-  Trash2
+  Trash2,
+  Upload
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
@@ -36,6 +37,7 @@ S0372/0012 F 21 III CIV - C HIST - C GEO - C KISW - B ENGL - C PHY - D CHEM - C 
 
 export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
   const [inputText, setInputText] = useState('');
+  const [importMethod, setImportMethod] = useState('text'); // 'text' or 'csv'
   const [selectedExamType, setSelectedExamType] = useState('CSEE');
   const [examYear, setExamYear] = useState(new Date().getFullYear().toString());
   const [activeTab, setActiveTab] = useState('raw'); // 'raw', 'grades', 'division'
@@ -43,6 +45,144 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
   const [subjectsList, setSubjectsList] = useState([]);
   const [saveStatus, setSaveStatus] = useState(null); // { type: 'success' | 'error', message: string }
   const [isSavingToDb, setIsSavingToDb] = useState(false);
+
+  // Download a CSV Template for quick batch importing
+  const handleDownloadTemplate = () => {
+    const csvContent = "CNO,SEX,AGGT,DIV,CIV,HIST,GEO,KISW,ENGL,PHY,CHEM,BIO,B/MATH\n"
+      + "S0372/0001,F,22,III,C,C,C,D,C,D,D,C,F\n"
+      + "S0372/0002,F,24,III,C,D,C,C,C,D,D,D,D\n"
+      + "S0372/0003,M,16,II,B,B,B,B,B,C,C,B,C\n"
+      + "S0372/0004,M,12,I,A,A,B,A,A,B,B,A,B\n"
+      + "S0372/0005,F,28,IV,D,D,D,C,D,F,F,D,F\n";
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", "NECTA_IMPORT_TEMPLATE.csv");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Handle CSV/Excel File Upload and Parse
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setSaveStatus(null);
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      try {
+        const bstr = evt.target.result;
+        const wb = XLSX.read(bstr, { type: 'binary' });
+        const wsname = wb.SheetNames[0];
+        const ws = wb.Sheets[wsname];
+        const data = XLSX.utils.sheet_to_json(ws, { header: 1 }); // read as array of arrays
+
+        if (data.length < 2) {
+          alert('Faili halina data ya kutosha. Hakikisha kuna mstari wa kichwa (header) na angalau mstari mmoja wa data.');
+          return;
+        }
+
+        // Parse rows and columns
+        const headers = data[0].map(h => String(h || '').trim().toUpperCase());
+        
+        // Find indices for standard columns
+        const cnoIdx = headers.findIndex(h => h.includes('CNO') || h.includes('CANDIDATE') || h.includes('NUMBER') || h.includes('MTAHINIWA') || h.includes('REG'));
+        const sexIdx = headers.findIndex(h => h.includes('SEX') || h.includes('GENDER') || h.includes('JINSIA') || h === 'F/M' || h === 'M/F');
+        const aggtIdx = headers.findIndex(h => h.includes('AGGT') || h.includes('AGG') || h.includes('POINTS') || h.includes('ALAMA') || h.includes('POINT'));
+        const divIdx = headers.findIndex(h => h.includes('DIV') || h.includes('DIVISION') || h.includes('DARAJA') || h === 'DIV_RESULT');
+
+        if (cnoIdx === -1) {
+          alert('Haikuweza kupata safu ya Candidate Number (CNO) kwenye faili lako. Hakikisha kichwa kina neno "CNO" au "Candidate Number".');
+          return;
+        }
+
+        const parsedRows = [];
+        const subjectsSet = new Set();
+
+        const structuralIndices = [cnoIdx, sexIdx, aggtIdx, divIdx].filter(idx => idx !== -1);
+        const subjectCols = []; // { index, name }
+        
+        headers.forEach((h, idx) => {
+          if (!structuralIndices.includes(idx) && h && !['NAME', 'STUDENT NAME', 'JINA', 'YEAR', 'MWAKA', 'SCHOOL', 'SHULE', 'ID'].includes(h)) {
+            let subj = h;
+            if (subj === 'BMATH' || subj === 'BASIC MATH' || subj === 'BASIC MATHEMATICS') subj = 'B/MATH';
+            if (subj === 'ENGLISH' || subj === 'ENG') subj = 'ENGL';
+            if (subj === 'KISWAHILI') subj = 'KISW';
+            if (subj === 'HISTORY') subj = 'HIST';
+            if (subj === 'GEOGRAPHY') subj = 'GEO';
+            if (subj === 'PHYSICS') subj = 'PHY';
+            if (subj === 'CHEMISTRY') subj = 'CHEM';
+            if (subj === 'BIOLOGY') subj = 'BIO';
+            if (subj === 'CIVICS') subj = 'CIV';
+
+            subjectCols.push({ index: idx, name: subj });
+          }
+        });
+
+        for (let i = 1; i < data.length; i++) {
+          const row = data[i];
+          if (!row || row.length === 0) continue;
+
+          const cno = String(row[cnoIdx] || '').trim().toUpperCase();
+          if (!cno) continue; // skip empty rows
+
+          let sex = sexIdx !== -1 ? String(row[sexIdx] || '').trim().toUpperCase() : 'M';
+          if (sex === 'FEMALE' || sex === 'KIKE' || sex === 'F') sex = 'F';
+          else if (sex === 'MALE' || sex === 'KIUME' || sex === 'M') sex = 'M';
+          else sex = 'M';
+
+          const aggt = aggtIdx !== -1 ? String(row[aggtIdx] || '').trim() : '-';
+          let div = divIdx !== -1 ? String(row[divIdx] || '').trim().toUpperCase() : '-';
+
+          // Subject/grade resolution
+          const subjects = {};
+          subjectCols.forEach(col => {
+            const val = String(row[col.index] || '').trim().toUpperCase();
+            if (val && val !== '-' && val !== '') {
+              subjects[col.name] = val;
+              subjectsSet.add(col.name);
+            }
+          });
+
+          parsedRows.push({
+            cno,
+            sex,
+            aggt,
+            div,
+            subjects
+          });
+        }
+
+        if (parsedRows.length === 0) {
+          alert('Hakuna watahiniwa waliopatikana kwenye faili la CSV/Excel.');
+          return;
+        }
+
+        // Preserve order
+        const coreOrder = ['CIV', 'HIST', 'GEO', 'KISW', 'ENGL', 'PHY', 'CHEM', 'BIO', 'B/MATH'];
+        const otherSubjects = Array.from(subjectsSet).filter(s => !coreOrder.includes(s)).sort();
+        const orderedSubjects = [
+          ...coreOrder.filter(s => subjectsSet.has(s)),
+          ...otherSubjects
+        ];
+
+        setSubjectsList(orderedSubjects);
+        setParsedData(parsedRows);
+        setSaveStatus({
+          type: 'success',
+          message: `Watahiniwa ${parsedRows.length} wameingizwa na kuchakatwa kutoka kwenye faili la CSV/Excel kikamilifu! Masomo yaliyotambuliwa: ${orderedSubjects.length}`
+        });
+
+      } catch (err) {
+        console.error('Error importing CSV/Excel:', err);
+        alert('Hitilafu wakati wa kusoma faili: ' + err.message);
+      }
+    };
+    reader.readAsBinaryString(file);
+  };
 
   // Parse NECTA Text
   const handleParse = () => {
@@ -480,78 +620,149 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
         </div>
       </div>
 
-      {/* Textarea Input Section */}
-      <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-4">
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-bold text-slate-800 flex items-center gap-2">
-            <FileText className="w-4 h-4 text-blue-600" />
-            <span>Bandika Matokeo ya NECTA Hapa (Paste Raw NECTA Text)</span>
-          </label>
-          <span className="text-xs text-slate-500 font-medium">
-            Muundo: <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">S0372/0001 F 22 III CIV - C HIST - C GEO - C...</span>
-          </span>
+      {/* Import Methods Selector */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        <div className="flex border-b border-slate-200 bg-slate-50">
+          <button
+            type="button"
+            onClick={() => setImportMethod('text')}
+            className={`flex items-center gap-2 px-6 py-3 font-bold text-xs transition-colors border-b-2 ${
+              importMethod === 'text'
+                ? 'border-blue-600 text-blue-600 bg-white'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <FileText className="w-4.5 h-4.5" />
+            <span>Njia ya 1: Bandika Nakala (Paste Raw Text)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setImportMethod('csv')}
+            className={`flex items-center gap-2 px-6 py-3 font-bold text-xs transition-colors border-b-2 ${
+              importMethod === 'csv'
+                ? 'border-blue-600 text-blue-600 bg-white'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <FileSpreadsheet className="w-4.5 h-4.5" />
+            <span>Njia ya 2: Pakia Faili la CSV / Excel (Batch Upload)</span>
+          </button>
         </div>
 
-        <textarea
-          rows={7}
-          value={inputText}
-          onChange={e => setInputText(e.target.value)}
-          placeholder="Bandika mistari ya matokeo ya NECTA hapa...
+        <div className="p-6 space-y-4">
+          {importMethod === 'text' ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  <span>Bandika Matokeo ya NECTA Hapa</span>
+                </label>
+                <span className="text-xs text-slate-500 font-medium">
+                  Muundo: <span className="font-mono text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">S0372/0001 F 22 III CIV - C HIST - C...</span>
+                </span>
+              </div>
+
+              <textarea
+                rows={7}
+                value={inputText}
+                onChange={e => setInputText(e.target.value)}
+                placeholder="Bandika mistari ya matokeo ya NECTA hapa...
 Mfano:
 S0372/0001 F 22 III CIV - C HIST - C GEO - C KISW - D ENGL - C PHY - D CHEM - D BIO - C B/MATH - F
-S0372/0002 F 24 III CIV - C HIST - D GEO - C KISW - C ENGL - C PHY - D CHEM - D BIO - D B/MATH - D
-S0372/0003 M 16 II CIV - B HIST - B GEO - B KISW - B ENGL - B PHY - C CHEM - C BIO - B B/MATH - C"
-          className="w-full font-mono text-xs p-3.5 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 placeholder-slate-400"
-        />
+S0372/0002 F 24 III CIV - C HIST - D GEO - C KISW - C ENGL - C PHY - D CHEM - D BIO - D B/MATH - D"
+                className="w-full font-mono text-xs p-3.5 bg-slate-50 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 text-slate-800 placeholder-slate-400"
+              />
 
-        <div className="flex flex-wrap items-center justify-between gap-3 pt-2">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={handleParse}
-              className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
-            >
-              <RefreshCw className="w-4 h-4" />
-              <span>Chakata Data (Parse NECTA Data)</span>
-            </button>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={handleParse}
+                  className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  <span>Chakata Maandishi (Parse Text)</span>
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-blue-50/50 rounded-xl border border-blue-100">
+                <div className="space-y-1">
+                  <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider">Kielezo cha Kupakia Alama (CSV Import Format)</h4>
+                  <p className="text-[11px] text-blue-700 leading-relaxed max-w-2xl">
+                    Pakia faili la Excel au CSV lenye safu zenye vichwa: <strong className="font-mono bg-blue-150 px-1 py-0.5 rounded text-blue-900">CNO</strong>, <strong className="font-mono bg-blue-150 px-1 py-0.5 rounded text-blue-900">SEX</strong>, <strong className="font-mono bg-blue-150 px-1 py-0.5 rounded text-blue-900">AGGT</strong>, <strong className="font-mono bg-blue-150 px-1 py-0.5 rounded text-blue-900">DIV</strong> na safu za masomo (k.m. CIV, HIST, GEO, KISW, ENGL, nk.) zikiwa na madaraja (A, B, C, D, F).
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleDownloadTemplate}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs rounded-lg transition shrink-0 flex items-center gap-1.5 shadow-sm"
+                >
+                  <Download className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Pakua Kiolezo (CSV Template)</span>
+                </button>
+              </div>
 
-            {parsedData.length > 0 && (
-              <button
-                onClick={handleExportExcel}
-                className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
-              >
-                <Download className="w-4 h-4" />
-                <span>Pakua NECTA_ANALYSIS.xlsx</span>
-              </button>
-            )}
-          </div>
+              <div className="border-2 border-dashed border-slate-300 rounded-2xl p-8 hover:border-blue-500 hover:bg-blue-50/5 transition-all flex flex-col items-center justify-center text-center space-y-3 relative group">
+                <div className="w-12 h-12 rounded-full bg-blue-50 flex items-center justify-center text-blue-600 group-hover:scale-110 transition-transform">
+                  <Upload className="w-6 h-6" />
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs font-bold text-slate-800">Bofya hapa au buruta faili la CSV au Excel hapa</p>
+                  <p className="text-[11px] text-slate-500">Mwisho wa ukubwa wa faili ni MB 10 (.csv, .xlsx, .xls)</p>
+                </div>
+                <input
+                  type="file"
+                  accept=".csv, application/vnd.openxmlformats-officedocument.spreadsheetml.sheet, application/vnd.ms-excel"
+                  onChange={handleFileUpload}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+              </div>
+            </div>
+          )}
 
+          {/* Action buttons shown once data is parsed */}
           {parsedData.length > 0 && (
-            <button
-              onClick={handleSaveToExamRecords}
-              disabled={isSavingToDb}
-              className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
-            >
-              <Database className="w-4 h-4" />
-              <span>{isSavingToDb ? 'Inahifadhi...' : 'Hifadhi kwenye Database (exam_records)'}</span>
-            </button>
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleExportExcel}
+                  className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>Pakua NECTA_ANALYSIS.xlsx</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleSaveToExamRecords}
+                disabled={isSavingToDb}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
+              >
+                <Database className="w-4 h-4" />
+                <span>{isSavingToDb ? 'Inahifadhi...' : 'Hifadhi kwenye Database (exam_records)'}</span>
+              </button>
+            </div>
+          )}
+
+          {/* Notifications */}
+          {saveStatus && (
+            <div className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center gap-2 mt-3 ${
+              saveStatus.type === 'success' 
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}>
+              {saveStatus.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+              )}
+              <span>{saveStatus.message}</span>
+            </div>
           )}
         </div>
-
-        {/* Notifications */}
-        {saveStatus && (
-          <div className={`p-3.5 rounded-xl border text-xs font-semibold flex items-center gap-2 ${
-            saveStatus.type === 'success' 
-              ? 'bg-emerald-50 border-emerald-200 text-emerald-800' 
-              : 'bg-red-50 border-red-200 text-red-800'
-          }`}>
-            {saveStatus.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-            ) : (
-              <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
-            )}
-            <span>{saveStatus.message}</span>
-          </div>
-        )}
       </div>
 
       {/* Parsed Results Presentation */}

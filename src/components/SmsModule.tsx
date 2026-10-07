@@ -33,6 +33,7 @@ import { SchoolInfo } from '../types';
 interface SmsModuleProps {
   schoolId: string;
   schoolInfo: SchoolInfo;
+  students?: any[];
   initialExamType?: string;
   initialYear?: string;
   onNavigateToAnalyzer?: () => void;
@@ -58,9 +59,14 @@ interface ParentItem {
   school_id: string;
   student_cno: string;
   phone_255: string;
+  phone?: string;
   student_name?: string;
+  parent_name?: string;
+  full_name?: string;
   class_level?: string;
+  class_name?: string;
   password?: string;
+  password_hash?: string;
 }
 
 interface SmsLogItem {
@@ -77,6 +83,7 @@ interface SmsLogItem {
 export const SmsModule: React.FC<SmsModuleProps> = ({
   schoolId,
   schoolInfo,
+  students,
   initialExamType = 'CSEE',
   initialYear = new Date().getFullYear().toString(),
   onNavigateToAnalyzer
@@ -284,7 +291,15 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
       console.log("Current school_id (loadParents):", schoolId);
       const res = await supabase.from('parents').select().eq('school_id', schoolId);
       if (res.data) {
-        setParents(res.data as ParentItem[]);
+        const mapped = res.data.map((p: any) => ({
+          ...p,
+          phone_255: p.phone_255 || p.phone || '',
+          student_cno: p.student_cno || p.student_name || p.id?.split('_')[1] || '',
+          student_name: p.student_name || p.full_name || p.parent_name || '',
+          password: p.password || p.password_hash || '123456',
+          class_level: p.class_level || p.class_name || 'All'
+        }));
+        setParents(mapped as ParentItem[]);
       }
     } catch (err) {
       console.warn("Error loading parents:", err);
@@ -349,16 +364,69 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     loadPaymentHistory();
   }, [schoolId]);
 
+  // Merge parents from parents table state and students array to get a complete, deduplicated parent roster
+  const allParentsMerged = useMemo(() => {
+    const map = new Map<string, ParentItem>();
+    
+    // 1. Populate from students array first (registration data)
+    if (Array.isArray(students)) {
+      students.forEach(st => {
+        const phone = st.parentPhone || st.phone || '';
+        if (!phone) return;
+        const cno = st.regNo || st.id?.toString() || '';
+        if (!cno) return;
+        
+        const cleanPhone = phone.trim();
+        const cleanCno = cno.toUpperCase().trim();
+        
+        map.set(cleanPhone, {
+          id: `student_parent_${cleanCno}`,
+          school_id: schoolId,
+          student_cno: cleanCno,
+          phone_255: cleanPhone,
+          phone: cleanPhone,
+          student_name: st.name,
+          parent_name: st.parentName || 'Mzazi',
+          class_level: st.className || 'All',
+          class_name: st.className || 'All'
+        });
+      });
+    }
+
+    // 2. Overwrite/merge with explicit parent directory entries
+    parents.forEach(p => {
+      const phone = p.phone_255 || p.phone || '';
+      if (!phone) return;
+      const cleanPhone = phone.trim();
+      
+      const existing = map.get(cleanPhone);
+      map.set(cleanPhone, {
+        id: p.id,
+        school_id: p.school_id || schoolId,
+        student_cno: p.student_cno || existing?.student_cno || '',
+        phone_255: cleanPhone,
+        phone: cleanPhone,
+        student_name: p.student_name || existing?.student_name || '',
+        parent_name: p.parent_name || existing?.parent_name || 'Mzazi',
+        password: p.password || p.password_hash || '123456',
+        class_level: p.class_level || p.class_name || existing?.class_level || 'All',
+        class_name: p.class_name || existing?.class_name || 'All'
+      });
+    });
+
+    return Array.from(map.values());
+  }, [parents, students, schoolId]);
+
   // Map parents by student_cno
   const parentsMap = useMemo(() => {
     const map = new Map<string, ParentItem>();
-    parents.forEach(p => {
+    allParentsMerged.forEach(p => {
       if (p.student_cno) {
         map.set(p.student_cno.toUpperCase().trim(), p);
       }
     });
     return map;
-  }, [parents]);
+  }, [allParentsMerged]);
 
   // Filter exam records by selected exam_type and year
   const filteredExamRecords = useMemo(() => {
@@ -506,15 +574,28 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
       return;
     }
 
-    if (parents.length === 0) {
+    if (allParentsMerged.length === 0) {
       alert('Hakuna wazazi waliosajiliwa kwenye mfumo.');
       return;
     }
 
-    // Filter recipients by target
-    const targetParents = parents.filter(p => {
+    // Filter recipients by target (linked to dynamic student classes)
+    const targetParents = allParentsMerged.filter(p => {
       if (announcementTarget === 'All school') return true;
-      return p.class_level?.toLowerCase() === announcementTarget.toLowerCase();
+      
+      // Dynamic parent-student matching by phone suffix or student registration number
+      const student = students?.find(st => {
+        const parentPhone = st.parentPhone || st.phone || (st as any).parent_phone || '';
+        const cleanPPhone = (p.phone_255 || p.phone || '').trim();
+        return (
+          (p.student_cno && st.regNo?.toUpperCase().trim() === p.student_cno.toUpperCase().trim()) ||
+          (cleanPPhone && parentPhone.includes(cleanPPhone.slice(-9)))
+        );
+      });
+      
+      const studentClass = student?.className || p.class_level || p.class_name || 'All';
+      return studentClass.toLowerCase().includes(announcementTarget.toLowerCase()) || 
+             announcementTarget.toLowerCase().includes(studentClass.toLowerCase());
     });
 
     if (targetParents.length === 0) {
@@ -591,36 +672,128 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
 
   // Add / Save single parent phone
   const handleSaveParent = async (cno: string, phone: string, name?: string) => {
-    if (!cno || !phone) return;
-    try {
-      const payload: ParentItem = {
-        id: `${schoolId}_${cno.replace(/[^A-Za-z0-9]/g, '_')}`,
-        school_id: schoolId,
-        student_cno: cno.toUpperCase().trim(),
-        phone_255: phone.trim(),
-        student_name: name || cno,
-        password: '123456'
-      };
+    if (!cno || !phone) {
+      alert("Tafadhali jaza CNO ya mwanafunzi na namba ya simu ya mzazi.");
+      return;
+    }
 
-      console.log("Current school_id (Saving parent):", schoolId);
-      await supabase.from('parents').insert(payload);
-      
-      // Update local state
+    const cleanPhone = phone.trim();
+    const cleanCno = cno.toUpperCase().trim();
+    const cleanName = name?.trim() || 'Mzazi / Mlezi';
+
+    try {
+      // 1. Check if parent with same phone number already exists to avoid unique constraint violations
+      const { data: existingParents, error: checkError } = await supabase
+        .from('parents')
+        .select('*')
+        .eq('phone', cleanPhone);
+
+      if (checkError) {
+        console.warn("Error checking existing parents:", checkError);
+      }
+
+      let payload: any;
+      let isUpdate = false;
+
+      if (existingParents && existingParents.length > 0) {
+        // Parent already exists! Update their row to link with this student CNO
+        isUpdate = true;
+        const parent = existingParents[0];
+        
+        payload = {
+          ...parent,
+          student_cno: cleanCno,
+          phone_255: cleanPhone,
+          phone: cleanPhone,
+          student_name: cleanName,
+          full_name: parent.full_name || cleanName,
+          parent_name: parent.parent_name || 'Mzazi',
+          class_name: parent.class_name || 'All',
+          class_level: parent.class_level || 'All'
+        };
+
+        const { error: updateError } = await supabase
+          .from('parents')
+          .update(payload)
+          .eq('id', parent.id);
+
+        if (updateError) {
+          console.warn("Update with extended fields failed, trying fallback schema:", updateError);
+          // Try updating with fallback schema columns
+          const fallbackPayload = {
+            student_name: cleanName,
+            parent_name: parent.parent_name || 'Mzazi',
+            class_name: parent.class_name || 'All'
+          };
+          const { error: retryUpdateError } = await supabase
+            .from('parents')
+            .update(fallbackPayload)
+            .eq('id', parent.id);
+          
+          if (retryUpdateError) throw retryUpdateError;
+        }
+      } else {
+        // Parent doesn't exist, insert new
+        const uniqueId = `parent_${schoolId}_${cleanCno.replace(/[^A-Za-z0-9]/g, '_')}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+        
+        payload = {
+          id: uniqueId,
+          school_id: schoolId,
+          student_cno: cleanCno,
+          phone_255: cleanPhone,
+          phone: cleanPhone,
+          student_name: cleanName,
+          full_name: cleanName,
+          parent_name: 'Mzazi',
+          password: '123456',
+          password_hash: '123456',
+          class_name: 'All',
+          class_level: 'All'
+        };
+
+        const { error: insertError } = await supabase.from('parents').insert(payload);
+        
+        if (insertError) {
+          console.warn("Insert with extended fields failed, trying fallback schema:", insertError);
+          // Try inserting with standard PostgreSQL columns
+          const fallbackPayload: any = {
+            id: uniqueId,
+            school_id: schoolId,
+            student_name: cleanName,
+            parent_name: 'Mzazi',
+            phone: cleanPhone,
+            class_name: 'All'
+          };
+          const { error: retryInsertError } = await supabase.from('parents').insert(fallbackPayload);
+          if (retryInsertError) throw retryInsertError;
+          payload = fallbackPayload;
+        }
+      }
+
+      // Update local state without removing unrelated parents
       setParents(prev => {
-        const existing = prev.filter(p => p.student_cno !== payload.student_cno);
+        const existing = prev.filter(p => p.phone_255 !== cleanPhone && p.phone !== cleanPhone && p.id !== payload.id);
         return [payload, ...existing];
       });
 
       setNewParentCno('');
       setNewParentPhone('');
       setNewParentName('');
+      
       setNotification({
         type: 'success',
-        message: `Namba ya mzazi wa ${cno} imehifadhiwa kikamilifu!`
+        message: isUpdate 
+          ? `Taarifa za mzazi wa mwanafunzi ${cleanCno} zimesasishwa kikamilifu!`
+          : `Mzazi wa mwanafunzi ${cleanCno} ameongezwa kikamilifu!`
       });
-    } catch (err) {
+      
+      alert(isUpdate ? "Taarifa za mzazi zimesasishwa kikamilifu!" : "Mzazi ameongezwa kikamilifu!");
+      
+      // Refresh the complete list from Supabase
+      await loadParents();
+    } catch (err: any) {
       console.error('Error saving parent:', err);
-      alert('Hitilafu wakati wa kuhifadhi mzazi');
+      alert('Hitilafu wakati wa kuhifadhi mzazi: ' + (err.message || err));
     }
   };
 

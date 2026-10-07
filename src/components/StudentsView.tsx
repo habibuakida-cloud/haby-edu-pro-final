@@ -49,6 +49,7 @@ import { downloadFile, escapeCSV, printFormattedSection } from '../utils/export'
 import { formatStudentRegNo, getNextStudentRegNo } from '../utils/studentRegUtils';
 import { GenderSummary } from './common/GenderSummary';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
+import { supabase } from '../lib/supabaseClient';
 import { PhoneInputPlugin } from './common/PhoneInputPlugin';
 import { StudentPhoneBadge } from './common/StudentPhoneBadge';
 import { StudentCsvImportModal } from './Students/StudentCsvImportModal';
@@ -164,6 +165,35 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
   // List filters & sorting (with gender-grouped alphabetical arrangement per user request)
   const [activeTab, setActiveTab] = useState<'form' | 'register_list' | 'classes_streams' | 'parents_list' | 'class_lists'>('classes_streams');
+  
+  // DB Parents list for Parent Directory
+  const [dbParents, setDbParents] = useState<any[]>([]);
+  const [loadingDbParents, setLoadingDbParents] = useState(false);
+
+  const fetchDbParents = async () => {
+    try {
+      setLoadingDbParents(true);
+      const schoolId = schoolInfo?.schoolNumber || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
+      const { data, error } = await supabase
+        .from('parents')
+        .select('*')
+        .eq('school_id', schoolId);
+      if (!error && data) {
+        setDbParents(data);
+      }
+    } catch (e) {
+      console.warn("Error fetching parents in StudentsView:", e);
+    } finally {
+      setLoadingDbParents(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'parents_list') {
+      fetchDbParents();
+    }
+  }, [activeTab]);
+
   const [searchFilter, setSearchFilter] = useState('');
   const [classFilter, setClassFilter] = useState('ALL');
   const [streamFilter, setStreamFilter] = useState('ALL');
@@ -2673,14 +2703,42 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <tbody className="divide-y divide-slate-100">
                 {(() => {
                   const parentMap = new Map<string, { parentName: string; phone: string; students: any[] }>();
+                  
+                  // 1. First populate from students array
                   students.forEach(st => {
                     const phone = st.parentPhone || st.phone || (st as any).parent_phone || '';
                     if (!phone) return;
                     const pName = st.parentName || (st as any).parent_name || 'Mzazi / Mlezi';
-                    if (!parentMap.has(phone)) {
-                      parentMap.set(phone, { parentName: pName, phone, students: [] });
+                    const cleanPhone = phone.trim();
+                    if (!parentMap.has(cleanPhone)) {
+                      parentMap.set(cleanPhone, { parentName: pName, phone: cleanPhone, students: [] });
                     }
-                    parentMap.get(phone)?.students.push(st);
+                    if (!parentMap.get(cleanPhone)?.students.some(s => s.id === st.id)) {
+                      parentMap.get(cleanPhone)?.students.push(st);
+                    }
+                  });
+
+                  // 2. Then merge from dbParents (loaded from parents table)
+                  dbParents.forEach(dp => {
+                    const phone = dp.phone || dp.phone_255 || '';
+                    if (!phone) return;
+                    const cleanPhone = phone.trim();
+                    const pName = dp.parent_name || dp.full_name || dp.student_name || 'Mzazi / Mlezi';
+                    
+                    if (!parentMap.has(cleanPhone)) {
+                      parentMap.set(cleanPhone, { parentName: pName, phone: cleanPhone, students: [] });
+                    }
+                    
+                    // Unconditionally find and link students by CNO or parentPhone
+                    const matchedSt = students.filter(st => 
+                      (dp.student_cno && st.regNo?.toUpperCase().trim() === dp.student_cno.toUpperCase().trim()) ||
+                      (st.parentPhone && st.parentPhone.trim() === cleanPhone)
+                    );
+                    matchedSt.forEach(st => {
+                      if (!parentMap.get(cleanPhone)?.students.some(s => s.id === st.id)) {
+                        parentMap.get(cleanPhone)?.students.push(st);
+                      }
+                    });
                   });
 
                   const parentsList = Array.from(parentMap.values());
@@ -2701,13 +2759,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       <td className="p-3 border-r border-slate-200 font-bold text-slate-900">{p.parentName}</td>
                       <td className="p-3 border-r border-slate-200 font-mono font-bold text-blue-600">{p.phone}</td>
                       <td className="p-3 border-r border-slate-200 font-semibold text-slate-800">
-                        {p.students.map(s => s.name).join(', ')}
+                        {p.students.length > 0 ? p.students.map(s => s.name).join(', ') : 'Hakuna mwanafunzi aliyeunganishwa'}
                       </td>
                       <td className="p-3 border-r border-slate-200 font-mono text-slate-600">
-                        {p.students.map(s => s.regNo).join(', ')}
+                        {p.students.length > 0 ? p.students.map(s => s.regNo || '-').join(', ') : '-'}
                       </td>
                       <td className="p-3 border-r border-slate-200 font-bold text-slate-700">
-                        {p.students.map(s => `${s.className} (${s.stream || '-'})`).join('; ')}
+                        {p.students.length > 0 ? p.students.map(s => `${s.className} (${s.stream || '-'})`).join('; ') : '-'}
                       </td>
                       <td className="p-3 text-center">
                         <button
