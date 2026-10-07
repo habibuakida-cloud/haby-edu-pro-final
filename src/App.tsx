@@ -23,6 +23,7 @@ import { SubscriptionModal } from './components/common/SubscriptionModal';
 import { DisciplineView } from './components/DisciplineView';
 import { LessonPlanView } from './components/LessonPlan/LessonPlanView';
 import { SchemeOfWorkView } from './components/SchemeOfWork/SchemeOfWorkView';
+import { TeacherPortalView } from './components/Teachers/TeacherPortalView';
 import { FloatingBubbles } from './components/FloatingBubbles';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { ParentPortalView } from './components/ParentPortalView';
@@ -1323,6 +1324,39 @@ export default function App() {
               periodSettings={data.periodSettings || []}
               schoolInfo={data.schoolInfo}
               currentUser={userAccount}
+            />
+          )}
+
+          {activeView === 'teacherportal' && (
+            <TeacherPortalView
+              teachers={data.teachers}
+              students={data.students}
+              schoolInfo={data.schoolInfo}
+              streamSettings={data.streamSettings || []}
+              currentUser={userAccount}
+              dailyAttendance={data.dailyAttendance || {}}
+              onSaveDailyAttendance={(date, rollCallRecords) => {
+                const currentDaily = data.dailyAttendance || {};
+                const updatedDaily = {
+                  ...currentDaily,
+                  [date]: rollCallRecords
+                };
+                updateRemoteData({ dailyAttendance: updatedDaily as any });
+              }}
+              onUpdateStudent={handleUpdateStudent}
+              onUpdateStudents={handleUpdateStudents}
+              exams={data.exams}
+              examinationRecords={data.examinationRecords || []}
+              onAutoSaveExaminationRecords={examinationRecords => {
+                const activityLogs = logActivity(
+                  'EXAM_UPDATED',
+                  'results',
+                  'Auto-Saved Examination Records from Teacher Portal',
+                  `Auto-saved ${examinationRecords.length} records`
+                );
+                updateRemoteData({ examinationRecords, activityLogs });
+              }}
+              onNavigateToView={view => setActiveView(view as any)}
             />
           )}
 

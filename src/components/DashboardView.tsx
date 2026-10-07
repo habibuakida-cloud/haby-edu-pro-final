@@ -28,7 +28,9 @@ import {
   Award,
   CalendarCheck,
   FileSpreadsheet,
-  Search
+  Search,
+  ClipboardCheck,
+  ShieldAlert
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount } from '../types';
@@ -331,18 +333,32 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
 
         {/* Quick Action Shortcuts Bar */}
-        <div className="mt-8 pt-6 border-t border-white/15 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        <div className="mt-8 pt-6 border-t border-white/15 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
           <button
             type="button"
-            onClick={() => handleNavigate('students')}
+            onClick={() => handleNavigate('teacherportal')}
+            className="p-3 bg-gradient-to-br from-amber-500/25 to-orange-600/25 hover:from-amber-500/35 hover:to-orange-600/35 border border-amber-300/40 rounded-2xl text-left transition group cursor-pointer flex items-center gap-3 shadow-sm"
+          >
+            <div className="p-2.5 bg-amber-500/40 text-amber-100 rounded-xl group-hover:scale-110 transition shadow-inner">
+              <GraduationCap className="w-4 h-4" />
+            </div>
+            <div className="min-w-0">
+              <span className="text-[11px] font-black text-white block truncate">Sehemu ya Mwalimu</span>
+              <span className="text-[9px] text-amber-200 font-semibold block truncate">Teacher Hub</span>
+            </div>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => handleNavigate('attendance')}
             className="p-3 bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 rounded-2xl text-left transition group cursor-pointer flex items-center gap-3"
           >
             <div className="p-2.5 bg-blue-500/30 text-blue-200 rounded-xl group-hover:scale-110 transition">
-              <UserPlus className="w-4 h-4" />
+              <ClipboardCheck className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <span className="text-[11px] font-black text-white block truncate">+ Usajili Mpya</span>
-              <span className="text-[9px] text-blue-200 font-semibold block truncate">Wanafunzi</span>
+              <span className="text-[11px] font-black text-white block truncate">+ Kuita Majina</span>
+              <span className="text-[9px] text-blue-200 font-semibold block truncate">Take Attendance</span>
             </div>
           </button>
 
@@ -356,49 +372,49 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             </div>
             <div className="min-w-0">
               <span className="text-[11px] font-black text-white block truncate">+ Weka Matokeo</span>
-              <span className="text-[9px] text-emerald-200 font-semibold block truncate">Mark Entry</span>
+              <span className="text-[9px] text-emerald-200 font-semibold block truncate">Add Marks</span>
             </div>
           </button>
 
           <button
             type="button"
-            onClick={() => handleNavigate('finance')}
+            onClick={() => handleNavigate('discipline')}
             className="p-3 bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 rounded-2xl text-left transition group cursor-pointer flex items-center gap-3"
           >
-            <div className="p-2.5 bg-amber-500/30 text-amber-200 rounded-xl group-hover:scale-110 transition">
-              <Wallet className="w-4 h-4" />
+            <div className="p-2.5 bg-rose-500/30 text-rose-200 rounded-xl group-hover:scale-110 transition">
+              <ShieldAlert className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <span className="text-[11px] font-black text-white block truncate">+ Michango / Ada</span>
-              <span className="text-[9px] text-amber-200 font-semibold block truncate">SaaS Finance</span>
+              <span className="text-[11px] font-black text-white block truncate">+ Ripoti Nidhamu</span>
+              <span className="text-[9px] text-rose-200 font-semibold block truncate">Discipline Log</span>
             </div>
           </button>
 
           <button
             type="button"
-            onClick={() => handleNavigate('sittingplan')}
+            onClick={() => handleNavigate('students')}
             className="p-3 bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 rounded-2xl text-left transition group cursor-pointer flex items-center gap-3"
           >
             <div className="p-2.5 bg-sky-500/30 text-sky-200 rounded-xl group-hover:scale-110 transition">
-              <Grid className="w-4 h-4" />
+              <UserPlus className="w-4 h-4" />
             </div>
             <div className="min-w-0">
-              <span className="text-[11px] font-black text-white block truncate">+ Sitting Plan</span>
-              <span className="text-[9px] text-sky-200 font-semibold block truncate">Exam Desks</span>
+              <span className="text-[11px] font-black text-white block truncate">+ Usajili Mpya</span>
+              <span className="text-[9px] text-sky-200 font-semibold block truncate">Wanafunzi</span>
             </div>
           </button>
 
           <button
             type="button"
             onClick={() => handleNavigate('sms')}
-            className="p-3 bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 rounded-2xl text-left transition group cursor-pointer flex items-center gap-3 col-span-2 sm:col-span-1"
+            className="p-3 bg-white/10 hover:bg-white/20 border border-white/15 hover:border-white/30 rounded-2xl text-left transition group cursor-pointer flex items-center gap-3"
           >
             <div className="p-2.5 bg-purple-500/30 text-purple-200 rounded-xl group-hover:scale-110 transition">
               <Smartphone className="w-4 h-4" />
             </div>
             <div className="min-w-0">
               <span className="text-[11px] font-black text-white block truncate">+ Tuma SMS</span>
-              <span className="text-[9px] text-purple-200 font-semibold block truncate">Parent Notifications</span>
+              <span className="text-[9px] text-purple-200 font-semibold block truncate">Parent SMS</span>
             </div>
           </button>
         </div>

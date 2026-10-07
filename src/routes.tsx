@@ -32,6 +32,7 @@ export type ActiveView =
   | 'dashboard'
   | 'students'
   | 'teachers'
+  | 'teacherportal'
   | 'classjournal'
   | 'lessonplans'
   | 'schemes'
@@ -95,6 +96,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     iconColor: 'text-amber-400',
     badgeBg: 'bg-amber-100 text-amber-800 border-amber-200',
     subModules: [
+      { id: 'teacherportal', label: 'Sehemu ya Mwalimu (Teacher Hub)', description: 'Kuita majina, kuingiza marks, lesson plan, scheme of work & ripoti za darasa', badge: 'MWALIMU' },
       { id: 'classjournal', label: 'Class Journal', description: 'Classroom period log & daily monitoring book' },
       { id: 'lessonplans', label: 'Lesson Plan', description: 'Prepare, generate & track daily teaching lesson plans' },
       { id: 'schemes', label: 'Scheme of Work', description: 'Curriculum schemes & weekly topic completion' }
