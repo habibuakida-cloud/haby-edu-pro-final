@@ -27,6 +27,7 @@ import { supabase } from '../lib/supabaseClient';
 import { db, auth } from '../lib/firebase';
 import { collection, getDocs, query, where, updateDoc, doc } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { downloadFile } from '../utils/export';
 import { SchoolInfo } from '../types';
 
 interface SmsModuleProps {
@@ -176,6 +177,18 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
 
     return months;
   }, [paymentHistory]);
+
+  const handleExportInsightsCSV = () => {
+    const headers = ['Month', 'Successful Renewals', 'Failed Renewals', 'Total Amount (TZS)'];
+    const rows = paymentInsightsData.map(item => [
+      `"${item.name}"`,
+      item.success,
+      item.failed,
+      item.totalAmount
+    ]);
+    const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    downloadFile(`Payment_Insights_Audit_${new Date().toISOString().split('T')[0]}.csv`, csvContent);
+  };
 
   const handleRetryFailedPayments = async () => {
     try {
@@ -881,7 +894,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
 
       {activeTab === 'insights' && (
         <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-6">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
                 <TrendingUp className="w-5 h-5 text-blue-600" />
@@ -891,6 +904,13 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                 Visualizing successful versus failed subscription renewals and SMS bundle top-ups over the past year.
               </p>
             </div>
+            <button
+              onClick={handleExportInsightsCSV}
+              className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition flex items-center gap-1.5 border border-slate-300 cursor-pointer h-fit"
+            >
+              <Download className="w-4 h-4 text-blue-600" />
+              <span>Export CSV (Audit)</span>
+            </button>
           </div>
 
           <div className="h-80 w-full pt-4">

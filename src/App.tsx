@@ -234,15 +234,17 @@ export default function App() {
         const rawExams = (((examData as any[])?.length || 0) > 0) ? examData : null;
 
         setData(prev => {
-          const nextStudents = rawStudents !== null 
+          const remoteStudents = rawStudents !== null 
             ? rawStudents.map((s, idx) => fromSupabaseStudent(s, idx)) 
-            : prev.students;
+            : [];
+          const nextStudents = mergeById(prev.students, remoteStudents);
           const nextRecords = rawRecords !== null 
             ? rawRecords 
             : (prev.examinationRecords || []);
-          const nextTeachers = rawTeachers !== null 
+          const remoteTeachers = rawTeachers !== null 
             ? rawTeachers.map((t, idx) => fromSupabaseTeacher(t, idx)) 
-            : prev.teachers;
+            : [];
+          const nextTeachers = mergeById(prev.teachers, remoteTeachers);
           const nextExams = rawExams !== null 
             ? rawExams.map((e, idx) => fromSupabaseExam(e, idx)) 
             : prev.exams;
@@ -281,8 +283,8 @@ export default function App() {
           const snapExams = Array.isArray(firestoreSnapshot.exams) ? firestoreSnapshot.exams : [];
           const snapStreams = Array.isArray(firestoreSnapshot.streamSettings) ? firestoreSnapshot.streamSettings : [];
 
-          const useStudents = (snapStudents.length > 0 || prev.students.length === 0) ? snapStudents : prev.students;
-          const useTeachers = (snapTeachers.length > 0 || prev.teachers.length === 0) ? snapTeachers : prev.teachers;
+          const useStudents = mergeById(prev.students, snapStudents);
+          const useTeachers = mergeById(prev.teachers, snapTeachers);
           const useExams = (snapExams.length > 0 || prev.exams.length === 0) ? snapExams : prev.exams;
           const useStreams = (snapStreams.length > 0 || (prev.streamSettings || []).length === 0) ? snapStreams : prev.streamSettings;
 
@@ -603,11 +605,14 @@ export default function App() {
   const handleAddStudent = async (student: Student) => {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleAddStudent):", schoolId);
+    const studentWithId = {
+      ...student,
+      id: student.id || Date.now(),
+      school_id: schoolId
+    };
+
     try {
-      await supabase.from('students').upsert({
-        ...student,
-        school_id: schoolId
-      }, { onConflict: 'id' });
+      await supabase.from('students').upsert(studentWithId, { onConflict: 'id' });
     } catch (e) {
       console.warn("Error upserting student in Supabase:", e);
     }
@@ -615,9 +620,9 @@ export default function App() {
       'STUDENT_ADDED',
       'students',
       'Student Enrolled',
-      `Enrolled ${student.name} (${student.regNo || 'No Reg'}) in Form ${student.className}`
+      `Enrolled ${studentWithId.name} (${studentWithId.regNo || 'No Reg'}) in Form ${studentWithId.className}`
     );
-    updateRemoteData({ students: [...data.students, student], activityLogs });
+    updateRemoteData({ students: [...data.students, studentWithId], activityLogs });
   };
 
   const handleBulkAddStudents = async (newStudents: Student[]) => {
@@ -704,11 +709,26 @@ export default function App() {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleDeleteStudent):", schoolId);
     const targetStrId = String(id);
+    const numericId = Number(id);
+
+    const newStudents = data.students.filter(s => String(s.id) !== targetStrId);
+
     try {
       await supabase.from('students').delete().eq('id', id).eq('school_id', schoolId);
+      if (!isNaN(numericId)) {
+        await supabase.from('students').delete().eq('id', numericId).eq('school_id', schoolId);
+      }
+      await supabase.from('students').delete().eq('id', targetStrId).eq('school_id', schoolId);
     } catch (e) {
       console.warn("Error deleting student doc in Supabase:", e);
     }
+
+    try {
+      await saveSchoolData(schoolId, { students: newStudents });
+    } catch (e) {
+      console.warn("Error updating Firestore after student deletion:", e);
+    }
+
     const target = data.students.find(s => String(s.id) === targetStrId);
     const activityLogs = logActivity(
       'STUDENT_DELETED',
@@ -717,7 +737,7 @@ export default function App() {
       `Removed student ${target?.name || `ID #${id}`} from school records`
     );
     updateRemoteData({
-      students: data.students.filter(s => String(s.id) !== targetStrId),
+      students: newStudents,
       activityLogs
     });
   };
@@ -729,11 +749,22 @@ export default function App() {
     const idStrings = ids.map(id => String(id));
     const idSet = new Set(idStrings);
     const count = ids.length;
+
+    const newStudents = data.students.filter(s => !idSet.has(String(s.id)));
+
     try {
       await supabase.from('students').delete().in('id', ids).eq('school_id', schoolId);
+      await supabase.from('students').delete().in('id', idStrings).eq('school_id', schoolId);
     } catch (e) {
       console.warn("Error bulk deleting students in Supabase:", e);
     }
+
+    try {
+      await saveSchoolData(schoolId, { students: newStudents });
+    } catch (e) {
+      console.warn("Error updating Firestore after bulk student deletion:", e);
+    }
+
     const activityLogs = logActivity(
       'STUDENT_DELETED',
       'students',
@@ -741,7 +772,7 @@ export default function App() {
       `Bulk deleted ${count} student(s) from school records`
     );
     updateRemoteData({
-      students: data.students.filter(s => !idSet.has(String(s.id))),
+      students: newStudents,
       activityLogs
     });
   };
@@ -822,18 +853,34 @@ export default function App() {
     });
   };
 
-  const handleDeleteTeacher = async (id: number) => {
+  const handleDeleteTeacher = async (id: number | string) => {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleDeleteTeacher):", schoolId);
+    const targetStrId = String(id);
+    const numericId = Number(id);
+
+    const newTeachers = data.teachers.filter(t => String(t.id) !== targetStrId);
+
     try {
       await supabase.from('teachers').delete().eq('id', id).eq('school_id', schoolId);
+      if (!isNaN(numericId)) {
+        await supabase.from('teachers').delete().eq('id', numericId).eq('school_id', schoolId);
+      }
+      await supabase.from('teachers').delete().eq('id', targetStrId).eq('school_id', schoolId);
     } catch (e) {
       console.warn("Error deleting teacher doc in Supabase:", e);
     }
-    const target = data.teachers.find(t => t.id === id);
+
+    try {
+      await saveSchoolData(schoolId, { teachers: newTeachers });
+    } catch (e) {
+      console.warn("Error updating Firestore after teacher deletion:", e);
+    }
+
+    const target = data.teachers.find(t => String(t.id) === targetStrId);
     const newInvigAssignments = { ...data.invigilationAssignments };
     Object.keys(newInvigAssignments).forEach(key => {
-      if (newInvigAssignments[key] === id) {
+      if (newInvigAssignments[key] === id || String(newInvigAssignments[key]) === targetStrId) {
         delete newInvigAssignments[key];
       }
     });
@@ -846,27 +893,40 @@ export default function App() {
     );
 
     updateRemoteData({
-      teachers: data.teachers.filter(t => t.id !== id),
-      selectedInvigilators: data.selectedInvigilators.filter(tid => tid !== id),
-      timetableAssignments: data.timetableAssignments.map(a => (a.teacherId === id ? { ...a, teacherId: undefined } : a)),
+      teachers: newTeachers,
+      selectedInvigilators: data.selectedInvigilators.filter(tid => String(tid) !== targetStrId),
+      timetableAssignments: data.timetableAssignments.map(a => (String(a.teacherId) === targetStrId ? { ...a, teacherId: undefined } : a)),
       invigilationAssignments: newInvigAssignments,
       activityLogs
     });
   };
 
-  const handleBulkDeleteTeachers = async (ids: number[]) => {
+  const handleBulkDeleteTeachers = async (ids: (number | string)[]) => {
     if (!ids || ids.length === 0) return;
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleBulkDeleteTeachers):", schoolId);
+    const idStrings = ids.map(id => String(id));
+    const idSet = new Set(idStrings);
+    const count = ids.length;
+
+    const newTeachers = data.teachers.filter(t => !idSet.has(String(t.id)));
+
     try {
       await supabase.from('teachers').delete().in('id', ids).eq('school_id', schoolId);
+      await supabase.from('teachers').delete().in('id', idStrings).eq('school_id', schoolId);
     } catch (e) {
       console.warn("Error bulk deleting teachers in Supabase:", e);
     }
-    const idSet = new Set(ids);
+
+    try {
+      await saveSchoolData(schoolId, { teachers: newTeachers });
+    } catch (e) {
+      console.warn("Error updating Firestore after bulk teacher deletion:", e);
+    }
+
     const newInvigAssignments = { ...data.invigilationAssignments };
     Object.keys(newInvigAssignments).forEach(key => {
-      if (idSet.has(newInvigAssignments[key])) {
+      if (idSet.has(String(newInvigAssignments[key]))) {
         delete newInvigAssignments[key];
       }
     });
@@ -875,13 +935,13 @@ export default function App() {
       'TEACHER_DELETED',
       'teachers',
       'Multiple Staff Members Removed',
-      `Bulk deleted ${ids.length} staff members from faculty list`
+      `Bulk deleted ${count} staff members from faculty list`
     );
 
     updateRemoteData({
-      teachers: data.teachers.filter(t => !idSet.has(t.id)),
-      selectedInvigilators: data.selectedInvigilators.filter(tid => !idSet.has(tid)),
-      timetableAssignments: data.timetableAssignments.map(a => (a.teacherId && idSet.has(a.teacherId) ? { ...a, teacherId: undefined } : a)),
+      teachers: newTeachers,
+      selectedInvigilators: data.selectedInvigilators.filter(tid => !idSet.has(String(tid))),
+      timetableAssignments: data.timetableAssignments.map(a => (a.teacherId && idSet.has(String(a.teacherId)) ? { ...a, teacherId: undefined } : a)),
       invigilationAssignments: newInvigAssignments,
       activityLogs
     });
