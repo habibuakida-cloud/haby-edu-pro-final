@@ -246,7 +246,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
       return;
     }
 
-    const existing = periodSettings.find(p => p.id === inlineEditingId);
+    const existing = periodSettings.find(p => String(p.id) === String(inlineEditingId));
     if (!existing) return;
 
     // Check if name, time, or day changed, and update assignments automatically
@@ -277,7 +277,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     }
 
     const updated = periodSettings.map(p => {
-      if (p.id === inlineEditingId) {
+      if (String(p.id) === String(inlineEditingId)) {
         return {
           ...p,
           day: inlineDay,
@@ -309,7 +309,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
 
     if (editingPeriodId !== null) {
       // EDIT MODE
-      const existing = periodSettings.find(p => p.id === editingPeriodId);
+      const existing = periodSettings.find(p => String(p.id) === String(editingPeriodId));
       if (!existing) return;
 
       const nameChanged = existing.name !== trimmedName;
@@ -339,7 +339,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
       }
 
       const updated = periodSettings.map(p => {
-        if (p.id === editingPeriodId) {
+        if (String(p.id) === String(editingPeriodId)) {
           return {
             ...p,
             day: formDay,
@@ -409,16 +409,16 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
       onUpdateAssignments(updatedAssignments);
     }
 
-    const updatedPeriods = periodSettings.filter(p => p.id !== targetId);
+    const updatedPeriods = periodSettings.filter(p => String(p.id) !== String(targetId));
     onUpdatePeriodSettings(updatedPeriods);
 
-    if (editingPeriodId === targetId) {
+    if (String(editingPeriodId) === String(targetId)) {
       handleCancelEdit();
     }
-    if (inlineEditingId === targetId) {
+    if (String(inlineEditingId) === String(targetId)) {
       setInlineEditingId(null);
     }
-    setSelectedIds(prev => prev.filter(id => id !== targetId));
+    setSelectedIds(prev => prev.filter(id => String(id) !== String(targetId)));
 
     showFeedback(`Period "${periodToDelete.name}" on ${periodToDelete.day} deleted.`);
     setPeriodToDelete(null);
@@ -432,7 +432,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
       return;
     }
 
-    const updated = periodSettings.filter(p => !selectedIds.includes(p.id));
+    const selectedStr = selectedIds.map(String);
+    const updated = periodSettings.filter(p => !selectedStr.includes(String(p.id)));
     onUpdatePeriodSettings(updated);
     setSelectedIds([]);
     showFeedback(`Deleted ${count} selected period(s).`);

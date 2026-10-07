@@ -180,7 +180,7 @@ export const getStreamsForClass = (
 ): string[] => {
   const streamsSet = new Set<string>();
 
-  // Check streamSettings first
+  // Check streamSettings first (Authoritative source)
   if (streamSettings && streamSettings.length > 0) {
     const found = streamSettings.find(
       s => s.className.toLowerCase().trim() === className.toLowerCase().trim()
@@ -189,6 +189,9 @@ export const getStreamsForClass = (
       found.streams.forEach(st => {
         if (st && st.trim()) streamsSet.add(normalizeStreamName(st));
       });
+      if (streamsSet.size > 0) {
+        return Array.from(streamsSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+      }
     }
   }
 

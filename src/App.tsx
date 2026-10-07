@@ -188,13 +188,15 @@ export default function App() {
               const snapStudents = Array.isArray(firestoreSnapshot.students) ? firestoreSnapshot.students : [];
               const snapTeachers = Array.isArray(firestoreSnapshot.teachers) ? firestoreSnapshot.teachers : [];
               const snapExams = Array.isArray(firestoreSnapshot.exams) ? firestoreSnapshot.exams : [];
-              const snapStreams = Array.isArray(firestoreSnapshot.streamSettings) ? firestoreSnapshot.streamSettings : [];
+              const snapStreams = Array.isArray(firestoreSnapshot.streamSettings) ? firestoreSnapshot.streamSettings : null;
+              const snapPeriods = Array.isArray(firestoreSnapshot.periodSettings) ? firestoreSnapshot.periodSettings : null;
 
               // Never overwrite existing data with empty array unless prev is also empty
               const nextStudents = (snapStudents.length > 0 || prev.students.length === 0) ? snapStudents : prev.students;
               const nextTeachers = (snapTeachers.length > 0 || prev.teachers.length === 0) ? snapTeachers : prev.teachers;
               const nextExams = (snapExams.length > 0 || prev.exams.length === 0) ? snapExams : prev.exams;
-              const nextStreams = (snapStreams.length > 0 || (prev.streamSettings || []).length === 0) ? snapStreams : prev.streamSettings;
+              const nextStreams = snapStreams !== null ? snapStreams : prev.streamSettings;
+              const nextPeriods = snapPeriods !== null ? snapPeriods : prev.periodSettings;
 
               const merged: AppData = {
                 ...prev,
@@ -202,9 +204,10 @@ export default function App() {
                 students: nextStudents,
                 teachers: nextTeachers,
                 exams: nextExams,
-                streamSettings: nextStreams
+                streamSettings: nextStreams,
+                periodSettings: nextPeriods
               };
-              // Removed localStorage.setItem
+              try { localStorage.setItem(schoolKey, JSON.stringify(merged)); } catch (e) {}
               return merged;
             });
 
@@ -284,12 +287,14 @@ export default function App() {
           const snapStudents = Array.isArray(firestoreSnapshot.students) ? firestoreSnapshot.students : [];
           const snapTeachers = Array.isArray(firestoreSnapshot.teachers) ? firestoreSnapshot.teachers : [];
           const snapExams = Array.isArray(firestoreSnapshot.exams) ? firestoreSnapshot.exams : [];
-          const snapStreams = Array.isArray(firestoreSnapshot.streamSettings) ? firestoreSnapshot.streamSettings : [];
+          const snapStreams = Array.isArray(firestoreSnapshot.streamSettings) ? firestoreSnapshot.streamSettings : null;
+          const snapPeriods = Array.isArray(firestoreSnapshot.periodSettings) ? firestoreSnapshot.periodSettings : null;
 
           const useStudents = mergeById(prev.students, snapStudents);
           const useTeachers = mergeById(prev.teachers, snapTeachers);
           const useExams = (snapExams.length > 0 || prev.exams.length === 0) ? snapExams : prev.exams;
-          const useStreams = (snapStreams.length > 0 || (prev.streamSettings || []).length === 0) ? snapStreams : prev.streamSettings;
+          const useStreams = snapStreams !== null ? snapStreams : prev.streamSettings;
+          const usePeriods = snapPeriods !== null ? snapPeriods : prev.periodSettings;
 
           const merged: AppData = {
             ...prev,
@@ -297,9 +302,10 @@ export default function App() {
             students: useStudents,
             teachers: useTeachers,
             exams: useExams,
-            streamSettings: useStreams
+            streamSettings: useStreams,
+            periodSettings: usePeriods
           };
-          try { /* localStorage.setItem(schoolKey, JSON.stringify(merged)); */ } catch (e) {}
+          try { localStorage.setItem(schoolKey, JSON.stringify(merged)); } catch (e) {}
           return merged;
         });
         setIsCloudSynced(true);
@@ -398,7 +404,7 @@ export default function App() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => {
         setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
-        try { /* localStorage.setItem(schoolKey, JSON.stringify(nextData)); */ } catch (e) {}
+        try { localStorage.setItem(schoolKey, JSON.stringify(nextData)); } catch (e) {}
       }, 300);
 
       // Durable Firestore Persistence: Save exact nextData state
