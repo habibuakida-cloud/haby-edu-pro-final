@@ -51,8 +51,84 @@ const customFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Pr
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
   auth: { persistSession: false, autoRefreshToken: false },
-  global: { fetch: customFetch }
+  global: { fetch: customFetch },
+  realtime: {
+    params: {
+      eventsPerSecond: 10
+    }
+  }
 });
+
+// Offline Sync Queue
+export interface SyncTask {
+  id: string;
+  table: string;
+  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'UPSERT';
+  data: any;
+  timestamp: number;
+}
+
+const SYNC_QUEUE_KEY = 'haby_sync_queue';
+
+export const getSyncQueue = (): SyncTask[] => {
+  try {
+    const raw = localStorage.getItem(SYNC_QUEUE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+};
+
+export const saveSyncQueue = (queue: SyncTask[]) => {
+  localStorage.setItem(SYNC_QUEUE_KEY, JSON.stringify(queue));
+};
+
+export const addToSyncQueue = (task: Omit<SyncTask, 'id' | 'timestamp'>) => {
+  const queue = getSyncQueue();
+  const newTask: SyncTask = {
+    ...task,
+    id: Math.random().toString(36).substring(2, 9),
+    timestamp: Date.now()
+  };
+  queue.push(newTask);
+  saveSyncQueue(queue);
+  console.log("Added to offline sync queue:", newTask);
+};
+
+export const processSyncQueue = async () => {
+  if (!navigator.onLine) return;
+  const queue = getSyncQueue();
+  if (queue.length === 0) return;
+
+  console.log(`Processing ${queue.length} items from offline sync queue...`);
+  const remaining: SyncTask[] = [];
+
+  for (const task of queue) {
+    try {
+      let result;
+      if (task.action === 'INSERT') result = await supabase.from(task.table).insert(task.data);
+      else if (task.action === 'UPDATE') result = await supabase.from(task.table).update(task.data).eq('id', task.data.id);
+      else if (task.action === 'DELETE') result = await supabase.from(task.table).delete().eq('id', task.data.id);
+      else if (task.action === 'UPSERT') result = await supabase.from(task.table).upsert(task.data);
+
+      if (result?.error) throw result.error;
+    } catch (err) {
+      console.warn("Failed to process sync task, keeping in queue:", err);
+      remaining.push(task);
+    }
+  }
+
+  saveSyncQueue(remaining);
+  if (remaining.length === 0) {
+    console.log("Offline sync queue cleared successfully.");
+  }
+};
+
+// Initial process attempt
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', processSyncQueue);
+}
+
 export default supabase;
 export { createClient };
 
@@ -251,7 +327,96 @@ export const fromSupabaseParent = (row: any) => {
   };
 };
 
-// Helper CRUD Functions with automatic school_id multi-tenancy
+// Activity Log Serializers
+export const toSupabaseActivityLog = (l: any, schoolId: string) => {
+  return {
+    school_id: schoolId,
+    user_email: l.userEmail || l.email || '',
+    action: l.action || '',
+    category: l.category || '',
+    target_name: l.targetName || '',
+    details: l.details || '',
+    timestamp: l.timestamp || new Date().toISOString()
+  };
+};
+
+export const fromSupabaseActivityLog = (row: any) => {
+  return {
+    id: row.id,
+    userEmail: row.user_email,
+    action: row.action,
+    category: row.category,
+    targetName: row.target_name,
+    details: row.details,
+    timestamp: row.timestamp
+  };
+};
+
+// Discipline Record Serializers
+export const toSupabaseDiscipline = (d: any, schoolId: string) => {
+  return {
+    school_id: schoolId,
+    student_id: d.studentId,
+    student_name: d.studentName,
+    incident_type: d.incidentType || d.type,
+    description: d.description,
+    action_taken: d.actionTaken,
+    severity: d.severity,
+    date: d.date || new Date().toISOString().slice(0, 10),
+    reported_by: d.reportedBy
+  };
+};
+
+export const fromSupabaseDiscipline = (row: any) => {
+  return {
+    id: row.id,
+    studentId: row.student_id,
+    studentName: row.student_name,
+    incidentType: row.incident_type,
+    description: row.description,
+    actionTaken: row.action_taken,
+    severity: row.severity,
+    date: row.date,
+    reportedBy: row.reported_by
+  };
+};
+
+// Gate Pass Log Serializers
+export const toSupabaseGatePass = (l: any, schoolId: string) => {
+  return {
+    school_id: schoolId,
+    student_id: l.studentId,
+    student_name: l.studentName,
+    reg_no: l.regNo,
+    class_name: l.className,
+    stream: l.stream,
+    type: l.type,
+    reason: l.reason,
+    officer_name: l.officerName,
+    timestamp: l.timestamp || new Date().toISOString(),
+    status: l.status || 'VALID',
+    fee_status: l.feeStatus
+  };
+};
+
+export const fromSupabaseGatePass = (row: any) => {
+  return {
+    id: row.id,
+    studentId: row.student_id,
+    studentName: row.student_name,
+    regNo: row.reg_no,
+    className: row.class_name,
+    stream: row.stream,
+    type: row.type,
+    reason: row.reason,
+    officerName: row.officer_name,
+    timestamp: row.timestamp,
+    status: row.status,
+    feeStatus: row.fee_status
+  };
+};
+
+// Helper CRUD Functions with automatic school_id multi-tenancy and offline queue
 export async function getAll(table: string, schoolId?: string, isSuperAdmin: boolean = false) {
   const effectiveSchoolId = isSuperAdmin ? undefined : (schoolId || getCurrentSchoolId());
   let query = supabase.from(table).select('*');
@@ -262,17 +427,64 @@ export async function getAll(table: string, schoolId?: string, isSuperAdmin: boo
 }
 
 export async function insertRecord(table: string, data: any) {
+  if (!navigator.onLine) {
+    addToSyncQueue({ table, action: 'INSERT', data });
+    return { data: null, error: null, offline: true };
+  }
   const schoolId = getCurrentSchoolId();
   const payload = (schoolId && !Array.isArray(data) && !data.school_id)
     ? { ...data, school_id: schoolId }
     : data;
-  return await supabase.from(table).insert(payload);
+  
+  const result = await supabase.from(table).insert(payload).select();
+  if (result.error) {
+    console.error(`Error inserting into ${table}:`, result.error);
+    // Optionally add to queue if it's a transient error, but for now just return
+  }
+  return result;
 }
 
 export async function updateRecord(table: string, id: string | number, data: any) {
-  return await supabase.from(table).update(data).eq('id', id);
+  if (!navigator.onLine) {
+    addToSyncQueue({ table, action: 'UPDATE', data: { ...data, id } });
+    return { data: null, error: null, offline: true };
+  }
+  
+  // Guard against overwriting with empty data if it's a critical count/list
+  if (Array.isArray(data) && data.length === 0 && (table === 'students' || table === 'teachers')) {
+    console.warn(`Prevented overwriting ${table} with 0 records.`);
+    return { data: null, error: new Error("Empty data guard triggered") };
+  }
+
+  const result = await supabase.from(table).update(data).eq('id', id).select();
+  return result;
+}
+
+export async function upsertRecord(table: string, data: any, onConflict: string = 'id') {
+  if (!navigator.onLine) {
+    addToSyncQueue({ table, action: 'UPSERT', data });
+    return { data: null, error: null, offline: true };
+  }
+
+  // Guard against overwriting with empty data if it's a critical count/list
+  if (Array.isArray(data) && data.length === 0 && (table === 'students' || table === 'teachers')) {
+    console.warn(`Prevented overwriting ${table} with 0 records.`);
+    return { data: null, error: new Error("Empty data guard triggered") };
+  }
+
+  const schoolId = getCurrentSchoolId();
+  const payload = (schoolId && !Array.isArray(data) && !data.school_id)
+    ? { ...data, school_id: schoolId }
+    : data;
+
+  const result = await supabase.from(table).upsert(payload, { onConflict }).select();
+  return result;
 }
 
 export async function deleteRecord(table: string, id: string | number) {
+  if (!navigator.onLine) {
+    addToSyncQueue({ table, action: 'DELETE', data: { id } });
+    return { data: null, error: null, offline: true };
+  }
   return await supabase.from(table).delete().eq('id', id);
 }

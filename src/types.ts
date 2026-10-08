@@ -534,6 +534,11 @@ export interface AppData {
   savedInvigilationRecords?: SavedInvigilationRecord[];
   subjectPaperConfigs?: Record<string, 1 | 2 | 3>;
   qrScanLogs?: QrScanAttendanceRecord[];
+  bubbleSettings?: {
+    enabled: boolean;
+    theme: string;
+    density: 'low' | 'medium' | 'high';
+  };
 }
 
 export interface QrScanAttendanceRecord {

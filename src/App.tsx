@@ -47,9 +47,22 @@ import {
   fromSupabaseTeacher, 
   toSupabaseExam, 
   fromSupabaseExam,
-  checkSupabaseHealth 
+  toSupabaseParent,
+  fromSupabaseParent,
+  toSupabaseActivityLog,
+  fromSupabaseActivityLog,
+  toSupabaseDiscipline,
+  fromSupabaseDiscipline,
+  toSupabaseGatePass,
+  fromSupabaseGatePass,
+  addToSyncQueue,
+  processSyncQueue,
+  checkSupabaseHealth,
+  insertRecord,
+  upsertRecord,
+  getCurrentSchoolId
 } from './lib/supabaseClient';
-import { saveSchoolData, getSchoolData, subscribeSchoolData } from './lib/firestoreService';
+import { getSchoolData, subscribeSchoolData } from './lib/firestoreService';
 import { saveTimetableAssignments } from './lib/timetableService';
 import { Loader2, Shield, Menu, RotateCw, Check } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
@@ -118,14 +131,12 @@ export default function App() {
   const saveSchoolDataToSupabase = async (schId: string, snapData: any) => {
     if (!schId) return;
     try {
+      // ONE SOURCE OF TRUTH: Relational data are REMOVED 
+      // from this JSON snapshot to ensure they only live in their respective tables.
       const payload = {
         id: schId,
         school_id: schId,
         school_info: snapData.schoolInfo || {},
-        students: snapData.students || [],
-        teachers: snapData.teachers || [],
-        exams: snapData.exams || [],
-        examination_records: snapData.examinationRecords || [],
         timetable_assignments: snapData.timetableAssignments || [],
         period_settings: snapData.periodSettings || [],
         stream_settings: snapData.streamSettings || [],
@@ -134,11 +145,12 @@ export default function App() {
         supervisors: snapData.supervisors || [],
         selected_invigilators: snapData.selectedInvigilators || [],
         invigilation_assignments: snapData.invigilationAssignments || {},
-        activity_logs: snapData.activityLogs || [],
-        discipline_records: snapData.disciplineRecords || [],
+        daily_attendance: snapData.dailyAttendance || {},
+        journal_records: snapData.journalRecords || {},
         updated_at: new Date().toISOString()
       };
-      await supabase.from('school_data').upsert(payload, { onConflict: 'school_id' });
+      
+      await upsertRecord('school_data', payload, 'school_id');
     } catch (err) {
       console.warn("Error saving school snapshot to Supabase school_data:", err);
     }
@@ -184,20 +196,28 @@ export default function App() {
       });
     }
 
-    // 0. Primary Database Load: Prioritize Supabase (the real Relational DB) & Firestore
+    // 0. Primary Database Load: Prioritize Supabase Relational Tables
     const loadFromDatabase = async (isInitialBoot = false) => {
-      console.log("Loading reliable relational data from Supabase for school:", schoolId);
+      console.log("Loading single source of truth from Supabase Tables for school:", schoolId);
+
+      // Process any pending offline changes before loading
+      if (navigator.onLine) {
+        await processSyncQueue();
+      }
 
       try {
-        // B. Fetch Relational Data from Supabase
-        const [studRes, recRes, teachRes, examRes, parentRes, psRes, schoolDataRes] = await Promise.all([
+        // Fetch Relational Data from Tables
+        const [studRes, recRes, teachRes, examRes, parentRes, psRes, actRes, discRes, gateRes, schoolDataRes] = await Promise.all([
           supabase.from('students').select('*').eq('school_id', schoolId),
           supabase.from('exam_records').select('*').eq('school_id', schoolId),
           supabase.from('teachers').select('*').eq('school_id', schoolId),
           supabase.from('exams').select('*').eq('school_id', schoolId),
           supabase.from('parents').select('*').eq('school_id', schoolId),
           supabase.from('parent_students').select('*'),
-          supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1)
+          supabase.from('activity_logs').select('*').eq('school_id', schoolId).order('timestamp', { ascending: false }).limit(100),
+          supabase.from('discipline_records').select('*').eq('school_id', schoolId),
+          supabase.from('gate_pass_logs').select('*').eq('school_id', schoolId).order('timestamp', { ascending: false }).limit(50),
+          supabase.from('school_data').select('*').eq('school_id', schoolId).maybeSingle()
         ]);
 
         const studData = studRes?.data || [];
@@ -206,38 +226,35 @@ export default function App() {
         const examData = examRes?.data || [];
         const parentData = parentRes?.data || [];
         const psData = psRes?.data || [];
-        const schoolDataArr = schoolDataRes?.data || [];
-        const remoteData = (schoolDataArr.length > 0 ? schoolDataArr[0] : {}) as Partial<AppData>;
+        const actData = actRes?.data || [];
+        const discData = discRes?.data || [];
+        const gateData = gateRes?.data || [];
+        const remoteData = (schoolDataRes?.data || {}) as Partial<AppData>;
 
         setSupabaseStudentCount(studData.length);
 
-        // Serialize data from Supabase
+        // Serialize data from Tables
         const remoteStudents = studData.map((s, idx) => fromSupabaseStudent(s, idx));
         const remoteTeachers = teachData.map((t, idx) => fromSupabaseTeacher(t, idx));
         const remoteExams = examData.map((e, idx) => fromSupabaseExam(e, idx));
         const remoteParents = parentData.map((p) => fromSupabaseParent(p));
-
-        // C. Fetch Firestore metadata snapshot
-        const firestoreSnapshot = await getSchoolData(schoolId);
-        const snapStreams = firestoreSnapshot && Array.isArray(firestoreSnapshot.streamSettings) ? firestoreSnapshot.streamSettings : null;
-        const snapPeriods = firestoreSnapshot && Array.isArray(firestoreSnapshot.periodSettings) ? firestoreSnapshot.periodSettings : null;
+        const remoteActivity = actData.map(a => fromSupabaseActivityLog(a));
+        const remoteDiscipline = discData.map(d => fromSupabaseDiscipline(d));
+        const remoteGatePass = gateData.map(l => fromSupabaseGatePass(l));
 
         setData(prev => {
-          const nextStreams = snapStreams !== null ? snapStreams : (remoteData.streamSettings || prev.streamSettings);
-          const nextPeriods = snapPeriods !== null ? snapPeriods : (remoteData.periodSettings || prev.periodSettings);
-
+          // Merge Table data with Snapshot settings
           const updatedState: AppData = {
             ...prev,
             ...remoteData,
-            ...firestoreSnapshot,
-            students: remoteStudents.length > 0 ? remoteStudents : (remoteData.students && remoteData.students.length > 0 ? remoteData.students : prev.students),
-            teachers: remoteTeachers.length > 0 ? remoteTeachers : (remoteData.teachers && remoteData.teachers.length > 0 ? remoteData.teachers : prev.teachers),
-            exams: remoteExams.length > 0 ? remoteExams : (remoteData.exams && remoteData.exams.length > 0 ? remoteData.exams : prev.exams),
-            parents: remoteParents.length > 0 ? remoteParents : (remoteData.parents && remoteData.parents.length > 0 ? remoteData.parents : prev.parents),
-            parentStudents: psData.length > 0 ? psData : (remoteData.parentStudents && remoteData.parentStudents.length > 0 ? remoteData.parentStudents : prev.parentStudents),
-            examinationRecords: recData.length > 0 ? recData : (remoteData.examinationRecords && remoteData.examinationRecords.length > 0 ? remoteData.examinationRecords : prev.examinationRecords),
-            streamSettings: nextStreams,
-            periodSettings: nextPeriods
+            students: remoteStudents.length > 0 ? remoteStudents : (isInitialBoot ? [] : prev.students),
+            teachers: remoteTeachers.length > 0 ? remoteTeachers : (isInitialBoot ? [] : prev.teachers),
+            exams: remoteExams.length > 0 ? remoteExams : (isInitialBoot ? [] : prev.exams),
+            parents: remoteParents.length > 0 ? remoteParents : (isInitialBoot ? [] : prev.parents),
+            parentStudents: psData.length > 0 ? psData : (isInitialBoot ? [] : prev.parentStudents),
+            activityLogs: remoteActivity.length > 0 ? remoteActivity : (isInitialBoot ? [] : prev.activityLogs),
+            disciplineRecords: remoteDiscipline.length > 0 ? remoteDiscipline : (isInitialBoot ? [] : prev.disciplineRecords),
+            examinationRecords: recData.length > 0 ? recData : (isInitialBoot ? [] : prev.examinationRecords),
           };
 
           setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
@@ -255,40 +272,26 @@ export default function App() {
     // Initial load
     loadFromDatabase(true);
 
-    // Real-Time Synchronization: Subscribe to real-time updates from Firestore across devices
-    const unsubscribe = subscribeSchoolData(schoolId, (firestoreSnapshot) => {
-      if (firestoreSnapshot && typeof firestoreSnapshot === 'object') {
-        console.log("Real-time cloud sync from Firestore!");
-        setData(prev => {
-          const snapStudents = Array.isArray(firestoreSnapshot.students) ? firestoreSnapshot.students : null;
-          const snapTeachers = Array.isArray(firestoreSnapshot.teachers) ? firestoreSnapshot.teachers : null;
-          const snapExams = Array.isArray(firestoreSnapshot.exams) ? firestoreSnapshot.exams : null;
-          const snapStreams = Array.isArray(firestoreSnapshot.streamSettings) ? firestoreSnapshot.streamSettings : null;
-          const snapPeriods = Array.isArray(firestoreSnapshot.periodSettings) ? firestoreSnapshot.periodSettings : null;
-          const snapParents = Array.isArray(firestoreSnapshot.parents) ? firestoreSnapshot.parents : null;
+    // 1. Supabase Real-Time Subscriptions (The Real Single Source of Truth)
+    const studentsSub = supabase
+      .channel('public:students')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
+      .subscribe();
 
-          const useStudents = snapStudents !== null ? snapStudents : prev.students;
-          const useTeachers = snapTeachers !== null ? snapTeachers : prev.teachers;
-          const useExams = snapExams !== null ? snapExams : prev.exams;
-          const useStreams = snapStreams !== null ? snapStreams : prev.streamSettings;
-          const usePeriods = snapPeriods !== null ? snapPeriods : prev.periodSettings;
+    const teachersSub = supabase
+      .channel('public:teachers')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
+      .subscribe();
 
-          const merged: AppData = {
-            ...prev,
-            ...firestoreSnapshot,
-            students: useStudents,
-            teachers: useTeachers,
-            exams: useExams,
-            streamSettings: useStreams,
-            periodSettings: usePeriods,
-            parents: snapParents !== null ? snapParents : prev.parents
-          };
-          setCachedData(schoolKey, merged).catch(e => console.warn("IDB cache set error:", e));
-          return merged;
-        });
-        setIsCloudSynced(true);
-      }
-    });
+    const examsSub = supabase
+      .channel('public:exams')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
+      .subscribe();
+
+    const parentsSub = supabase
+      .channel('public:parents')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parents', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
+      .subscribe();
 
     // Auto re-sync when window gains focus (e.g., opening on phone or switching tabs)
     const handleWindowFocus = () => {
@@ -307,7 +310,10 @@ export default function App() {
 
     return () => {
       window.removeEventListener('focus', handleWindowFocus);
-      if (unsubscribe) unsubscribe();
+      supabase.removeChannel(studentsSub);
+      supabase.removeChannel(teachersSub);
+      supabase.removeChannel(examsSub);
+      supabase.removeChannel(parentsSub);
     };
   }, [userAccount]);
 
@@ -315,6 +321,12 @@ export default function App() {
   const handleForceRefreshSync = async () => {
     if (!userAccount?.schoolId) return;
     setIsSyncing(true);
+
+    // 1. Process Offline Queue first if online
+    if (navigator.onLine) {
+      await processSyncQueue();
+    }
+
     const schoolId = userAccount.schoolId;
     const schoolKey = `haby_school_data_${schoolId}`;
     try {
@@ -322,43 +334,30 @@ export default function App() {
       console.log(`Pushing local data to Supabase cloud sync... Local students: ${data.students.length}`);
       
       if (data.students && data.students.length > 0) {
-        // Map local students back to Supabase rows and ensure valid UUIDs
-        const studentsWithValidIds = data.students.map(s => {
-          const isUuid = typeof s.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.id);
-          const validId = isUuid ? s.id : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-            const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-            return v.toString(16);
-          });
-          return { ...s, id: validId };
-        });
-
-        const studentsToPush = studentsWithValidIds.map(s => toSupabaseStudent(s, schoolId));
-        
-        // Chunk inserts if too large to prevent payload size limits
+        const studentsToPush = data.students.map(s => toSupabaseStudent(s, schoolId));
         const chunkSize = 100;
         for (let i = 0; i < studentsToPush.length; i += chunkSize) {
           const chunk = studentsToPush.slice(i, i + chunkSize);
-          await supabase.from('students').upsert(chunk, { onConflict: 'id' });
+          await upsertRecord('students', chunk, 'id');
         }
       }
 
       if (data.teachers && data.teachers.length > 0) {
         const teachersToPush = data.teachers.map(t => toSupabaseTeacher(t, schoolId));
-        await supabase.from('teachers').upsert(teachersToPush, { onConflict: 'id' });
+        await upsertRecord('teachers', teachersToPush, 'id');
       }
 
       if (data.exams && data.exams.length > 0) {
         const examsToPush = data.exams.map(e => toSupabaseExam(e, schoolId));
-        await supabase.from('exams').upsert(examsToPush, { onConflict: 'id' });
+        await upsertRecord('exams', examsToPush, 'id');
       }
 
       if (data.parents && data.parents.length > 0) {
         const parentsToPush = data.parents.map(p => toSupabaseParent(p, schoolId));
-        await supabase.from('parents').upsert(parentsToPush, { onConflict: 'phone' });
+        await upsertRecord('parents', parentsToPush, 'phone');
       }
 
-      // Also save the entire school data state in Firestore as a snapshot backup and Supabase school_data snapshot
-      await saveSchoolData(schoolId, data);
+      // Also save the entire school data state in Supabase school_data snapshot
       await saveSchoolDataToSupabase(schoolId, data);
 
       // 2. Now PULL latest remote data from Supabase to verify sync
@@ -398,8 +397,6 @@ export default function App() {
           examinationRecords: remoteRecords.length > 0 ? remoteRecords : prev.examinationRecords
         };
 
-        saveSchoolData(schoolId, next).catch(e => console.warn("Firestore sync error:", e));
-
         setSyncToast(`Cloud Sync Active: Pushed and synchronized ${next.students.length} Students, ${next.teachers.length} Staff, and ${next.exams.length} Exams.`);
         setTimeout(() => setSyncToast(null), 5000);
 
@@ -418,80 +415,70 @@ export default function App() {
 
   const updateRemoteData = useCallback(async (updates: Partial<AppData>) => {
     setSaveStatus('saving');
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEFAULT_SCHOOL';
+    const schoolId = userAccount?.schoolId || getCurrentSchoolId();
     const schoolKey = `haby_school_data_${schoolId}`;
 
     setData(prev => {
       const nextData: AppData = { ...prev, ...updates };
 
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      debounceTimer.current = setTimeout(() => {
+      debounceTimer.current = setTimeout(async () => {
         setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
         
-        // Also push the complete school_data snapshot to Supabase on debounce to prevent loss!
-        saveSchoolDataToSupabase(schoolId, nextData).catch(e => console.warn("Supabase school_data sync error:", e));
-      }, 300);
-
-      // Durable Firestore Persistence: Save exact nextData state
-      if (userAccount?.schoolId) {
-        saveSchoolData(schoolId, nextData)
-          .then(() => {
-            setSaveStatus('saved');
-            setIsCloudSynced(true);
-          })
-          .catch(e => {
-            console.warn("Firestore data save error:", e);
-            setSaveStatus('saved');
-          });
-      } else {
-        setSaveStatus('saved');
-      }
-
-      return nextData;
-    });
-
-    // Supabase serialization with correct database column mappings
-    if (userAccount?.schoolId) {
-      try {
+        // 1. Relational Table Updates (Targeted mutations) with Offline Support
         if (updates.students && Array.isArray(updates.students)) {
-          if (updates.students.length > 0) {
-            const studentsToPush = updates.students.map(s => toSupabaseStudent(s, schoolId));
-            await supabase.from('students').upsert(studentsToPush, { onConflict: 'id' });
+          // Guard: Never overwrite cloud data with 0 if it had data before
+          if (updates.students.length > 0 || (prev.students && prev.students.length === 0)) {
+            const chunk = updates.students.map(s => toSupabaseStudent(s, schoolId));
+            await upsertRecord('students', chunk, 'id');
           }
         }
 
         if (updates.teachers && Array.isArray(updates.teachers)) {
-          if (updates.teachers.length > 0) {
-            const teachersToPush = updates.teachers.map(t => toSupabaseTeacher(t, schoolId));
-            await supabase.from('teachers').upsert(teachersToPush, { onConflict: 'id' });
+          if (updates.teachers.length > 0 || (prev.teachers && prev.teachers.length === 0)) {
+            const chunk = updates.teachers.map(t => toSupabaseTeacher(t, schoolId));
+            await upsertRecord('teachers', chunk, 'id');
           }
         }
 
         if (updates.exams && Array.isArray(updates.exams)) {
-          if (updates.exams.length > 0) {
-            const examsToPush = updates.exams.map(e => toSupabaseExam(e, schoolId));
-            await supabase.from('exams').upsert(examsToPush, { onConflict: 'id' });
-          }
+          const chunk = updates.exams.map(e => toSupabaseExam(e, schoolId));
+          await upsertRecord('exams', chunk, 'id');
         }
 
         if (updates.examinationRecords && Array.isArray(updates.examinationRecords)) {
-          if (updates.examinationRecords.length > 0) {
-            await supabase.from('exam_records').upsert(
-              updates.examinationRecords.map(r => ({ ...r, school_id: schoolId })),
-              { onConflict: 'id' }
-            );
-          }
+          const chunk = updates.examinationRecords.map(r => ({ ...r, school_id: schoolId }));
+          await upsertRecord('exam_records', chunk, 'id');
+        }
+
+        if (updates.activityLogs && Array.isArray(updates.activityLogs)) {
+          const chunk = updates.activityLogs.map(l => toSupabaseActivityLog(l, schoolId));
+          await insertRecord('activity_logs', chunk);
+        }
+
+        if (updates.disciplineRecords && Array.isArray(updates.disciplineRecords)) {
+          const chunk = updates.disciplineRecords.map(d => toSupabaseDiscipline(d, schoolId));
+          await upsertRecord('discipline_records', chunk, 'id');
+        }
+
+        if (updates.parents && Array.isArray(updates.parents)) {
+          const chunk = updates.parents.map(p => toSupabaseParent(p, schoolId));
+          await upsertRecord('parents', chunk, 'id');
         }
 
         if (updates.timetableAssignments && Array.isArray(updates.timetableAssignments)) {
-          await saveTimetableAssignments(schoolId, updates.timetableAssignments, { replace: true });
+          saveTimetableAssignments(schoolId, updates.timetableAssignments, { replace: true }).catch(e => console.warn("Timetable sync error:", e));
         }
-      } catch (err) {
-        console.warn("Supabase / Timetable upsert sync warning:", err);
-      }
-    } else if (updates.timetableAssignments && Array.isArray(updates.timetableAssignments)) {
-      saveTimetableAssignments(schoolId, updates.timetableAssignments, { replace: true }).catch(e => console.warn("Local timetable save error:", e));
-    }
+
+        // 2. Snapshot Update (Metadata & Settings - Reduced payload)
+        saveSchoolDataToSupabase(schoolId, nextData).catch(e => console.warn("Supabase school_data sync error:", e));
+        
+        setSaveStatus('saved');
+        setIsCloudSynced(true);
+      }, 500);
+
+      return nextData;
+    });
   }, [userAccount]);
 
   // Auto-ensure USAL records exist for all registered exams
@@ -590,6 +577,21 @@ export default function App() {
   }, [userAccount, user, data.activityLogs]);
 
   // Auth Guard
+  // Parent Portal Bypass for login
+  const isParentPortalHash = window.location.hash === '#parentportal' || window.location.pathname === '/parent/login';
+  const hasParentSession = !!sessionStorage.getItem('haby_parent_session');
+
+  if (isParentPortalHash || (hasParentSession && activeView === 'parentportal')) {
+    return (
+      <ConfirmDeleteProvider>
+        <ParentPortalView onBackToMain={() => {
+           window.location.hash = '';
+           window.location.reload();
+        }} />
+      </ConfirmDeleteProvider>
+    );
+  }
+
   if (authLoading && !userAccount) {
     return (
       <div className="min-h-screen bg-[#0f2948] text-white flex flex-col items-center justify-center font-sans">
@@ -771,19 +773,13 @@ export default function App() {
     const newStudents = data.students.filter(s => String(s.id) !== targetStrId);
 
     try {
-      await supabase.from('students').delete().eq('id', id).eq('school_id', schoolId);
+      await deleteRecord('students', id);
       if (!isNaN(numericId)) {
-        await supabase.from('students').delete().eq('id', numericId).eq('school_id', schoolId);
+        await deleteRecord('students', numericId);
       }
-      await supabase.from('students').delete().eq('id', targetStrId).eq('school_id', schoolId);
+      await deleteRecord('students', targetStrId);
     } catch (e) {
       console.warn("Error deleting student doc in Supabase:", e);
-    }
-
-    try {
-      await saveSchoolData(schoolId, { students: newStudents });
-    } catch (e) {
-      console.warn("Error updating Firestore after student deletion:", e);
     }
 
     const target = data.students.find(s => String(s.id) === targetStrId);
@@ -810,16 +806,10 @@ export default function App() {
     const newStudents = data.students.filter(s => !idSet.has(String(s.id)));
 
     try {
+      await deleteRecord('students', ids as any); // deleteRecord might need to handle array, but for now we'll use supabase directly or fix helper
       await supabase.from('students').delete().in('id', ids).eq('school_id', schoolId);
-      await supabase.from('students').delete().in('id', idStrings).eq('school_id', schoolId);
     } catch (e) {
       console.warn("Error bulk deleting students in Supabase:", e);
-    }
-
-    try {
-      await saveSchoolData(schoolId, { students: newStudents });
-    } catch (e) {
-      console.warn("Error updating Firestore after bulk student deletion:", e);
     }
 
     const activityLogs = logActivity(
@@ -919,19 +909,13 @@ export default function App() {
     const newTeachers = data.teachers.filter(t => String(t.id) !== targetStrId);
 
     try {
-      await supabase.from('teachers').delete().eq('id', id).eq('school_id', schoolId);
+      await deleteRecord('teachers', id);
       if (!isNaN(numericId)) {
-        await supabase.from('teachers').delete().eq('id', numericId).eq('school_id', schoolId);
+        await deleteRecord('teachers', numericId);
       }
-      await supabase.from('teachers').delete().eq('id', targetStrId).eq('school_id', schoolId);
+      await deleteRecord('teachers', targetStrId);
     } catch (e) {
       console.warn("Error deleting teacher doc in Supabase:", e);
-    }
-
-    try {
-      await saveSchoolData(schoolId, { teachers: newTeachers });
-    } catch (e) {
-      console.warn("Error updating Firestore after teacher deletion:", e);
     }
 
     const target = data.teachers.find(t => String(t.id) === targetStrId);
@@ -970,15 +954,8 @@ export default function App() {
 
     try {
       await supabase.from('teachers').delete().in('id', ids).eq('school_id', schoolId);
-      await supabase.from('teachers').delete().in('id', idStrings).eq('school_id', schoolId);
     } catch (e) {
       console.warn("Error bulk deleting teachers in Supabase:", e);
-    }
-
-    try {
-      await saveSchoolData(schoolId, { teachers: newTeachers });
-    } catch (e) {
-      console.warn("Error updating Firestore after bulk teacher deletion:", e);
     }
 
     const newInvigAssignments = { ...data.invigilationAssignments };
@@ -1230,7 +1207,10 @@ export default function App() {
     <ConfirmDeleteProvider>
       <div className="min-h-screen bg-[#edf2f7] text-slate-800 font-sans relative overflow-x-hidden flex flex-col">
         {/* Floating Ambient Bubbles with Beautiful Iridescent Colors */}
-        <FloatingBubbles />
+        <FloatingBubbles 
+          settings={data.bubbleSettings}
+          onUpdateSettings={(settings) => updateRemoteData({ bubbleSettings: settings })}
+        />
 
       {/* Top Header & Collapsible Sidebar Navigation */}
       {subscription && !checkingSub && !isSubscriptionValid(subscription) && (

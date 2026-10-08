@@ -270,7 +270,51 @@ CREATE TABLE IF NOT EXISTS public.remedial_payment_settings (
   effective_date DATE DEFAULT CURRENT_DATE
 );
 
--- 13. ROW LEVEL SECURITY (RLS) POLICIES
+-- 13. DISCIPLINE RECORDS TABLE
+CREATE TABLE IF NOT EXISTS public.discipline_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  student_id UUID REFERENCES public.students(id) ON DELETE CASCADE,
+  student_name TEXT,
+  incident_type TEXT,
+  description TEXT,
+  action_taken TEXT,
+  severity TEXT,
+  date DATE DEFAULT CURRENT_DATE,
+  reported_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 14. ACTIVITY LOGS TABLE
+CREATE TABLE IF NOT EXISTS public.activity_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  user_email TEXT,
+  action TEXT,
+  category TEXT,
+  target_name TEXT,
+  details TEXT,
+  timestamp TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 15. GATE PASS LOGS TABLE
+CREATE TABLE IF NOT EXISTS public.gate_pass_logs (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  student_id UUID,
+  student_name TEXT,
+  reg_no TEXT,
+  class_name TEXT,
+  stream TEXT,
+  type TEXT, -- CHECK_IN, CHECK_OUT
+  reason TEXT,
+  officer_name TEXT,
+  timestamp TIMESTAMPTZ DEFAULT NOW(),
+  status TEXT DEFAULT 'VALID',
+  fee_status TEXT
+);
+
+-- 16. ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE public.schools ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
@@ -287,6 +331,9 @@ ALTER TABLE public.parent_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.remedial_timetable ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.remedial_attendance ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.remedial_payment_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.discipline_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gate_pass_logs ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public all access on schools" ON public.schools FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on users" ON public.users FOR ALL USING (true) WITH CHECK (true);
@@ -304,8 +351,11 @@ CREATE POLICY "Allow public all access on parent_messages" ON public.parent_mess
 CREATE POLICY "Allow public all access on remedial_timetable" ON public.remedial_timetable FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on remedial_attendance" ON public.remedial_attendance FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on remedial_payment_settings" ON public.remedial_payment_settings FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on discipline_records" ON public.discipline_records FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on activity_logs" ON public.activity_logs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on gate_pass_logs" ON public.gate_pass_logs FOR ALL USING (true) WITH CHECK (true);
 
--- 13. HIGH SPEED PERFORMANCE INDEXES
+-- 17. HIGH SPEED PERFORMANCE INDEXES
 CREATE INDEX IF NOT EXISTS idx_students_school ON public.students(school_id);
 CREATE INDEX IF NOT EXISTS idx_teachers_school ON public.teachers(school_id);
 CREATE INDEX IF NOT EXISTS idx_exams_school ON public.exams(school_id);
@@ -314,3 +364,5 @@ CREATE INDEX IF NOT EXISTS idx_users_school ON public.users(school_id);
 CREATE INDEX IF NOT EXISTS idx_parents_phone ON public.parents(phone);
 CREATE INDEX IF NOT EXISTS idx_remedial_tt_school ON public.remedial_timetable(school_id);
 CREATE INDEX IF NOT EXISTS idx_remedial_att_school ON public.remedial_attendance(school_id, date);
+CREATE INDEX IF NOT EXISTS idx_activity_logs_school ON public.activity_logs(school_id);
+CREATE INDEX IF NOT EXISTS idx_discipline_school ON public.discipline_records(school_id);

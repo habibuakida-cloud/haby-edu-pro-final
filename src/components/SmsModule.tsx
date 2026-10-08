@@ -21,7 +21,10 @@ import {
   ShieldCheck,
   FileSpreadsheet,
   Activity,
-  TrendingUp
+  TrendingUp,
+  Mail,
+  Bell,
+  Inbox
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 import { db, auth } from '../lib/firebase';
@@ -92,7 +95,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   initialYear = new Date().getFullYear().toString(),
   onNavigateToAnalyzer
 }) => {
-  const [activeTab, setActiveTab] = useState<'results' | 'announcements' | 'parents' | 'wallet' | 'logs' | 'diagnostics' | 'history' | 'insights'>('results');
+  const [activeTab, setActiveTab] = useState<'results' | 'announcements' | 'inbox' | 'parents' | 'wallet' | 'logs' | 'diagnostics' | 'history' | 'insights'>('results');
   
   // Wallet state
   const [walletBalance, setWalletBalance] = useState<number>(100);
@@ -125,9 +128,68 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   const [announcementMsg, setAnnouncementMsg] = useState<string>('');
   const [announcementTarget, setAnnouncementTarget] = useState<string>('All school');
   const [isSendingAnnouncement, setIsSendingAnnouncement] = useState<boolean>(false);
+  const [inboxMessages, setInboxMessages] = useState<any[]>([]);
+  const [adminAnnouncements, setAdminAnnouncements] = useState<any[]>([]);
+  const [loadingInbox, setLoadingInbox] = useState<boolean>(false);
+  const [replyText, setReplyText] = useState<string>('');
+  const [selectedInboxMessage, setSelectedInboxMessage] = useState<any | null>(null);
 
-  // SMS Logs State
-  const [smsLogs, setSmsLogs] = useState<SmsLogItem[]>([]);
+  const loadAdminAnnouncements = async () => {
+    try {
+      const { data } = await supabase
+        .from('announcements')
+        .select('*')
+        .eq('school_id', schoolId)
+        .order('created_at', { ascending: false });
+      setAdminAnnouncements(data || []);
+    } catch (e) {}
+  };
+
+  const loadInbox = async () => {
+    try {
+      setLoadingInbox(true);
+      const { data } = await supabase
+        .from('parent_messages')
+        .select('*')
+        .eq('school_id', schoolId)
+        .order('created_at', { ascending: false });
+      setInboxMessages(data || []);
+    } catch (e) {
+    } finally {
+      setLoadingInbox(false);
+    }
+  };
+
+  const handleReplyToParent = async () => {
+    if (!replyText.trim() || !selectedInboxMessage) return;
+
+    try {
+      const payload = {
+        school_id: schoolId,
+        parent_id: selectedInboxMessage.parent_id,
+        parent_phone: selectedInboxMessage.parent_phone,
+        parent_name: 'Utawala wa Shule',
+        message: replyText.trim(),
+        sender: 'school',
+        created_at: new Date().toISOString()
+      };
+
+      const { error } = await supabase.from('parent_messages').insert(payload);
+      if (error) throw error;
+
+      setReplyText('');
+      setSelectedInboxMessage(null);
+      loadInbox();
+      setNotification({ type: 'success', message: 'Ujumbe umetumwa kwa mzazi!' });
+    } catch (err: any) {
+      setNotification({ type: 'error', message: 'Imeshindwa kutuma jibu: ' + err.message });
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'inbox') loadInbox();
+    if (activeTab === 'announcements') loadAdminAnnouncements();
+  }, [activeTab]);
   const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
 
   // Dispatch Status & Progress
@@ -685,6 +747,14 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
         updated_at: new Date().toISOString()
       }, { onConflict: 'school_id' });
 
+      // Save to announcements table for Parent Portal visibility
+      await supabase.from('announcements').insert({
+        school_id: schoolId,
+        title: announcementTarget === 'All school' ? 'Tangazo la Shule kwa Wote' : `Tangazo: ${announcementTarget}`,
+        content: announcementMsg,
+        created_at: new Date().toISOString()
+      });
+
       // Insert into sms_logs
       if (Array.isArray(result.logs) && result.logs.length > 0) {
         const logsToInsert = result.logs.map((l: any) => ({
@@ -727,11 +797,12 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     const cleanName = name?.trim() || 'Mzazi / Mlezi';
 
     try {
-      // 1. Check if parent with same phone number already exists to avoid unique constraint violations
+      // 1. Check if parent with same phone number already exists
       const { data: existingParents, error: checkError } = await supabase
         .from('parents')
         .select('*')
-        .eq('phone', cleanPhone);
+        .eq('phone', cleanPhone)
+        .maybeSingle();
 
       if (checkError) {
         console.warn("Error checking existing parents:", checkError);
@@ -740,45 +811,45 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
       let parentId: string;
       let isUpdate = false;
 
-      if (existingParents && existingParents.length > 0) {
+      if (existingParents) {
         // Parent already exists! Update their row
         isUpdate = true;
-        const parent = existingParents[0];
-        parentId = parent.id;
+        parentId = existingParents.id;
         
         const { error: updateError } = await supabase
           .from('parents')
           .update({
-            full_name: parent.full_name || cleanName,
-            phone: cleanPhone
+            full_name: existingParents.full_name || cleanName,
           })
-          .eq('id', parent.id);
+          .eq('id', parentId);
 
         if (updateError) throw updateError;
       } else {
-        // Parent doesn't exist, insert new using a valid UUID
-        parentId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-          const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-          return v.toString(16);
-        });
-
-        const { error: insertError } = await supabase.from('parents').insert({
-          id: parentId,
-          school_id: schoolId,
-          phone: cleanPhone,
-          full_name: cleanName,
-          password_hash: '123456'
-        });
+        // Parent doesn't exist, insert new
+        // We let Supabase generate the UUID id
+        const { data: newParent, error: insertError } = await supabase
+          .from('parents')
+          .insert({
+            school_id: schoolId,
+            phone: cleanPhone,
+            full_name: cleanName,
+            password_hash: '123456'
+          })
+          .select()
+          .single();
 
         if (insertError) throw insertError;
+        if (!newParent) throw new Error("Failed to create new parent record");
+        parentId = newParent.id;
       }
 
       // Link parent with student in parent_students table
+      // We look for student by reg_no (CNO) specifically
       const { data: studentRows } = await supabase
         .from('students')
         .select('id')
         .eq('school_id', schoolId)
-        .or(`reg_no.eq.${cleanCno},name.eq.${cleanName}`);
+        .eq('reg_no', cleanCno);
 
       if (studentRows && studentRows.length > 0) {
         const studentId = studentRows[0].id;
@@ -791,11 +862,14 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
           .eq('student_id', studentId);
 
         if (!existingLink || existingLink.length === 0) {
-          await supabase.from('parent_students').insert({
+          const { error: linkError } = await supabase.from('parent_students').insert({
             parent_id: parentId,
             student_id: studentId
           });
+          if (linkError) console.error("Error linking parent to student:", linkError);
         }
+      } else {
+        console.warn(`Student with CNO ${cleanCno} not found to link with parent.`);
       }
 
       setNewParentCno('');
@@ -812,7 +886,9 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
       alert(isUpdate ? "Taarifa za mzazi zimesasishwa kikamilifu!" : "Mzazi ameongezwa kikamilifu!");
       
       // Refresh the complete list from Supabase
-      await loadParents();
+      if (typeof loadParents === 'function') {
+        await loadParents();
+      }
     } catch (err: any) {
       console.error('Error saving parent:', err);
       alert('Hitilafu wakati wa kuhifadhi mzazi: ' + (err.message || err));
@@ -958,6 +1034,30 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('announcements')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'announcements'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Bell className="w-4 h-4" />
+          <span>Matangazo (Portal)</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('inbox')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'inbox'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Inbox className="w-4 h-4" />
+          <span>Inbox ya Wazazi</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('parents')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
             activeTab === 'parents'
@@ -1041,6 +1141,117 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
             <AlertCircle className="w-5 h-5 text-red-600 shrink-0" />
           )}
           <span>{notification.message}</span>
+        </div>
+      )}
+
+      {activeTab === 'announcements' && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+              <Bell className="w-5 h-5 text-blue-600" />
+              <span>Matangazo ya Portal</span>
+            </h3>
+          </div>
+          <div className="space-y-3">
+            {adminAnnouncements.length === 0 ? (
+              <p className="text-sm text-slate-500 text-center py-10">Hamna matangazo bado.</p>
+            ) : (
+              adminAnnouncements.map((ann) => (
+                <div key={ann.id} className="p-4 bg-slate-50 border border-slate-200 rounded-xl flex justify-between items-start">
+                  <div>
+                    <h4 className="font-bold text-slate-900">{ann.title}</h4>
+                    <p className="text-xs text-slate-600 mt-1">{ann.content}</p>
+                    <p className="text-[10px] text-slate-400 mt-2">{new Date(ann.created_at).toLocaleString()}</p>
+                  </div>
+                  <button 
+                    onClick={async () => {
+                      await supabase.from('announcements').delete().eq('id', ann.id);
+                      loadAdminAnnouncements();
+                    }}
+                    className="p-1.5 text-rose-500 hover:bg-rose-50 rounded-lg transition"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'inbox' && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200 space-y-4">
+          <h3 className="text-base font-black text-slate-900 flex items-center gap-2">
+            <Inbox className="w-5 h-5 text-blue-600" />
+            <span>Inbox ya Mawasiliano ya Wazazi</span>
+          </h3>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 h-[600px]">
+            {/* Message List */}
+            <div className="lg:col-span-1 border border-slate-200 rounded-2xl overflow-y-auto bg-slate-50">
+              {inboxMessages.length === 0 ? (
+                <p className="text-xs text-slate-400 text-center py-10">Hamna ujumbe mpya.</p>
+              ) : (
+                inboxMessages.filter(m => m.sender === 'parent').map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => setSelectedInboxMessage(m)}
+                    className={`w-full text-left p-3 border-b border-slate-200 hover:bg-white transition ${selectedInboxMessage?.id === m.id ? 'bg-white border-l-4 border-l-blue-600' : ''}`}
+                  >
+                    <p className="font-black text-[11px] text-slate-900 truncate">{m.parent_name}</p>
+                    <p className="text-[10px] text-slate-500 truncate">{m.message}</p>
+                    <p className="text-[9px] text-slate-400 mt-1">{new Date(m.created_at).toLocaleString()}</p>
+                  </button>
+                ))
+              )}
+            </div>
+
+            {/* Conversation Thread */}
+            <div className="lg:col-span-2 border border-slate-200 rounded-2xl flex flex-col bg-white overflow-hidden">
+              {selectedInboxMessage ? (
+                <>
+                  <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <div>
+                      <h4 className="font-black text-sm text-slate-900">{selectedInboxMessage.parent_name}</h4>
+                      <p className="text-[10px] text-slate-500">Mzazi wa {selectedInboxMessage.student_name} • {selectedInboxMessage.parent_phone}</p>
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {/* Simplified thread view: Show parent's message and all replies associated with this parent */}
+                    <div className="flex justify-start">
+                      <div className="max-w-[80%] p-3 bg-slate-100 rounded-2xl rounded-tl-none text-xs">
+                        <p className="font-bold mb-1">Mzazi</p>
+                        <p>{selectedInboxMessage.message}</p>
+                        <p className="text-[9px] text-slate-400 mt-1">{new Date(selectedInboxMessage.created_at).toLocaleString()}</p>
+                      </div>
+                    </div>
+                    {/* Fetch and show real thread if needed, but for now simple one-to-one reply UI */}
+                  </div>
+                  <div className="p-4 border-t border-slate-100 flex gap-2">
+                    <input
+                      type="text"
+                      placeholder="Andika jibu hapa..."
+                      value={replyText}
+                      onChange={e => setReplyText(e.target.value)}
+                      className="flex-1 bg-slate-100 border border-slate-200 rounded-xl px-4 py-2.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-600"
+                    />
+                    <button
+                      onClick={handleReplyToParent}
+                      className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-black hover:bg-blue-700 transition flex items-center gap-1.5"
+                    >
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Tuma Jibu</span>
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
+                  <Mail className="w-12 h-12 mb-2" />
+                  <p className="text-sm font-bold">Chagua ujumbe kusoma na kujibu.</p>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

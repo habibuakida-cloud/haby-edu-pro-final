@@ -141,9 +141,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     if (!term.trim()) return;
     const updated = [term, ...recentSearches.filter(s => s !== term)].slice(0, 5);
     setRecentSearches(updated);
-    try {
-      localStorage.setItem('haby_recent_searches', JSON.stringify(updated));
-    } catch {}
+    // Removed localStorage.setItem per single source of truth migration
   };
 
   // Modified Search Handler

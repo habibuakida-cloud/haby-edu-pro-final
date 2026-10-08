@@ -35,48 +35,40 @@ interface Particle {
   maxLife: number;
 }
 
-export const FloatingBubbles: React.FC = () => {
+export const FloatingBubbles: React.FC<{
+  settings?: {
+    enabled: boolean;
+    theme: string;
+    density: 'low' | 'medium' | 'high';
+  };
+  onUpdateSettings?: (settings: any) => void;
+}> = ({ settings, onUpdateSettings }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Settings with LocalStorage persistence
-  const [isEnabled, setIsEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('haby_bubbles_enabled');
-      return saved !== null ? JSON.parse(saved) : true;
-    } catch {
-      return true;
-    }
-  });
+  // Use props if available, otherwise local state (fallback)
+  const [localEnabled, setLocalEnabled] = useState(true);
+  const [localTheme, setLocalTheme] = useState<BubbleTheme>('rainbow');
+  const [localDensity, setLocalDensity] = useState<'low' | 'medium' | 'high'>('medium');
 
-  const [theme, setTheme] = useState<BubbleTheme>(() => {
-    try {
-      const saved = localStorage.getItem('haby_bubbles_theme');
-      return (saved as BubbleTheme) || 'rainbow';
-    } catch {
-      return 'rainbow';
-    }
-  });
+  const isEnabled = settings?.enabled ?? localEnabled;
+  const theme = (settings?.theme as BubbleTheme) ?? localTheme;
+  const density = settings?.density ?? localDensity;
 
-  const [density, setDensity] = useState<'low' | 'medium' | 'high'>(() => {
-    try {
-      const saved = localStorage.getItem('haby_bubbles_density');
-      return (saved as 'low' | 'medium' | 'high') || 'medium';
-    } catch {
-      return 'medium';
-    }
-  });
+  const setIsEnabled = (val: boolean) => {
+    if (onUpdateSettings) onUpdateSettings({ ...settings, enabled: val });
+    else setLocalEnabled(val);
+  };
+  const setTheme = (val: BubbleTheme) => {
+    if (onUpdateSettings) onUpdateSettings({ ...settings, theme: val });
+    else setLocalTheme(val);
+  };
+  const setDensity = (val: 'low' | 'medium' | 'high') => {
+    if (onUpdateSettings) onUpdateSettings({ ...settings, density: val });
+    else setLocalDensity(val);
+  };
 
   const [interactivePop, setInteractivePop] = useState<boolean>(true);
   const [showControls, setShowControls] = useState<boolean>(false);
-
-  // Save changes
-  useEffect(() => {
-    try {
-      localStorage.setItem('haby_bubbles_enabled', JSON.stringify(isEnabled));
-      localStorage.setItem('haby_bubbles_theme', theme);
-      localStorage.setItem('haby_bubbles_density', density);
-    } catch {}
-  }, [isEnabled, theme, density]);
 
   // Color generator based on theme
   const getThemeHues = useCallback((th: BubbleTheme): [number, number, number, number] => {

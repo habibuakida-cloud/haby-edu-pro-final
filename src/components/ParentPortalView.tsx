@@ -25,9 +25,21 @@ import {
   Copy,
   Check,
   Sparkles,
-  Info
+  Info,
+  TrendingUp,
+  BarChart2
 } from 'lucide-react';
 import { normalizeTzPhone } from '../utils/phoneUtils';
+import { 
+  ResponsiveContainer, 
+  LineChart, 
+  Line, 
+  XAxis, 
+  YAxis, 
+  CartesianGrid, 
+  Tooltip, 
+  Legend 
+} from 'recharts';
 
 export interface ParentPortalViewProps {
   onBackToMain?: () => void;
@@ -47,6 +59,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
   const [childAttendance, setChildAttendance] = useState<any[]>([]);
   const [childFees, setChildFees] = useState<any[]>([]);
   const [childDiscipline, setChildDiscipline] = useState<any[]>([]);
+  const [sittingPlan, setSittingPlan] = useState<{ room: string; desk: string } | null>(null);
   const [announcements, setAnnouncements] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
   const [newMessageText, setNewMessageText] = useState('');
@@ -66,7 +79,29 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
         }
       }
     } catch (e) {}
-  }, []);
+
+    // Real-time subscriptions
+    const announcementsSub = supabase
+      .channel('public:announcements')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+        if (parent) fetchParentData(parent.phone, parent.id);
+      })
+      .subscribe();
+
+    const messagesSub = supabase
+      .channel('public:parent_messages')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'parent_messages' }, (payload) => {
+        if (parent && (payload.new.parent_id === parent.id || payload.new.parent_phone === parent.phone)) {
+          setMessages(prev => [...prev, payload.new]);
+        }
+      })
+      .subscribe();
+
+    return () => {
+      announcementsSub.unsubscribe();
+      messagesSub.unsubscribe();
+    };
+  }, [parent?.id]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,130 +109,56 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
     setErrorMsg(null);
 
     const rawPhone = phoneInput.trim();
-    const cleanPassword = passwordInput.trim();
+    const studentRegNo = passwordInput.trim(); // Using password field for RegNo per requirement
 
-    if (!rawPhone) {
-      setErrorMsg('Tafadhali ingiza namba ya simu ya mzazi.');
+    if (!rawPhone || !studentRegNo) {
+      setErrorMsg('Tafadhali jaza namba ya simu na namba ya usajili ya mwanafunzi.');
       setLoading(false);
       return;
     }
 
     const normalizedPhone = normalizeTzPhone(rawPhone);
-    const localPhone = rawPhone.startsWith('255') ? '0' + rawPhone.slice(3) : rawPhone;
 
     try {
-      // 1. First check in parents table
-      let matchedParent: any = null;
-      try {
-        const { data: parentRows } = await supabase
-          .from('parents')
-          .select('*')
-          .or(`phone.eq.${rawPhone},phone.eq.${normalizedPhone},phone.eq.${localPhone}`);
+      // 1. Verify student exists with this parent phone AND reg_no
+      const { data: students, error: studError } = await supabase
+        .from('students')
+        .select('*')
+        .eq('reg_no', studentRegNo.toUpperCase())
+        .or(`parent_phone.eq.${rawPhone},parent_phone.eq.${normalizedPhone},phone.eq.${rawPhone},phone.eq.${normalizedPhone}`);
 
-        if (parentRows && parentRows.length > 0) {
-          const p = parentRows[0];
-          if (!cleanPassword || p.password_hash === cleanPassword || p.password === cleanPassword || cleanPassword === '123456') {
-            matchedParent = p;
-          }
-        }
-      } catch (err) {
-        console.warn("Parents table query check:", err);
+      if (studError) throw studError;
+
+      if (!students || students.length === 0) {
+        throw new Error('Mwanafunzi mwenye namba hii ya usajili na simu hakuonekana. Tafadhali thibitisha taarifa zako.');
       }
 
-      // 2. If not found in parents table, look directly into students table by parent phone!
-      let matchedStudents: any[] = [];
-      try {
-        const { data: studentRows } = await supabase
-          .from('students')
-          .select('*')
-          .or(`parent_phone.eq.${rawPhone},parent_phone.eq.${normalizedPhone},parent_phone.eq.${localPhone},phone.eq.${rawPhone},phone.eq.${normalizedPhone}`);
+      const activeChild = students[0];
+      
+      // 2. Look for the parent record linked to this student
+      let parentData: any = null;
+      const { data: linkedParents } = await supabase
+        .from('parent_students')
+        .select('parent_id, parents(*)')
+        .eq('student_id', activeChild.id);
 
-        if (studentRows && studentRows.length > 0) {
-          matchedStudents = studentRows;
-        }
-      } catch (err) {
-        console.warn("Students table query check:", err);
-      }
-
-      // 3. Search in Firestore School Database Snapshot
-      if (!matchedParent && matchedStudents.length === 0) {
-        try {
-          const schoolId = localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
-          const fsData = await getSchoolData(schoolId);
-          if (fsData && fsData.students && Array.isArray(fsData.students)) {
-            const fsMatched = fsData.students.filter((s: any) => {
-              const sPhone = normalizeTzPhone(s.parentPhone || s.phone || s.parent_phone || '');
-              return sPhone === normalizedPhone || (s.parentPhone && s.parentPhone.includes(rawPhone));
-            });
-            if (fsMatched.length > 0) {
-              matchedStudents = fsMatched;
-            }
-          }
-        } catch (e) {
-          console.warn("Firestore parent check error:", e);
-        }
-      }
-
-      // 4. If neither returned data, search in localStorage cached school data
-      if (!matchedParent && matchedStudents.length === 0) {
-        try {
-          const keys = Object.keys(localStorage).filter(k => k.startsWith('haby_school_data_'));
-          for (const k of keys) {
-            const parsed = JSON.parse(localStorage.getItem(k) || '{}');
-            if (parsed.students && Array.isArray(parsed.students)) {
-              const localMatched = parsed.students.filter((s: any) => {
-                const sPhone = normalizeTzPhone(s.parentPhone || s.phone || s.parent_phone || '');
-                return sPhone === normalizedPhone || (s.parentPhone && s.parentPhone.includes(rawPhone));
-              });
-              if (localMatched.length > 0) {
-                matchedStudents = localMatched;
-                break;
-              }
-            }
-          }
-        } catch (e) {}
-      }
-
-      // Accept login if student found OR if demo / default password is valid
-      if (!matchedParent && matchedStudents.length === 0) {
-        // If password is default 123456, allow access with demo child so parents are never blocked
-        if (cleanPassword === '123456') {
-          matchedStudents = [
-            {
-              id: 'demo-student-1',
-              name: 'Baraka Juma Mohamed',
-              regNo: 'S0123/0002/2026',
-              class: 'Form 2',
-              className: 'Form 2',
-              stream: 'STREAM A',
-              gender: 'Male',
-              parent_phone: rawPhone,
-              average: '82.4',
-              division: 'Division I (12 Points)',
-              total: 412
-            }
-          ];
-        } else {
-          throw new Error('Namba hii ya simu haijasajiliwa au nenosiri si sahihi. Nenosiri la awali ni 123456.');
-        }
+      if (linkedParents && linkedParents.length > 0) {
+        parentData = linkedParents[0].parents;
       }
 
       const parentSession = {
-        id: matchedParent?.id || `parent_${normalizedPhone}`,
+        id: parentData?.id || `p_${activeChild.id}`,
         phone: rawPhone,
-        full_name: matchedParent?.full_name || matchedParent?.name || (matchedStudents[0]?.name ? `Mzazi wa ${matchedStudents[0].name}` : 'Mzazi')
+        full_name: parentData?.full_name || `Mzazi wa ${activeChild.name}`,
+        school_id: activeChild.school_id
       };
 
       setParent(parentSession);
       sessionStorage.setItem('haby_parent_session', JSON.stringify(parentSession));
-
-      if (matchedStudents.length > 0) {
-        setChildren(matchedStudents);
-        setSelectedChild(matchedStudents[0]);
-        await fetchChildDetails(matchedStudents[0].id || matchedStudents[0].regNo, rawPhone);
-      } else {
-        await fetchParentData(rawPhone, parentSession.id);
-      }
+      setChildren(students);
+      setSelectedChild(activeChild);
+      await fetchChildDetails(activeChild.id, rawPhone);
+      
     } catch (err: any) {
       setErrorMsg(err.message || 'Hitilafu imetokea wakati wa kuingia.');
     } finally {
@@ -357,7 +318,38 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
         { incident: 'Tuzo ya Usafi na Utunzaji Mazingira', category: 'Nidhamu', description: 'Mwanafunzi amekuwa mfano bora wa usafi binafsi na darasani.', date: '2026-03-05', status: 'Sifa Njema' }
       ]);
 
-      // 5. Default Announcements
+      // 5. Fetch sitting plan
+      try {
+        const { data: plans } = await supabase
+          .from('sitting_plans')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (plans && plans.length > 0) {
+          // Find student in any plan grid_layout
+          let found = false;
+          for (const plan of plans) {
+            const grid = plan.grid_layout || {};
+            for (const cellId of Object.keys(grid)) {
+              const occupant = grid[cellId];
+              if (occupant?.id === studentId || occupant?.regNo === selectedChild?.regNo) {
+                setSittingPlan({
+                  room: plan.room_name,
+                  desk: cellId.replace('cell-', '')
+                });
+                found = true;
+                break;
+              }
+            }
+            if (found) break;
+          }
+          if (!found) setSittingPlan(null);
+        }
+      } catch (e) {
+        console.warn("Error fetching sitting plan:", e);
+      }
+
+      // 6. Default Announcements
       setAnnouncements([
         { id: 'ann-1', title: 'Kikao cha Wazazi na Uongozi wa Shule', content: 'Wazazi na walezi wote mnakaribishwa kwenye kikao cha maendeleo ya kitaaluma kitakachofanyika Jumamosi hii saa tatu asubuhi katika ukumbi wa shule.', created_at: '2026-03-25' },
         { id: 'ann-2', title: 'Tarehe ya Kufungwa Shule kwa Likizo Fupi', content: 'Shule itafungwa rasmi tarehe 28 Machi na wanafunzi watarejea tarehe 14 Aprili 2026. Tafadhali hakikisha mwanafunzi anafanya kazi za likizo.', created_at: '2026-03-20' }
@@ -374,6 +366,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
 
     const msg = newMessageText.trim();
     const payload = {
+      school_id: parent.school_id || DEFAULT_PRIMARY_SCHOOL_ID,
       parent_id: parent.id,
       parent_phone: parent.phone,
       parent_name: parent.full_name,
@@ -428,7 +421,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
             <div className="mx-auto w-16 h-16 bg-white/10 rounded-2xl flex items-center justify-center mb-3 backdrop-blur-md border border-white/20 shadow-inner">
               <Phone className="w-8 h-8 text-sky-300" />
             </div>
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight uppercase">PORTAL YA WAZAZI</h1>
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight uppercase">HabyEduPro3A - Portal ya Wazazi</h1>
             <p className="text-xs text-blue-200 mt-1 font-medium">Taarifa za Mwanafunzi, Matokeo, Ada & Mahudhurio</p>
           </div>
 
@@ -520,6 +513,30 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
     );
   }
 
+  // Bottom Mobile Navigation
+  const BottomNav = () => (
+    <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 flex justify-around py-2.5 px-2 z-40 shadow-[0_-4px_12px_rgba(0,0,0,0.05)]">
+      {[
+        { id: 'dashboard', label: 'Nyumbani', icon: <BookOpen className="w-5 h-5" /> },
+        { id: 'matokeo', label: 'Matokeo', icon: <Award className="w-5 h-5" /> },
+        { id: 'ada', label: 'Ada', icon: <DollarSign className="w-5 h-5" /> },
+        { id: 'ujumbe', label: 'Ujumbe', icon: <MessageSquare className="w-5 h-5" /> },
+        { id: 'matangazo', label: 'Matangazo', icon: <Bell className="w-5 h-5" /> }
+      ].map(t => (
+        <button
+          key={t.id}
+          onClick={() => setActiveTab(t.id as any)}
+          className={`flex flex-col items-center gap-1 transition-all ${
+            activeTab === t.id ? 'text-blue-700 scale-110' : 'text-slate-400'
+          }`}
+        >
+          {t.icon}
+          <span className="text-[10px] font-bold">{t.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+
   // Logged-in Parent Portal (Mobile-First Optimized)
   return (
     <div className="min-h-screen bg-[#f1f5f9] flex flex-col font-sans pb-24 md:pb-8 text-slate-800">
@@ -532,8 +549,8 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
               <Phone className="w-4 h-4" />
             </div>
             <div>
-              <h2 className="text-xs sm:text-sm font-black tracking-wide uppercase">HABY EDU PRO</h2>
-              <p className="text-[11px] text-blue-200 truncate max-w-[200px] sm:max-w-xs">{parent.full_name}</p>
+              <h2 className="text-xs sm:text-sm font-black tracking-wide uppercase">HabyEduPro3A - Parent Portal</h2>
+              <p className="text-[11px] text-blue-200 truncate max-w-[150px] sm:max-w-xs">{parent.full_name}</p>
             </div>
           </div>
           
@@ -639,7 +656,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
         {/* Navigation Tabs (Desktop & Tablet Top Bar) */}
         <div className="hidden md:grid grid-cols-6 gap-2 bg-white p-2 rounded-2xl shadow-xs border border-slate-200 text-center">
           {[
-            { id: 'dashboard', label: 'Muhtasari', icon: <BookOpen className="w-4 h-4" /> },
+            { id: 'dashboard', label: 'Nyumbani', icon: <BookOpen className="w-4 h-4" /> },
             { id: 'matokeo', label: 'Matokeo', icon: <Award className="w-4 h-4" /> },
             { id: 'ada', label: 'Ada & Malipo', icon: <DollarSign className="w-4 h-4" /> },
             { id: 'mahudhurio', label: 'Mahudhurio', icon: <Calendar className="w-4 h-4" /> },
@@ -768,6 +785,29 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
                   <Printer className="w-3.5 h-3.5" />
                   <span>Chapisha / PDF</span>
                 </button>
+              </div>
+
+              {/* Performance Trend Graph */}
+              <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 space-y-4">
+                <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                  <TrendingUp className="w-4 h-4 text-blue-600" />
+                  <span>Mwenendo wa Kitaaluma (Performance Trend)</span>
+                </h4>
+                <div className="h-64 w-full">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <LineChart data={childResults.slice().reverse().map(r => ({
+                      name: r.exam_name || r.examType,
+                      average: parseFloat(r.average) || 0
+                    }))}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                      <XAxis dataKey="name" hide />
+                      <YAxis domain={[0, 100]} />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="average" name="Wastani (%)" stroke="#1e40af" strokeWidth={3} dot={{ r: 6 }} activeDot={{ r: 8 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               </div>
 
               {/* Exam Records Cards */}
@@ -924,7 +964,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
             <div className="flex items-center justify-between pb-2 border-b border-slate-100">
               <h3 className="font-black text-slate-800 text-xs sm:text-sm uppercase flex items-center gap-2">
                 <MessageSquare className="w-4 h-4 text-blue-600" />
-                <span>Mazungumzo na Mwalimu wa Darasa</span>
+                <span>Tuma Ujumbe kwa Utawala (Inbox)</span>
               </h3>
               <span className="w-2.5 h-2.5 bg-emerald-500 rounded-full animate-pulse" title="Shule Ipo Hewani" />
             </div>
@@ -1005,10 +1045,9 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
       {/* MOBILE FIXED BOTTOM NAVIGATION BAR (Thumb-friendly for Phone users) */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-slate-200 shadow-2xl px-2 py-1.5 flex justify-around items-center">
         {[
-          { id: 'dashboard', label: 'Muhtasari', icon: <BookOpen className="w-5 h-5" /> },
+          { id: 'dashboard', label: 'Nyumbani', icon: <BookOpen className="w-5 h-5" /> },
           { id: 'matokeo', label: 'Matokeo', icon: <Award className="w-5 h-5" /> },
           { id: 'ada', label: 'Ada', icon: <DollarSign className="w-5 h-5" /> },
-          { id: 'mahudhurio', label: 'Mahudhurio', icon: <Calendar className="w-5 h-5" /> },
           { id: 'ujumbe', label: 'Ujumbe', icon: <MessageSquare className="w-5 h-5" /> },
           { id: 'matangazo', label: 'Matangazo', icon: <Bell className="w-5 h-5" /> }
         ].map(item => {

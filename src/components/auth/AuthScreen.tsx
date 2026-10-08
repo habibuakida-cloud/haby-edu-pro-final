@@ -257,66 +257,35 @@ export const AuthScreen: React.FC = () => {
               </form>
             </>
           ) : (
-            <form onSubmit={handleParentSubmit} className="space-y-4 pt-2">
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3.5 text-xs text-emerald-900 space-y-1">
-                <p className="font-black">Portal ya Wazazi (Parent Portal)</p>
-                <p className="text-[11px] text-emerald-700">Ingia kuona maendeleo ya mwanao. Neno la siri la awali ni <span className="font-bold text-emerald-900">123456</span>.</p>
+            <div className="space-y-4 pt-2">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-900 space-y-2">
+                <p className="font-black text-sm uppercase">Portal ya Wazazi (HabyEduPro3A)</p>
+                <p className="text-[11px] text-emerald-700 leading-relaxed">
+                  Karibu kwenye mfumo wa maendeleo ya mwanafunzi. Ili kuingia, unahitaji namba yako ya simu na namba ya usajili ya mwanafunzi (Admission Number).
+                </p>
               </div>
 
-              {parentError && (
-                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl">
-                  {parentError}
-                </div>
-              )}
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
-                  Namba ya Simu ya Mzazi
-                </label>
-                <div className="relative">
-                  <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="text"
-                    required
-                    value={parentPhone}
-                    onChange={(e) => setParentPhone(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none"
-                    placeholder="0710000000"
-                  />
-                </div>
+              <div className="p-4 bg-slate-50 rounded-2xl border border-dashed border-slate-300 flex flex-col items-center gap-3">
+                 <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center">
+                    <Phone className="w-6 h-6" />
+                 </div>
+                 <p className="text-xs font-bold text-slate-600 text-center">
+                    Bofya kitufe hapa chini kwenda kwenye ukurasa wa kuingia wa wazazi.
+                 </p>
+                 <button
+                    onClick={() => {
+                       // We can either set a session flag or redirect if router was active
+                       // For now, since we use activeView, we need App.tsx to handle it
+                       window.location.hash = 'parentportal';
+                       window.location.reload(); 
+                    }}
+                    className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-black text-sm shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer"
+                 >
+                    <span>Fungua Portal ya Wazazi</span>
+                    <ArrowRight className="w-4 h-4" />
+                 </button>
               </div>
-
-              <div>
-                <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
-                  Nenosiri (Password)
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-                  <input
-                    type="password"
-                    required
-                    value={parentPassword}
-                    onChange={(e) => setParentPassword(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono font-bold text-slate-800 focus:ring-2 focus:ring-emerald-500 outline-none"
-                    placeholder="123456"
-                  />
-                </div>
-              </div>
-
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-[11px] text-slate-600 space-y-0.5">
-                <p className="font-bold text-slate-800">Jaribu Mfano:</p>
-                <p>Simu: <code className="font-mono text-emerald-800 font-bold">0710000000</code></p>
-                <p>Nenosiri: <code className="font-mono text-emerald-800 font-bold">123456</code></p>
-              </div>
-
-              <button
-                type="submit"
-                disabled={parentLoading}
-                className="w-full py-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl font-bold text-sm shadow-md flex items-center justify-center gap-2 transition-all cursor-pointer"
-              >
-                {parentLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <> <LogIn className="w-4 h-4" /> <span>Ingia kwenye Portal ya Wazazi</span> </>}
-              </button>
-            </form>
+            </div>
           )}
 
           {/* Demo Access Section */}
