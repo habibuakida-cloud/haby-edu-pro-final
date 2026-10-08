@@ -87,6 +87,7 @@
     #report-card-print-area,
     #sitting-plan-print,
     #timetable-print,
+    #master-timetable-container,
     #general-printable-view,
     #class-printable-view,
     #teacher-printable-view,
@@ -104,6 +105,51 @@
       color: #000000 !important;
       overflow: visible !important;
       z-index: auto !important;
+    }
+
+    /* Master Timetable Container print styling */
+    .master-timetable-container,
+    #master-timetable-container {
+      width: 100% !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+    }
+
+    .master-timetable-container table {
+      width: 100% !important;
+      border-collapse: collapse !important;
+      page-break-inside: auto !important;
+      break-inside: auto !important;
+      font-size: 8pt !important;
+      background: #ffffff !important;
+      color: #000000 !important;
+      margin-top: 4px !important;
+      margin-bottom: 8px !important;
+    }
+
+    .master-timetable-container thead th {
+      background-color: #f1f5f9 !important;
+      color: #000000 !important;
+      font-weight: 800 !important;
+      border: 1px solid #000000 !important;
+      padding: 3px 4px !important;
+      font-size: 8pt !important;
+      text-transform: uppercase !important;
+      text-align: center !important;
+    }
+
+    .master-timetable-container td {
+      border: 1px solid #000000 !important;
+      padding: 3px 4px !important;
+      font-size: 8pt !important;
+      color: #000000 !important;
+      background: #ffffff !important;
+      text-align: center !important;
+    }
+
+    .master-timetable-container tr {
+      page-break-inside: avoid !important;
+      break-inside: avoid !important;
     }
 
     /* High-contrast crisp tables with solid black borders and clear typography */

@@ -309,7 +309,9 @@ export function printFormattedSection(
     fontSize?: 'normal' | 'large' | 'extralarge';
   }
 ) {
-  const el = document.getElementById(elementId);
+  const el = document.getElementById(elementId) || 
+    (elementId === 'general-printable-view' ? document.getElementById('master-timetable-container') : null) ||
+    document.querySelector('.master-timetable-container');
   if (!el) {
     window.print();
     return;

@@ -208,21 +208,22 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     window.open(url, '_blank');
   };
 
-  const handlePrintActiveTimetableGrid = () => {
-    if (activeTab === 'general') {
-      const scopeLabel = selectedGeneralClass === 'All' ? 'Whole School' : selectedGeneralClass;
-      const streamLabel = selectedGeneralStream !== 'All' ? selectedGeneralStream : '';
-      printFormattedSection('general-printable-view', `General Teaching Timetable - ${scopeLabel} ${streamLabel}`.trim(), schoolName, { orientation: printOrientation });
-    } else if (activeTab === 'class') {
-      printFormattedSection('class-printable-view', `${selectedClassFilter} Timetable`, schoolName, { orientation: 'landscape' });
-    } else if (activeTab === 'teacher') {
-      const currentTeacher = teachers.find(t => t.id === selectedTeacherFilter);
-      printFormattedSection('teacher-printable-view', `${currentTeacher?.name || 'Teacher'} Teaching Timetable`, schoolName, { orientation: 'landscape' });
-    } else if (activeTab === 'journal') {
-      printFormattedSection('official-class-journal-printable', `Official Class Journal`, schoolName, { orientation: 'landscape' });
-    } else {
-      window.print();
+  const handlePrintTimetable = (forceMaster: boolean = false) => {
+    // If printing master timetable or currently in a non-grid configuration tab, switch to general tab first
+    if (forceMaster || !['general', 'class', 'teacher', 'journal'].includes(activeTab)) {
+      if (activeTab !== 'general') {
+        setActiveTab('general');
+        setTimeout(() => {
+          window.print();
+        }, 150);
+        return;
+      }
     }
+    window.print();
+  };
+
+  const handlePrintActiveTimetableGrid = () => {
+    handlePrintTimetable();
   };
 
   // Comprehensive Timetable Integrity Analysis
@@ -614,6 +615,98 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
   return (
     <div className="space-y-6">
+      {/* Dedicated Master Timetable Print CSS Styling */}
+      <style>{`
+        @media print {
+          @page {
+            size: ${printOrientation};
+            margin: 6mm 6mm;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .master-timetable-container,
+          .master-timetable-container *,
+          #master-timetable-container,
+          #master-timetable-container *,
+          #general-printable-view,
+          #general-printable-view *,
+          #class-printable-view,
+          #class-printable-view *,
+          #teacher-printable-view,
+          #teacher-printable-view * {
+            visibility: visible !important;
+          }
+
+          .master-timetable-container,
+          #master-timetable-container,
+          #general-printable-view,
+          #class-printable-view,
+          #teacher-printable-view {
+            position: absolute !important;
+            left: 0 !important;
+            top: 0 !important;
+            width: 100% !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            z-index: 999999 !important;
+          }
+
+          .no-print,
+          .no-print * {
+            display: none !important;
+            visibility: hidden !important;
+            height: 0 !important;
+            width: 0 !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+
+          .master-timetable-container table {
+            width: 100% !important;
+            border-collapse: collapse !important;
+            page-break-inside: auto !important;
+            break-inside: auto !important;
+            font-size: 8pt !important;
+            background: #ffffff !important;
+            color: #000000 !important;
+            margin-top: 4px !important;
+            margin-bottom: 6px !important;
+          }
+
+          .master-timetable-container th,
+          .master-timetable-container td {
+            border: 1px solid #000000 !important;
+            padding: 3px 4px !important;
+            font-size: 8pt !important;
+            color: #000000 !important;
+            text-align: center !important;
+          }
+
+          .master-timetable-container thead th {
+            background-color: #f1f5f9 !important;
+            color: #000000 !important;
+            font-weight: 800 !important;
+            text-transform: uppercase !important;
+          }
+
+          .master-timetable-container tr {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+          }
+
+          .print-avoid-break {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            margin-bottom: 12px !important;
+          }
+        }
+      `}</style>
+
       {/* Sub Navigation */}
       <div className="bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs flex flex-wrap items-center justify-between gap-2 no-print">
         <div className="flex flex-wrap gap-1 items-center flex-1">
@@ -811,9 +904,10 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
           <button
             type="button"
-            onClick={handlePrintActiveTimetableGrid}
+            onClick={() => handlePrintTimetable()}
             className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-lg flex items-center gap-2 shadow-xs transition-all cursor-pointer active:scale-95 border border-blue-500"
-            title="Print current generated timetable grid using browser print"
+            title="Print Master Timetable using dedicated print CSS"
+            data-testid="print-timetable-button"
           >
             <Printer className="w-4 h-4" />
             <span>Print Timetable</span>
@@ -833,7 +927,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
       {/* Conflict Bar Alert (if any teacher is double-booked or conflicts exist) */}
       {(totalConflicts > 0 || integrityReport.criticalCount > 0) && (
-        <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-rose-900 shadow-xs animate-in fade-in flex-wrap gap-3">
+        <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-rose-900 shadow-xs animate-in fade-in flex-wrap gap-3 no-print">
           <div className="flex items-center gap-3">
             <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
             <div className="flex flex-col">
@@ -873,7 +967,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       )}
 
       {/* MANUAL TIMETABLE BUILDER HEADER */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 no-print">
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
           <div className="flex items-start gap-2.5">
             <div className="p-2.5 bg-blue-600 text-white rounded-xl shrink-0 mt-0.5 sm:mt-0 shadow-xs">
@@ -892,7 +986,18 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            <button
+              type="button"
+              onClick={() => handlePrintTimetable(true)}
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95 border border-slate-700"
+              title="Print Master Timetable with official letterhead and stamp layout"
+              data-testid="print-master-timetable-header-btn"
+            >
+              <Printer className="w-3.5 h-3.5 text-blue-400" />
+              <span>Print Timetable</span>
+            </button>
+
             <button
               type="button"
               onClick={() => setAiModalOpen(true)}
@@ -922,7 +1027,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       </div>
 
       {/* Quick Add Extra-Curricular Bar (Editable Times) */}
-      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white p-4 rounded-xl shadow-md border border-slate-800">
+      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white p-4 rounded-xl shadow-md border border-slate-800 no-print">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -979,7 +1084,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       {activeTab === 'general' && (
         <div className="space-y-6">
           {/* Action Bar */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 no-print">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Class:</span>
               <select
@@ -1154,12 +1259,11 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               </button>
 
               <button
-                onClick={() => {
-                  const scopeLabel = selectedGeneralClass === 'All' ? 'Whole School' : selectedGeneralClass;
-                  const streamLabel = selectedGeneralStream !== 'All' ? selectedGeneralStream : '';
-                  printFormattedSection('general-printable-view', `General Teaching Timetable - ${scopeLabel} ${streamLabel}`.trim(), schoolName, { orientation: printOrientation });
-                }}
-                className="px-3 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                type="button"
+                onClick={() => handlePrintTimetable(true)}
+                className="px-3.5 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                title="Print Master Timetable with dedicated print CSS layout"
+                data-testid="print-master-timetable-action-btn"
               >
                 <Printer className="w-3.5 h-3.5" />
                 <span>Print Timetable</span>
@@ -1168,7 +1272,52 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           </div>
 
           {/* Timetable View by Days */}
-          <div id="general-printable-view" className="space-y-8 master-timetable-container">
+          <div id="master-timetable-container" data-alias="general-printable-view" className="space-y-8 master-timetable-container">
+            {/* Official Master Timetable Letterhead Header (Visible ONLY during print) */}
+            <div className="hidden print:block mb-4 border-b-2 border-slate-900 pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {(schoolInfo?.logo || schoolInfo?.badge) ? (
+                    <img
+                      src={schoolInfo?.logo || schoolInfo?.badge}
+                      alt={schoolName}
+                      className="w-14 h-14 object-contain border border-slate-300 p-1 rounded"
+                    />
+                  ) : (
+                    <div className="w-14 h-14 bg-blue-900 text-white rounded flex items-center justify-center font-black text-xl">
+                      {schoolName.substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <h1 className="text-xl font-black uppercase text-slate-900 tracking-tight">
+                      {schoolInfo?.name || schoolName || 'HabyEduPro3A'}
+                    </h1>
+                    <p className="text-xs font-semibold text-slate-700">
+                      {schoolInfo?.motto ? `"${schoolInfo.motto}" • ` : ''}
+                      {schoolInfo?.address || 'P.O. BOX 1000, ACADEMIC DIVISION'} 
+                      {schoolInfo?.phone ? ` • Tel: ${schoolInfo.phone}` : ''}
+                    </p>
+                    <p className="text-[11px] font-bold text-blue-950 uppercase mt-0.5 tracking-wider">
+                      MASTER TEACHING &amp; LESSON TIMETABLE (RATIBA KUU YA MASOMO)
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right text-[10px] text-slate-700">
+                  <div className="font-mono font-bold bg-slate-100 px-2 py-1 border border-slate-300 rounded inline-block">
+                    OFFICIAL ACADEMIC SCHEDULE
+                  </div>
+                  <div className="mt-1 font-semibold">
+                    Year: {new Date().getFullYear()}
+                  </div>
+                  <div>
+                    Scope: {selectedGeneralClass === 'All' ? 'Whole School' : selectedGeneralClass} {selectedGeneralStream !== 'All' ? `(${selectedGeneralStream})` : ''}
+                  </div>
+                  <div>
+                    Printed: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </div>
+                </div>
+              </div>
+            </div>
             {DAYS_OF_WEEK.filter(day => selectedDayFilter === 'All' || selectedDayFilter === day).map(day => {
               const dayTheme = getDayTheme(day, dayThemes);
   const timeToMinutes = (timeStr: string) => {
@@ -1564,6 +1713,28 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 </div>
               );
             })}
+
+            {/* Official Signatures & Stamp Footer (Visible ONLY during print) */}
+            <div className="hidden print:block mt-8 pt-4 border-t-2 border-slate-900">
+              <div className="grid grid-cols-3 gap-6 text-center text-xs">
+                <div>
+                  <div className="h-10 border-b border-dashed border-slate-500 mb-1" />
+                  <p className="font-bold text-slate-900">Academic Master / Mistress</p>
+                  <p className="text-[10px] text-slate-600">Signature &amp; Date</p>
+                </div>
+                <div>
+                  <div className="h-10 flex items-center justify-center text-slate-400 border border-dashed border-slate-300 rounded mb-1 text-[10px] uppercase font-bold">
+                    Official School Stamp
+                  </div>
+                  <p className="font-bold text-slate-900">School Registry Stamp</p>
+                </div>
+                <div>
+                  <div className="h-10 border-b border-dashed border-slate-500 mb-1" />
+                  <p className="font-bold text-slate-900">Head of School / Principal</p>
+                  <p className="text-[10px] text-slate-600">Signature &amp; Approval</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1573,7 +1744,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       {/* ======================================================== */}
       {activeTab === 'class' && (
         <div className="space-y-6">
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 no-print">
             <div className="flex items-center gap-3">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Select Class:</label>
               <select
@@ -1671,17 +1842,20 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               </button>
 
               <button
-                onClick={() => printFormattedSection('class-printable-view', `${selectedClassFilter} Timetable`, schoolName)}
-                className="px-3 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                type="button"
+                onClick={() => handlePrintTimetable()}
+                className="px-3.5 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 transition-all"
+                title="Print Class Timetable using dedicated print CSS"
+                data-testid="print-class-timetable-btn"
               >
                 <Printer className="w-3.5 h-3.5" />
-                Print Class Timetable
+                <span>Print Timetable</span>
               </button>
             </div>
           </div>
 
           {/* Quick Stream Tabs for the selected level */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 shadow-xs space-y-2">
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 shadow-xs space-y-2 no-print">
             <div className="flex items-center justify-between">
               <span className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5 text-blue-600" />
@@ -1721,6 +1895,51 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
           {/* Printable Class Grid */}
           <div id="class-printable-view" className="space-y-6 master-timetable-container">
+            {/* Official Class Timetable Letterhead Header (Visible ONLY during print) */}
+            <div className="hidden print:block mb-4 border-b-2 border-slate-900 pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {(schoolInfo?.logo || schoolInfo?.badge) ? (
+                    <img
+                      src={schoolInfo?.logo || schoolInfo?.badge}
+                      alt={schoolName}
+                      className="w-14 h-14 object-contain border border-slate-300 p-1 rounded"
+                    />
+                  ) : (
+                    <div className="w-14 h-14 bg-blue-900 text-white rounded flex items-center justify-center font-black text-xl">
+                      {schoolName.substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <h1 className="text-xl font-black uppercase text-slate-900 tracking-tight">
+                      {schoolInfo?.name || schoolName || 'HabyEduPro3A'}
+                    </h1>
+                    <p className="text-xs font-semibold text-slate-700">
+                      {schoolInfo?.motto ? `"${schoolInfo.motto}" • ` : ''}
+                      {schoolInfo?.address || 'P.O. BOX 1000, ACADEMIC DIVISION'} 
+                      {schoolInfo?.phone ? ` • Tel: ${schoolInfo.phone}` : ''}
+                    </p>
+                    <p className="text-[11px] font-bold text-blue-950 uppercase mt-0.5 tracking-wider">
+                      CLASS TIMETABLE • {selectedClassFilter} (RATIBA YA DARASA)
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right text-[10px] text-slate-700">
+                  <div className="font-mono font-bold bg-slate-100 px-2 py-1 border border-slate-300 rounded inline-block">
+                    CLASS ROSTER
+                  </div>
+                  <div className="mt-1 font-semibold">
+                    Year: {new Date().getFullYear()}
+                  </div>
+                  <div>
+                    Class: {selectedClassFilter}
+                  </div>
+                  <div>
+                    Printed: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </div>
+                </div>
+              </div>
+            </div>
             {getStreamsForClass(selectedClassFilter).map(stream => {
               const formTheme = getFormStreamTheme(selectedClassFilter);
 
@@ -1907,6 +2126,28 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 </div>
               );
             })}
+
+            {/* Official Signatures & Stamp Footer (Visible ONLY during print) */}
+            <div className="hidden print:block mt-8 pt-4 border-t-2 border-slate-900">
+              <div className="grid grid-cols-3 gap-6 text-center text-xs">
+                <div>
+                  <div className="h-10 border-b border-dashed border-slate-500 mb-1" />
+                  <p className="font-bold text-slate-900">Academic Master / Mistress</p>
+                  <p className="text-[10px] text-slate-600">Signature &amp; Date</p>
+                </div>
+                <div>
+                  <div className="h-10 flex items-center justify-center text-slate-400 border border-dashed border-slate-300 rounded mb-1 text-[10px] uppercase font-bold">
+                    Official School Stamp
+                  </div>
+                  <p className="font-bold text-slate-900">School Registry Stamp</p>
+                </div>
+                <div>
+                  <div className="h-10 border-b border-dashed border-slate-500 mb-1" />
+                  <p className="font-bold text-slate-900">Head of School / Principal</p>
+                  <p className="text-[10px] text-slate-600">Signature &amp; Approval</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -1916,7 +2157,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       {/* ======================================================== */}
       {activeTab === 'teacher' && (
         <div className="space-y-6">
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 no-print">
             <div className="flex items-center gap-3">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Select Teacher:</label>
               <select
@@ -1967,24 +2208,62 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               </button>
 
               <button
-                onClick={() => {
-                  const currentTeacher = teachers.find(t => t.id === selectedTeacherFilter);
-                  printFormattedSection(
-                    'teacher-printable-view',
-                    `${currentTeacher?.name || 'Teacher'} Teaching Timetable`,
-                    schoolName
-                  );
-                }}
-                className="px-3 py-2 text-xs font-bold bg-slate-800 text-white rounded-lg hover:bg-slate-900 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                type="button"
+                onClick={() => handlePrintTimetable()}
+                className="px-3.5 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 transition-all"
+                title="Print Teacher Timetable using dedicated print CSS"
+                data-testid="print-teacher-timetable-btn"
               >
                 <Printer className="w-3.5 h-3.5" />
-                <span>Print Schedule</span>
+                <span>Print Timetable</span>
               </button>
             </div>
           </div>
 
           {/* Teacher Schedule View */}
           <div id="teacher-printable-view" className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6 master-timetable-container">
+            {/* Official Teacher Timetable Letterhead Header (Visible ONLY during print) */}
+            <div className="hidden print:block mb-4 border-b-2 border-slate-900 pb-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  {(schoolInfo?.logo || schoolInfo?.badge) ? (
+                    <img
+                      src={schoolInfo?.logo || schoolInfo?.badge}
+                      alt={schoolName}
+                      className="w-14 h-14 object-contain border border-slate-300 p-1 rounded"
+                    />
+                  ) : (
+                    <div className="w-14 h-14 bg-blue-900 text-white rounded flex items-center justify-center font-black text-xl">
+                      {schoolName.substring(0, 2).toUpperCase()}
+                    </div>
+                  )}
+                  <div>
+                    <h1 className="text-xl font-black uppercase text-slate-900 tracking-tight">
+                      {schoolInfo?.name || schoolName || 'HabyEduPro3A'}
+                    </h1>
+                    <p className="text-xs font-semibold text-slate-700">
+                      {schoolInfo?.motto ? `"${schoolInfo.motto}" • ` : ''}
+                      {schoolInfo?.address || 'P.O. BOX 1000, ACADEMIC DIVISION'} 
+                      {schoolInfo?.phone ? ` • Tel: ${schoolInfo.phone}` : ''}
+                    </p>
+                    <p className="text-[11px] font-bold text-blue-950 uppercase mt-0.5 tracking-wider">
+                      TEACHER TEACHING TIMETABLE • {teachers.find(t => t.id === selectedTeacherFilter)?.name || 'FACULTY'} (RATIBA YA MWALIMU)
+                    </p>
+                  </div>
+                </div>
+                <div className="text-right text-[10px] text-slate-700">
+                  <div className="font-mono font-bold bg-slate-100 px-2 py-1 border border-slate-300 rounded inline-block">
+                    INDIVIDUAL FACULTY ROSTER
+                  </div>
+                  <div className="mt-1 font-semibold">
+                    Year: {new Date().getFullYear()}
+                  </div>
+                  <div>
+                    Printed: {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}
+                  </div>
+                </div>
+              </div>
+            </div>
             {(() => {
               const currentTeacher = teachers.find(t => t.id === selectedTeacherFilter);
               if (!currentTeacher) return <p className="text-slate-500">Select a teacher.</p>;
@@ -2109,6 +2388,28 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 </div>
               );
             })()}
+
+            {/* Official Signatures & Stamp Footer (Visible ONLY during print) */}
+            <div className="hidden print:block mt-8 pt-4 border-t-2 border-slate-900">
+              <div className="grid grid-cols-3 gap-6 text-center text-xs">
+                <div>
+                  <div className="h-10 border-b border-dashed border-slate-500 mb-1" />
+                  <p className="font-bold text-slate-900">Academic Master / Mistress</p>
+                  <p className="text-[10px] text-slate-600">Signature &amp; Date</p>
+                </div>
+                <div>
+                  <div className="h-10 flex items-center justify-center text-slate-400 border border-dashed border-slate-300 rounded mb-1 text-[10px] uppercase font-bold">
+                    Official School Stamp
+                  </div>
+                  <p className="font-bold text-slate-900">School Registry Stamp</p>
+                </div>
+                <div>
+                  <div className="h-10 border-b border-dashed border-slate-500 mb-1" />
+                  <p className="font-bold text-slate-900">Head of School / Principal</p>
+                  <p className="text-[10px] text-slate-600">Signature &amp; Approval</p>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}
