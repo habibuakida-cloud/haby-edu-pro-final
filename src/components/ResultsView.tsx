@@ -86,6 +86,8 @@ interface ResultsViewProps {
   onSaveUsalRecord?: (record: UsalRecord) => void;
   onNavigateToMarkEntry?: (examName?: string, className?: string) => void;
   teachers?: Teacher[];
+  ledgerSubjectKeys?: string[];
+  onUpdateLedgerSubjectKeys?: (keys: string[]) => void;
 }
 
 // Complete list of available Tanzanian subjects across Nursery, Primary, Secondary and High School
@@ -182,7 +184,9 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   usalRecords = [],
   onSaveUsalRecord,
   onNavigateToMarkEntry,
-  teachers = []
+  teachers = [],
+  ledgerSubjectKeys: initialLedgerSubjectKeys = [],
+  onUpdateLedgerSubjectKeys
 }) => {
   const [activeTab, setActiveTab] = useState<'ledger' | 'dashboard' | 'reportcard' | 'comparison'>('ledger');
   const [selectedClass, setSelectedClass] = useState<string>('Form 1');
@@ -283,17 +287,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     return Array.from(set);
   }, [students]);
 
-  // Selected custom subject keys for the ledger
-  const [selectedSubjectKeys, setSelectedSubjectKeys] = useState<string[]>(() => {
-    try {
-      const saved = localStorage.getItem(`haby_ledger_subjects_${schoolInfo?.name || 'default'}`);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-      }
-    } catch {}
-    return DEFAULT_ACTIVE_SUBJECT_KEYS;
-  });
+  // Local Search & Filter state
 
   // Modal and batch management states
   const [isCustomizeModalOpen, setIsCustomizeModalOpen] = useState(false);
@@ -315,12 +309,21 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Save customized subjects to localStorage whenever changed
+  // Load customized subjects from props
+  const [selectedSubjectKeys, setSelectedSubjectKeys] = useState<string[]>(initialLedgerSubjectKeys || []);
+
+  useEffect(() => {
+    if (initialLedgerSubjectKeys && initialLedgerSubjectKeys.length > 0) {
+      setSelectedSubjectKeys(initialLedgerSubjectKeys);
+    }
+  }, [initialLedgerSubjectKeys]);
+
+  // Save customized subjects via callback
   const handleSaveSubjectKeys = (keys: string[]) => {
     setSelectedSubjectKeys(keys);
-    try {
-      localStorage.setItem(`haby_ledger_subjects_${schoolInfo?.name || 'default'}`, JSON.stringify(keys));
-    } catch {}
+    if (onUpdateLedgerSubjectKeys) {
+      onUpdateLedgerSubjectKeys(keys);
+    }
   };
 
   const isClassPrimary = isPrimaryOrNursery(undefined, selectedClass);

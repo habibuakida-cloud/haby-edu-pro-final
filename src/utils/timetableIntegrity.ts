@@ -48,11 +48,11 @@ export const DEFAULT_INTEGRITY_POLICIES: IntegrityPolicySettings = {
 };
 
 export interface InvolvedSlotInfo {
-  assignmentId: number;
+  assignmentId: number | string;
   className: string;
   stream: string;
   subject: string;
-  teacherId?: number;
+  teacherId?: number | string;
   teacherName?: string;
   room?: string;
   activityType?: string;
@@ -68,16 +68,16 @@ export interface TimetableConflictItem {
   period: string;
   periodName: string;
   timeRange?: string;
-  assignmentIds: number[];
+  assignmentIds: (number | string)[];
   involvedSlots: InvolvedSlotInfo[];
-  involvedTeachers: { teacherId: number; teacherName: string; currentLoad?: number; maxLoad?: number }[];
+  involvedTeachers: { teacherId: number | string; teacherName: string; currentLoad?: number; maxLoad?: number }[];
   involvedRooms: string[];
   policyRule: string;
   recommendation: string;
 }
 
 export interface TeacherWorkloadAudit {
-  teacherId: number;
+  teacherId: number | string;
   teacherName: string;
   schoolRole: string;
   subjects: string[];

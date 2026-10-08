@@ -73,6 +73,8 @@ interface ClassJournalTabProps {
   currentUser?: UserAccount | null;
   students?: Student[];
   institutionalPolicy?: InstitutionalPolicy;
+  journalRecords?: Record<string, ClassJournalEntry>;
+  onUpdateJournal?: (records: Record<string, ClassJournalEntry>) => void;
 }
 
 export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
@@ -83,8 +85,17 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
   schoolInfo,
   currentUser,
   students = [],
-  institutionalPolicy
+  institutionalPolicy,
+  journalRecords: initialJournalRecords = {},
+  onUpdateJournal
 }) => {
+  const [journalRecords, setJournalRecords] = useState<Record<string, ClassJournalEntry>>(initialJournalRecords);
+
+  useEffect(() => {
+    if (Object.keys(initialJournalRecords).length > 0) {
+      setJournalRecords(initialJournalRecords);
+    }
+  }, [initialJournalRecords]);
   // Available classes & streams
   const classList = useMemo(() => {
     if (streamSettings.length > 0) {
@@ -283,19 +294,7 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
     return count > 0 ? count : 45; // sensible default
   }, [students, selectedClass, selectedStream]);
 
-  // Local state for Journal Entries
-  const storageKey = `haby_class_journal_records_${schoolInfo?.name || 'default'}`;
-  const [journalRecords, setJournalRecords] = useState<Record<string, ClassJournalEntry>>(() => {
-    try {
-      const saved = localStorage.getItem(storageKey);
-      if (saved) {
-        return JSON.parse(saved);
-      }
-    } catch {}
-    return {};
-  });
-
-  // Save to localStorage whenever modified
+  // Save changes via callback
   const updateJournalEntry = (entryId: string, updates: Partial<ClassJournalEntry>) => {
     setJournalRecords(prev => {
       const existing = prev[entryId];
@@ -307,9 +306,7 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
           ...updates
         }
       };
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(updated));
-      } catch {}
+      if (onUpdateJournal) onUpdateJournal(updated);
       return updated;
     });
   };
@@ -317,16 +314,10 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
   // Save monitor name on change
   const handleSaveMonitorName = (name: string) => {
     setMonitorName(name);
-    try {
-      localStorage.setItem(`haby_monitor_${selectedClass}_${selectedStream}`, name);
-    } catch {}
   };
 
   const handleSaveClassTeacherName = (name: string) => {
     setClassTeacherName(name);
-    try {
-      localStorage.setItem(`haby_classteacher_${selectedClass}_${selectedStream}`, name);
-    } catch {}
   };
 
   // Generate / Compile Journal Entries for the selected class, stream, and week
@@ -441,9 +432,7 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
     });
     if (hasNew) {
       setJournalRecords(newRecords);
-      try {
-        localStorage.setItem(storageKey, JSON.stringify(newRecords));
-      } catch {}
+      if (onUpdateJournal) onUpdateJournal(newRecords);
     }
   }, [weekJournalEntries, storageKey]);
 
@@ -497,9 +486,7 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
     });
 
     setJournalRecords(updated);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(updated));
-    } catch {}
+    if (onUpdateJournal) onUpdateJournal(updated);
   };
 
   // Quick action: Teacher signs all their periods for the week
@@ -523,9 +510,7 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
     });
 
     setJournalRecords(updated);
-    try {
-      localStorage.setItem(storageKey, JSON.stringify(updated));
-    } catch {}
+    if (onUpdateJournal) onUpdateJournal(updated);
   };
 
   // Print official class journal

@@ -1,5 +1,6 @@
 import { TimetableAssignment } from '../types';
 import { isSameClass } from '../utils/reportCardUtils';
+import { supabase } from './supabaseClient';
 
 /**
  * Normalizes stream name for accurate comparison
@@ -52,82 +53,45 @@ export async function fetchTimetable(options: FetchTimetableOptions = {}): Promi
   const teacherId = options.teacherId ? String(options.teacherId) : '';
   const day = options.day || '';
 
-  console.log(`[Timetable Service] Fetching timetable - class: "${className}", stream: "${stream}", teacherId: "${teacherId}", school: "${schoolId}"`);
+  console.log(`[Timetable Service] Fetching timetable from Supabase - class: "${className}", stream: "${stream}", teacherId: "${teacherId}", school: "${schoolId}"`);
 
-  // 1. Try server API endpoint
   try {
-    const params = new URLSearchParams();
-    if (schoolId) params.append('schoolId', schoolId);
-    if (className && className !== 'ALL' && className !== 'All') params.append('class', className);
-    if (stream && stream !== 'ALL' && stream !== 'All' && stream !== 'All Streams') params.append('stream', stream);
-    if (teacherId && teacherId !== 'ALL') params.append('teacherId', teacherId);
-    if (day && day !== 'ALL' && day !== 'All') params.append('day', day);
+    const { data: resData, error } = await supabase
+      .from('school_data')
+      .select('timetable_assignments')
+      .eq('school_id', schoolId)
+      .maybeSingle();
 
-    const response = await fetch(`/api/timetable?${params.toString()}`);
-    if (response.ok) {
-      const json = await response.json();
-      if (json.success && Array.isArray(json.data)) {
-        console.log(`[Timetable Service] API returned ${json.data.length} periods for class="${className}" stream="${stream}"`);
+    if (error) throw error;
 
-        // Update local cache
-        try {
-          const cacheKey = `haby_timetable_assignments_${schoolId}`;
-          const existingRaw = localStorage.getItem(cacheKey);
-          let allList: TimetableAssignment[] = existingRaw ? JSON.parse(existingRaw) : [];
-          // Merge items into local cache
-          json.data.forEach((item: TimetableAssignment) => {
-            const idx = allList.findIndex(a => a.id === item.id);
-            if (idx >= 0) allList[idx] = item;
-            else allList.push(item);
-          });
-          localStorage.setItem(cacheKey, JSON.stringify(allList));
-        } catch (e) {}
+    const allAssignments: TimetableAssignment[] = (resData?.timetable_assignments) || [];
 
-        return {
-          success: true,
-          data: json.data,
-          periods: json.data
-        };
+    const filtered = allAssignments.filter(a => {
+      if (className && className !== 'ALL' && className !== 'All') {
+        if (!isSameClass(a.className, className)) return false;
       }
-    }
-  } catch (err) {
-    console.warn('[Timetable Service] Server fetch error, falling back to local storage cache:', err);
+      if (stream && stream !== 'ALL' && stream !== 'All' && stream !== 'All Streams') {
+        if (!isSameStream(a.stream, stream)) return false;
+      }
+      if (teacherId && teacherId !== 'ALL') {
+        if (String(a.teacherId) !== teacherId) return false;
+      }
+      if (day && day !== 'ALL' && day !== 'All') {
+        if (a.day?.toLowerCase() !== day.toLowerCase()) return false;
+      }
+      return true;
+    });
+
+    console.log(`[Timetable Service] Supabase returned ${filtered.length} matching periods`);
+    return {
+      success: true,
+      data: filtered,
+      periods: filtered
+    };
+  } catch (err: any) {
+    console.error('[Timetable Service] Supabase fetch error:', err);
+    return { success: false, data: [], periods: [], error: err.message };
   }
-
-  // 2. Fallback to LocalStorage cache with STRICT class AND stream filter
-  try {
-    const cacheKey = `haby_timetable_assignments_${schoolId}`;
-    const raw = localStorage.getItem(cacheKey);
-    if (raw) {
-      const allAssignments: TimetableAssignment[] = JSON.parse(raw);
-      const filtered = allAssignments.filter(a => {
-        if (className && className !== 'ALL' && className !== 'All') {
-          if (!isSameClass(a.className, className)) return false;
-        }
-        if (stream && stream !== 'ALL' && stream !== 'All' && stream !== 'All Streams') {
-          if (!isSameStream(a.stream, stream)) return false;
-        }
-        if (teacherId && teacherId !== 'ALL') {
-          if (String(a.teacherId) !== teacherId) return false;
-        }
-        if (day && day !== 'ALL' && day !== 'All') {
-          if (a.day?.toLowerCase() !== day.toLowerCase()) return false;
-        }
-        return true;
-      });
-
-      console.log(`[Timetable Service] Local cache returned ${filtered.length} periods for class="${className}" stream="${stream}"`);
-      return {
-        success: true,
-        data: filtered,
-        periods: filtered
-      };
-    }
-  } catch (e) {
-    console.error('[Timetable Service] Local cache read error:', e);
-  }
-
-  return { success: true, data: [], periods: [] };
 }
 
 /**
@@ -140,37 +104,61 @@ export async function saveTimetableAssignments(
 ): Promise<{ success: boolean; data: TimetableAssignment[] }> {
   const sid = schoolId || 'DEFAULT_PRIMARY_SCHOOL_ID';
 
-  console.log(`[Timetable Service] Saving ${assignments.length} assignments for school: ${sid}`);
+  console.log(`[Timetable Service] Saving ${assignments.length} assignments directly to Supabase for school: ${sid}`);
 
-  // 1. Save to local storage first for immediate optimistic update
   try {
-    const cacheKey = `haby_timetable_assignments_${sid}`;
-    localStorage.setItem(cacheKey, JSON.stringify(assignments));
-  } catch (e) {}
+    // Fetch current school_data to avoid overwriting other fields
+    const { data: currentData } = await supabase
+      .from('school_data')
+      .select('timetable_assignments')
+      .eq('school_id', sid)
+      .maybeSingle();
 
-  // 2. Persist to Backend API
-  try {
-    const response = await fetch('/api/timetable', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        schoolId: sid,
-        assignments,
-        replace: options?.replace ?? false,
-        className: options?.className,
-        stream: options?.stream
-      })
-    });
+    let nextAssignments = assignments;
 
-    if (response.ok) {
-      const json = await response.json();
-      if (json.success && Array.isArray(json.data)) {
-        return { success: true, data: json.data };
+    if (!options?.replace) {
+      const existing: TimetableAssignment[] = currentData?.timetable_assignments || [];
+      const current = [...existing];
+      for (const item of assignments) {
+        const existingIdx = current.findIndex(a => {
+          if (a.id && item.id && String(a.id) === String(item.id)) return true;
+          return (
+            isSameClass(a.className, item.className) &&
+            isSameStream(a.stream, item.stream) &&
+            a.day === item.day &&
+            (a.period === item.period || a.periodName === item.periodName)
+          );
+        });
+
+        const entryWithId = {
+          ...item,
+          id: item.id || 'ta_' + Date.now() + '_' + Math.floor(Math.random() * 10000),
+          updatedAt: new Date().toISOString()
+        };
+
+        if (existingIdx >= 0) {
+          current[existingIdx] = entryWithId;
+        } else {
+          current.push(entryWithId);
+        }
       }
+      nextAssignments = current;
     }
-  } catch (err) {
-    console.warn('[Timetable Service] Remote save failed, stored locally:', err);
-  }
 
-  return { success: true, data: assignments };
+    // Also update server-side timetable assignments if needed, but primary source is school_data JSON snapshot!
+    const { error } = await supabase
+      .from('school_data')
+      .upsert({
+        school_id: sid,
+        timetable_assignments: nextAssignments,
+        updated_at: new Date().toISOString()
+      }, { onConflict: 'school_id' });
+
+    if (error) throw error;
+
+    return { success: true, data: nextAssignments };
+  } catch (err: any) {
+    console.error('[Timetable Service] Supabase save error:', err);
+    return { success: false, data: assignments };
+  }
 }

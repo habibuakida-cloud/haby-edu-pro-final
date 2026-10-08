@@ -34,6 +34,8 @@ interface SmsModuleProps {
   schoolId: string;
   schoolInfo: SchoolInfo;
   students?: any[];
+  parents?: any[];
+  parentStudents?: any[];
   initialExamType?: string;
   initialYear?: string;
   onNavigateToAnalyzer?: () => void;
@@ -84,6 +86,8 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   schoolId,
   schoolInfo,
   students,
+  parents: propParents = [],
+  parentStudents: propParentStudents = [],
   initialExamType = 'CSEE',
   initialYear = new Date().getFullYear().toString(),
   onNavigateToAnalyzer
@@ -102,13 +106,20 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   const [selectedYear, setSelectedYear] = useState<string>(initialYear);
   const [distinctExams, setDistinctExams] = useState<{ exam_type: string; year: string | number; count: number }[]>([]);
 
-  // Parents State
-  const [parents, setParents] = useState<ParentItem[]>([]);
+  // Parents State - Initialized from props
+  const [parents, setParents] = useState<ParentItem[]>(propParents as ParentItem[]);
   const [loadingParents, setLoadingParents] = useState<boolean>(false);
   const [parentSearch, setParentSearch] = useState<string>('');
   const [newParentCno, setNewParentCno] = useState<string>('');
   const [newParentPhone, setNewParentPhone] = useState<string>('');
   const [newParentName, setNewParentName] = useState<string>('');
+
+  // Update parents state when props change
+  useEffect(() => {
+    if (propParents && propParents.length > 0) {
+      setParents(propParents as ParentItem[]);
+    }
+  }, [propParents]);
 
   // Announcement State
   const [announcementMsg, setAnnouncementMsg] = useState<string>('');
@@ -289,16 +300,50 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     try {
       setLoadingParents(true);
       console.log("Current school_id (loadParents):", schoolId);
-      const res = await supabase.from('parents').select().eq('school_id', schoolId);
-      if (res.data) {
-        const mapped = res.data.map((p: any) => ({
-          ...p,
-          phone_255: p.phone_255 || p.phone || '',
-          student_cno: p.student_cno || p.student_name || p.id?.split('_')[1] || '',
-          student_name: p.student_name || p.full_name || p.parent_name || '',
-          password: p.password || p.password_hash || '123456',
-          class_level: p.class_level || p.class_name || 'All'
-        }));
+      
+      // 1. Prioritize Props for Instant hydration
+      const initialParentStudents = propParentStudents.length > 0 ? propParentStudents : [];
+
+      // 2. Fetch from Supabase
+      const [res, psRes, studentRowsRes] = await Promise.all([
+        supabase.from('parents').select().eq('school_id', schoolId),
+        supabase.from('parent_students').select('*'),
+        supabase.from('students').select('id, reg_no, name, class, stream').eq('school_id', schoolId)
+      ]);
+
+      const parentRows = res.data || (propParents as any[]);
+      const parentStudents = psRes.data || initialParentStudents;
+      const studentRows = studentRowsRes.data || [];
+
+      if (parentRows) {
+        const studentMap = new Map();
+        studentRows.forEach(s => studentMap.set(s.id, s));
+
+        const relationMap = new Map();
+        parentStudents.forEach(ps => {
+          if (!relationMap.has(ps.parent_id)) {
+            relationMap.set(ps.parent_id, []);
+          }
+          relationMap.get(ps.parent_id).push(ps.student_id);
+        });
+
+        const mapped = parentRows.map((p: any) => {
+          const studentIds = relationMap.get(p.id) || [];
+          const relatedStudents = studentIds.map((sid: string) => studentMap.get(sid)).filter(Boolean);
+          const primaryStudent = relatedStudents[0];
+
+          return {
+            ...p,
+            phone_255: p.phone || '',
+            phone: p.phone || '',
+            student_cno: primaryStudent?.reg_no || primaryStudent?.name || '',
+            student_name: primaryStudent?.name || p.full_name || '',
+            password: p.password || p.password_hash || '123456',
+            class_level: primaryStudent?.class || 'All',
+            class_name: primaryStudent?.class || 'All',
+            parent_name: p.full_name || 'Mzazi'
+          };
+        });
         setParents(mapped as ParentItem[]);
       }
     } catch (err) {
@@ -692,89 +737,66 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
         console.warn("Error checking existing parents:", checkError);
       }
 
-      let payload: any;
+      let parentId: string;
       let isUpdate = false;
 
       if (existingParents && existingParents.length > 0) {
-        // Parent already exists! Update their row to link with this student CNO
+        // Parent already exists! Update their row
         isUpdate = true;
         const parent = existingParents[0];
+        parentId = parent.id;
         
-        payload = {
-          ...parent,
-          student_cno: cleanCno,
-          phone_255: cleanPhone,
-          phone: cleanPhone,
-          student_name: cleanName,
-          full_name: parent.full_name || cleanName,
-          parent_name: parent.parent_name || 'Mzazi',
-          class_name: parent.class_name || 'All',
-          class_level: parent.class_level || 'All'
-        };
-
         const { error: updateError } = await supabase
           .from('parents')
-          .update(payload)
+          .update({
+            full_name: parent.full_name || cleanName,
+            phone: cleanPhone
+          })
           .eq('id', parent.id);
 
-        if (updateError) {
-          console.warn("Update with extended fields failed, trying fallback schema:", updateError);
-          // Try updating with fallback schema columns
-          const fallbackPayload = {
-            student_name: cleanName,
-            parent_name: parent.parent_name || 'Mzazi',
-            class_name: parent.class_name || 'All'
-          };
-          const { error: retryUpdateError } = await supabase
-            .from('parents')
-            .update(fallbackPayload)
-            .eq('id', parent.id);
-          
-          if (retryUpdateError) throw retryUpdateError;
-        }
+        if (updateError) throw updateError;
       } else {
-        // Parent doesn't exist, insert new
-        const uniqueId = `parent_${schoolId}_${cleanCno.replace(/[^A-Za-z0-9]/g, '_')}_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
-        
-        payload = {
-          id: uniqueId,
-          school_id: schoolId,
-          student_cno: cleanCno,
-          phone_255: cleanPhone,
-          phone: cleanPhone,
-          student_name: cleanName,
-          full_name: cleanName,
-          parent_name: 'Mzazi',
-          password: '123456',
-          password_hash: '123456',
-          class_name: 'All',
-          class_level: 'All'
-        };
+        // Parent doesn't exist, insert new using a valid UUID
+        parentId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
 
-        const { error: insertError } = await supabase.from('parents').insert(payload);
-        
-        if (insertError) {
-          console.warn("Insert with extended fields failed, trying fallback schema:", insertError);
-          // Try inserting with standard PostgreSQL columns
-          const fallbackPayload: any = {
-            id: uniqueId,
-            school_id: schoolId,
-            student_name: cleanName,
-            parent_name: 'Mzazi',
-            phone: cleanPhone,
-            class_name: 'All'
-          };
-          const { error: retryInsertError } = await supabase.from('parents').insert(fallbackPayload);
-          if (retryInsertError) throw retryInsertError;
-          payload = fallbackPayload;
-        }
+        const { error: insertError } = await supabase.from('parents').insert({
+          id: parentId,
+          school_id: schoolId,
+          phone: cleanPhone,
+          full_name: cleanName,
+          password_hash: '123456'
+        });
+
+        if (insertError) throw insertError;
       }
 
-      // Update local state without removing unrelated parents
-      setParents(prev => {
-        const existing = prev.filter(p => p.phone_255 !== cleanPhone && p.phone !== cleanPhone && p.id !== payload.id);
-        return [payload, ...existing];
-      });
+      // Link parent with student in parent_students table
+      const { data: studentRows } = await supabase
+        .from('students')
+        .select('id')
+        .eq('school_id', schoolId)
+        .or(`reg_no.eq.${cleanCno},name.eq.${cleanName}`);
+
+      if (studentRows && studentRows.length > 0) {
+        const studentId = studentRows[0].id;
+        
+        // Check if link already exists
+        const { data: existingLink } = await supabase
+          .from('parent_students')
+          .select('*')
+          .eq('parent_id', parentId)
+          .eq('student_id', studentId);
+
+        if (!existingLink || existingLink.length === 0) {
+          await supabase.from('parent_students').insert({
+            parent_id: parentId,
+            student_id: studentId
+          });
+        }
+      }
 
       setNewParentCno('');
       setNewParentPhone('');

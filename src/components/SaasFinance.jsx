@@ -89,34 +89,11 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
   const typesStorageKey = `haby_contribution_types_${schoolId}`;
   const ledgerStorageKey = `haby_student_ledger_${schoolId}`;
 
-  // Fetch Contribution Types with local & Firestore fallback
+  // Fetch Contribution Types with Firestore & Supabase directly
   const loadContributionTypes = async () => {
     setLoadingTypes(true);
-    let loaded = false;
 
-    // 1. LocalStorage
-    try {
-      const cached = localStorage.getItem(typesStorageKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setContributionTypes(parsed);
-          loaded = true;
-        }
-      }
-    } catch (e) {}
-
-    // 2. Firestore
-    try {
-      const fsData = await getSchoolData(schoolId);
-      if (fsData && Array.isArray(fsData.contributionTypes) && fsData.contributionTypes.length > 0) {
-        setContributionTypes(fsData.contributionTypes);
-        localStorage.setItem(typesStorageKey, JSON.stringify(fsData.contributionTypes));
-        loaded = true;
-      }
-    } catch (e) {}
-
-    // 3. Supabase
+    // 1. Fetch from Supabase directly (primary relational source)
     try {
       const res = await supabase
         .from('contribution_types')
@@ -125,40 +102,29 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
 
       if (res.data && res.data.length > 0) {
         setContributionTypes(res.data);
-        localStorage.setItem(typesStorageKey, JSON.stringify(res.data));
+        setLoadingTypes(false);
+        return;
       }
     } catch (err) {
       console.warn('Error loading contribution_types from Supabase:', err);
-    } finally {
-      setLoadingTypes(false);
     }
+
+    // 2. Fallback to Firestore snapshot
+    try {
+      const fsData = await getSchoolData(schoolId);
+      if (fsData && Array.isArray(fsData.contributionTypes) && fsData.contributionTypes.length > 0) {
+        setContributionTypes(fsData.contributionTypes);
+      }
+    } catch (e) {}
+
+    setLoadingTypes(false);
   };
 
-  // Fetch Student Ledger with local & Firestore fallback
+  // Fetch Student Ledger with Firestore & Supabase directly
   const loadStudentLedger = async () => {
     setLoadingLedger(true);
 
-    // 1. LocalStorage
-    try {
-      const cached = localStorage.getItem(ledgerStorageKey);
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          setLedger(parsed);
-        }
-      }
-    } catch (e) {}
-
-    // 2. Firestore
-    try {
-      const fsData = await getSchoolData(schoolId);
-      if (fsData && Array.isArray(fsData.studentLedger) && fsData.studentLedger.length > 0) {
-        setLedger(fsData.studentLedger);
-        localStorage.setItem(ledgerStorageKey, JSON.stringify(fsData.studentLedger));
-      }
-    } catch (e) {}
-
-    // 3. Supabase
+    // 1. Fetch from Supabase directly (primary relational source)
     try {
       const res = await supabase
         .from('student_ledger')
@@ -167,13 +133,22 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
 
       if (res.data && res.data.length > 0) {
         setLedger(res.data);
-        localStorage.setItem(ledgerStorageKey, JSON.stringify(res.data));
+        setLoadingLedger(false);
+        return;
       }
     } catch (err) {
       console.warn('Error loading student_ledger from Supabase:', err);
-    } finally {
-      setLoadingLedger(false);
     }
+
+    // 2. Fallback to Firestore snapshot
+    try {
+      const fsData = await getSchoolData(schoolId);
+      if (fsData && Array.isArray(fsData.studentLedger) && fsData.studentLedger.length > 0) {
+        setLedger(fsData.studentLedger);
+      }
+    } catch (e) {}
+
+    setLoadingLedger(false);
   };
 
   useEffect(() => {
@@ -288,11 +263,9 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
         showToast(`Mchango mpya wa "${formName}" umeongezwa na kuunganishwa kwa wanafunzi ${targetStudents.length}!`);
       }
 
-      // Sync state, localStorage, and Firestore
+      // Sync state and Firestore
       setContributionTypes(updatedTypes);
       setLedger(updatedLedger);
-      localStorage.setItem(typesStorageKey, JSON.stringify(updatedTypes));
-      localStorage.setItem(ledgerStorageKey, JSON.stringify(updatedLedger));
       await saveSchoolData(schoolId, {
         contributionTypes: updatedTypes,
         studentLedger: updatedLedger
@@ -314,7 +287,6 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
     try {
       const updatedTypes = contributionTypes.filter(t => t.id !== deletingType.id);
       setContributionTypes(updatedTypes);
-      localStorage.setItem(typesStorageKey, JSON.stringify(updatedTypes));
 
       try {
         await supabase.from('contribution_types').delete().eq('id', deletingType.id);
@@ -376,7 +348,6 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
       }
 
       setLedger(updatedLedger);
-      localStorage.setItem(ledgerStorageKey, JSON.stringify(updatedLedger));
 
       try {
         if (paymentTargetLedger.id && typeof paymentTargetLedger.id === 'string' && !paymentTargetLedger.id.startsWith('ledg_')) {

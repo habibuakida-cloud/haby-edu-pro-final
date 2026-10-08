@@ -49,6 +49,7 @@ interface DashboardViewProps {
   sessions: InvigilationSession[];
   isCloudSynced?: boolean;
   isSyncing?: boolean;
+  isLoading?: boolean;
   onForceRefreshSync?: () => void;
   syncToast?: string | null;
   schoolInfo?: SchoolInfo;
@@ -56,6 +57,7 @@ interface DashboardViewProps {
   activityLogs: ActivityLog[];
   schoolId?: string;
   currentUser?: UserAccount | null;
+  supabaseStudentCount?: number;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -65,14 +67,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   sessions = [],
   isCloudSynced = false,
   isSyncing = false,
+  isLoading = false,
   onForceRefreshSync,
   syncToast = null,
   schoolInfo,
   onSelectView,
   activityLogs = [],
   schoolId = '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
-  currentUser
+  currentUser,
+  supabaseStudentCount
 }) => {
+  const displayStudentCount = supabaseStudentCount !== undefined ? supabaseStudentCount : students.length;
   const [activeLevelFilter, setActiveLevelFilter] = useState<'ALL' | 'PRIMARY' | 'PRE_PRIMARY' | 'SECONDARY'>('ALL');
   const [activityCategoryFilter, setActivityCategoryFilter] = useState<'ALL' | 'students' | 'teachers' | 'exams'>('ALL');
   const [activitySearchQuery, setActivitySearchQuery] = useState<string>('');
@@ -430,11 +435,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Academic Overview Section */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {[
-          { title: "Total Students", value: students.length, icon: Users, color: "text-blue-600 bg-blue-50", action: () => handleNavigate('students') },
+          { title: "Total Students", value: displayStudentCount, icon: Users, color: "text-blue-600 bg-blue-50", action: () => handleNavigate('students') },
           { title: "Active Teaching Staff", value: teachers.length, icon: GraduationCap, color: "text-emerald-600 bg-emerald-50", action: () => handleNavigate('teachers') },
           { title: "Pending Exam Records", value: 0, icon: FileText, color: "text-amber-600 bg-amber-50", action: () => handleNavigate('results') }
         ].map((card, idx) => (
-          <button key={idx} onClick={card.action} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between hover:border-blue-300 transition-all cursor-pointer text-left">
+          <button key={idx} onClick={card.action} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between hover:border-blue-300 transition-all cursor-pointer text-left relative overflow-hidden">
+            {isLoading && (
+              <div className="absolute inset-0 bg-slate-50 animate-pulse flex items-center px-5">
+                <div className="space-y-2 w-full">
+                  <div className="h-2 w-1/3 bg-slate-200 rounded" />
+                  <div className="h-6 w-1/2 bg-slate-200 rounded" />
+                </div>
+              </div>
+            )}
             <div>
               <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider">{card.title}</p>
               <h3 className="text-2xl font-black text-slate-900 mt-1">{card.value}</h3>
@@ -449,7 +462,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       {/* Main Executive Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* Card 1: Enrolled Students & Gender */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-xs hover:shadow-md transition space-y-3">
+        <div className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-xs hover:shadow-md transition space-y-3 relative overflow-hidden">
+          {isLoading && (
+            <div className="absolute inset-0 bg-white z-10 p-5 space-y-4">
+              <div className="flex justify-between">
+                <div className="h-6 w-20 bg-slate-100 rounded-lg animate-pulse" />
+                <div className="h-10 w-10 bg-slate-100 rounded-xl animate-pulse" />
+              </div>
+              <div className="space-y-2">
+                <div className="h-8 w-16 bg-slate-100 rounded animate-pulse" />
+                <div className="h-3 w-32 bg-slate-100 rounded animate-pulse" />
+              </div>
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100">
               Enrolment
@@ -460,7 +485,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
 
           <div>
-            <div className="text-3xl font-black text-slate-900">{students.length}</div>
+            <div className="text-3xl font-black text-slate-900">{displayStudentCount}</div>
             <div className="text-xs font-bold text-slate-500 mt-0.5">Wanafunzi Wote Waliosajiliwa</div>
           </div>
 

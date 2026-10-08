@@ -36,7 +36,7 @@ export interface StudentReportCardData {
 export type EducationLevel = 'PRE_PRIMARY' | 'PRIMARY' | 'CSEE' | 'ACSEE';
 
 export interface Student {
-  id: number;
+  id: number | string;
   regNo: string;
   name: string;
   gender?: 'Male' | 'Female' | '';
@@ -86,7 +86,7 @@ export type SchoolStaffRole =
   | string;
 
 export interface Teacher {
-  id: number;
+  id: number | string;
   name: string;
   initial: string;
   gender?: 'Male' | 'Female' | '';
@@ -161,7 +161,7 @@ export type ActivityType =
   | 'other';
 
 export interface TimetableAssignment {
-  id: number;
+  id: number | string;
   className: string;
   stream: string;
   day: string;
@@ -302,7 +302,7 @@ export interface TeacherEvaluation {
 }
 
 export interface UsalCandidateRecord {
-  studentId: number;
+  studentId: number | string;
   regNo: string;
   studentName: string;
   gender: string;
@@ -317,7 +317,7 @@ export interface UsalCandidateRecord {
 
 export interface UsalRecord {
   id: string; // e.g. `usal_${examId}_${subject}_${className}_${stream}`
-  examId: number;
+  examId: number | string;
   examName: string;
   academicYear: string;
   term: string;
@@ -524,7 +524,10 @@ export interface AppData {
   schemesOfWork?: SchemeOfWork[];
   dailyAttendance?: Record<string, Record<number, 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'>>;
   gradeCutoffs?: Record<string, any>;
+  journalRecords?: Record<string, any>;
+  ledgerSubjectKeys?: Record<string, string[]>;
   parents?: ParentContact[];
+  parentStudents?: { parent_id: string; student_id: string }[];
   smsWallet?: SmsWallet;
   smsLogs?: SmsLog[];
   savedTimetableRecords?: SavedTimetableRecord[];

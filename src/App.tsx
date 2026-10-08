@@ -187,36 +187,16 @@ export default function App() {
     // 0. Primary Database Load: Prioritize Supabase (the real Relational DB) & Firestore
     const loadFromDatabase = async (isInitialBoot = false) => {
       console.log("Loading reliable relational data from Supabase for school:", schoolId);
-      
-      // A. Instant Local Cache Hydration (Prevent zero flash on refresh)
-      const schoolKey = `haby_school_data_${schoolId}`;
-      const cachedRaw = localStorage.getItem(schoolKey);
-      if (cachedRaw) {
-        try {
-          const cachedData = JSON.parse(cachedRaw);
-          if (cachedData && typeof cachedData === 'object') {
-            setData(prev => ({
-              ...prev,
-              ...cachedData,
-              students: Array.isArray(cachedData.students) ? cachedData.students : prev.students,
-              teachers: Array.isArray(cachedData.teachers) ? cachedData.teachers : prev.teachers,
-              exams: Array.isArray(cachedData.exams) ? cachedData.exams : prev.exams,
-              streamSettings: Array.isArray(cachedData.streamSettings) ? cachedData.streamSettings : prev.streamSettings
-            }));
-            if (isInitialBoot) setDataLoading(false);
-          }
-        } catch (e) {
-          console.warn("Failed to parse local cache:", e);
-        }
-      }
 
       try {
         // B. Fetch Relational Data from Supabase
-        const [studRes, recRes, teachRes, examRes, schoolDataRes] = await Promise.all([
+        const [studRes, recRes, teachRes, examRes, parentRes, psRes, schoolDataRes] = await Promise.all([
           supabase.from('students').select('*').eq('school_id', schoolId),
           supabase.from('exam_records').select('*').eq('school_id', schoolId),
           supabase.from('teachers').select('*').eq('school_id', schoolId),
           supabase.from('exams').select('*').eq('school_id', schoolId),
+          supabase.from('parents').select('*').eq('school_id', schoolId),
+          supabase.from('parent_students').select('*'),
           supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1)
         ]);
 
@@ -224,6 +204,8 @@ export default function App() {
         const recData = recRes?.data || [];
         const teachData = teachRes?.data || [];
         const examData = examRes?.data || [];
+        const parentData = parentRes?.data || [];
+        const psData = psRes?.data || [];
         const schoolDataArr = schoolDataRes?.data || [];
         const remoteData = (schoolDataArr.length > 0 ? schoolDataArr[0] : {}) as Partial<AppData>;
 
@@ -233,6 +215,7 @@ export default function App() {
         const remoteStudents = studData.map((s, idx) => fromSupabaseStudent(s, idx));
         const remoteTeachers = teachData.map((t, idx) => fromSupabaseTeacher(t, idx));
         const remoteExams = examData.map((e, idx) => fromSupabaseExam(e, idx));
+        const remoteParents = parentData.map((p) => fromSupabaseParent(p));
 
         // C. Fetch Firestore metadata snapshot
         const firestoreSnapshot = await getSchoolData(schoolId);
@@ -250,13 +233,14 @@ export default function App() {
             students: remoteStudents.length > 0 ? remoteStudents : (remoteData.students && remoteData.students.length > 0 ? remoteData.students : prev.students),
             teachers: remoteTeachers.length > 0 ? remoteTeachers : (remoteData.teachers && remoteData.teachers.length > 0 ? remoteData.teachers : prev.teachers),
             exams: remoteExams.length > 0 ? remoteExams : (remoteData.exams && remoteData.exams.length > 0 ? remoteData.exams : prev.exams),
+            parents: remoteParents.length > 0 ? remoteParents : (remoteData.parents && remoteData.parents.length > 0 ? remoteData.parents : prev.parents),
+            parentStudents: psData.length > 0 ? psData : (remoteData.parentStudents && remoteData.parentStudents.length > 0 ? remoteData.parentStudents : prev.parentStudents),
             examinationRecords: recData.length > 0 ? recData : (remoteData.examinationRecords && remoteData.examinationRecords.length > 0 ? remoteData.examinationRecords : prev.examinationRecords),
             streamSettings: nextStreams,
             periodSettings: nextPeriods
           };
 
           setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
-          try { localStorage.setItem(schoolKey, JSON.stringify(updatedState)); } catch (e) {}
           return updatedState;
         });
 
@@ -300,7 +284,6 @@ export default function App() {
             parents: snapParents !== null ? snapParents : prev.parents
           };
           setCachedData(schoolKey, merged).catch(e => console.warn("IDB cache set error:", e));
-          try { localStorage.setItem(schoolKey, JSON.stringify(merged)); } catch (e) {}
           return merged;
         });
         setIsCloudSynced(true);
@@ -339,23 +322,17 @@ export default function App() {
       console.log(`Pushing local data to Supabase cloud sync... Local students: ${data.students.length}`);
       
       if (data.students && data.students.length > 0) {
-        // Map local students back to Supabase rows
-        const studentsToPush = data.students.map(s => {
-          const row = toSupabaseStudent(s, schoolId);
-          row.id = s.id;
-          if (s.regNo) row.reg_no = s.regNo;
-          row.parent_phone = s.parentPhone || s.phone || '';
-          row.phone = s.phone || s.parentPhone || '';
-          row.dob = s.dob || '2010-01-01';
-          row.passport_photo = s.passportPhoto || '';
-          row.subjects = s.subjects || [];
-          row.marks = s.marks || {};
-          row.total = s.total || 0;
-          row.average = s.average || '0.0';
-          row.division = s.division || '-';
-          row.level = s.level || 'CSEE';
-          return row;
+        // Map local students back to Supabase rows and ensure valid UUIDs
+        const studentsWithValidIds = data.students.map(s => {
+          const isUuid = typeof s.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.id);
+          const validId = isUuid ? s.id : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+          });
+          return { ...s, id: validId };
         });
+
+        const studentsToPush = studentsWithValidIds.map(s => toSupabaseStudent(s, schoolId));
         
         // Chunk inserts if too large to prevent payload size limits
         const chunkSize = 100;
@@ -366,35 +343,18 @@ export default function App() {
       }
 
       if (data.teachers && data.teachers.length > 0) {
-        const teachersToPush = data.teachers.map(t => {
-          const row = toSupabaseTeacher(t, schoolId);
-          row.id = t.id;
-          row.phone = t.phone || '';
-          row.email = t.email || '';
-          row.gender = t.gender || 'Male';
-          row.school_role = t.schoolRole || 'Subject Teacher';
-          row.initial = t.initial || '';
-          row.color = t.color || '#1d4ed8';
-          row.max_periods_per_week = t.maxPeriodsPerWeek || 20;
-          row.exclude_invigilation = t.excludeInvigilation || false;
-          row.subjects = t.subjects || [];
-          row.teaching_streams = t.teachingStreams || [];
-          return row;
-        });
+        const teachersToPush = data.teachers.map(t => toSupabaseTeacher(t, schoolId));
         await supabase.from('teachers').upsert(teachersToPush, { onConflict: 'id' });
       }
 
       if (data.exams && data.exams.length > 0) {
-        const examsToPush = data.exams.map(e => {
-          const row = toSupabaseExam(e, schoolId);
-          row.id = e.id;
-          row.name = e.name;
-          row.term = e.type || 'Term 1';
-          row.year = e.date ? String(e.date).slice(0, 4) : String(new Date().getFullYear());
-          row.class = e.className || 'Form 1';
-          return row;
-        });
+        const examsToPush = data.exams.map(e => toSupabaseExam(e, schoolId));
         await supabase.from('exams').upsert(examsToPush, { onConflict: 'id' });
+      }
+
+      if (data.parents && data.parents.length > 0) {
+        const parentsToPush = data.parents.map(p => toSupabaseParent(p, schoolId));
+        await supabase.from('parents').upsert(parentsToPush, { onConflict: 'phone' });
       }
 
       // Also save the entire school data state in Firestore as a snapshot backup and Supabase school_data snapshot
@@ -402,17 +362,21 @@ export default function App() {
       await saveSchoolDataToSupabase(schoolId, data);
 
       // 2. Now PULL latest remote data from Supabase to verify sync
-      const [studRes, recRes, teachRes, examRes, schoolDataRes] = await Promise.all([
+      const [studRes, recRes, teachRes, examRes, parentRes, psRes, schoolDataRes] = await Promise.all([
         supabase.from('students').select('*').eq('school_id', schoolId),
         supabase.from('exam_records').select('*').eq('school_id', schoolId),
         supabase.from('teachers').select('*').eq('school_id', schoolId),
         supabase.from('exams').select('*').eq('school_id', schoolId),
+        supabase.from('parents').select('*').eq('school_id', schoolId),
+        supabase.from('parent_students').select('*'),
         supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1)
       ]);
 
       const remoteStudents = studRes.data || [];
       const remoteTeachers = teachRes.data || [];
       const remoteExams = examRes.data || [];
+      const remoteParentsData = parentRes.data || [];
+      const remotePsData = psRes.data || [];
       const remoteRecords = recRes.data || [];
       const schoolDataArr = schoolDataRes.data || [];
       const remoteData = (schoolDataArr.length > 0 ? schoolDataArr[0] : {}) as Partial<AppData>;
@@ -421,6 +385,7 @@ export default function App() {
         const serializedStudents = remoteStudents.map((s: any, idx: number) => fromSupabaseStudent(s, idx));
         const serializedTeachers = remoteTeachers.map((t: any, idx: number) => fromSupabaseTeacher(t, idx));
         const serializedExams = remoteExams.map((e: any, idx: number) => fromSupabaseExam(e, idx));
+        const serializedParents = remoteParentsData.map((p: any) => fromSupabaseParent(p));
 
         const next: AppData = {
           ...prev,
@@ -428,10 +393,11 @@ export default function App() {
           students: serializedStudents.length > 0 ? serializedStudents : prev.students,
           teachers: serializedTeachers.length > 0 ? serializedTeachers : prev.teachers,
           exams: serializedExams.length > 0 ? serializedExams : prev.exams,
+          parents: serializedParents.length > 0 ? serializedParents : prev.parents,
+          parentStudents: remotePsData.length > 0 ? remotePsData : prev.parentStudents,
           examinationRecords: remoteRecords.length > 0 ? remoteRecords : prev.examinationRecords
         };
 
-        try { localStorage.setItem(schoolKey, JSON.stringify(next)); } catch (e) {}
         saveSchoolData(schoolId, next).catch(e => console.warn("Firestore sync error:", e));
 
         setSyncToast(`Cloud Sync Active: Pushed and synchronized ${next.students.length} Students, ${next.teachers.length} Staff, and ${next.exams.length} Exams.`);
@@ -461,7 +427,6 @@ export default function App() {
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(() => {
         setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
-        try { localStorage.setItem(schoolKey, JSON.stringify(nextData)); } catch (e) {}
         
         // Also push the complete school_data snapshot to Supabase on debounce to prevent loss!
         saveSchoolDataToSupabase(schoolId, nextData).catch(e => console.warn("Supabase school_data sync error:", e));
@@ -485,33 +450,27 @@ export default function App() {
       return nextData;
     });
 
-    // Supabase synchronization for relational tables
+    // Supabase serialization with correct database column mappings
     if (userAccount?.schoolId) {
       try {
         if (updates.students && Array.isArray(updates.students)) {
           if (updates.students.length > 0) {
-            await supabase.from('students').upsert(
-              updates.students.map(s => ({ ...s, school_id: schoolId })),
-              { onConflict: 'id' }
-            );
+            const studentsToPush = updates.students.map(s => toSupabaseStudent(s, schoolId));
+            await supabase.from('students').upsert(studentsToPush, { onConflict: 'id' });
           }
         }
 
         if (updates.teachers && Array.isArray(updates.teachers)) {
           if (updates.teachers.length > 0) {
-            await supabase.from('teachers').upsert(
-              updates.teachers.map(t => ({ ...t, school_id: schoolId })),
-              { onConflict: 'id' }
-            );
+            const teachersToPush = updates.teachers.map(t => toSupabaseTeacher(t, schoolId));
+            await supabase.from('teachers').upsert(teachersToPush, { onConflict: 'id' });
           }
         }
 
         if (updates.exams && Array.isArray(updates.exams)) {
           if (updates.exams.length > 0) {
-            await supabase.from('exams').upsert(
-              updates.exams.map(e => ({ ...e, school_id: schoolId })),
-              { onConflict: 'id' }
-            );
+            const examsToPush = updates.exams.map(e => toSupabaseExam(e, schoolId));
+            await supabase.from('exams').upsert(examsToPush, { onConflict: 'id' });
           }
         }
 
@@ -657,7 +616,7 @@ export default function App() {
     );
   }
 
-  if (dataLoading && (!data || !data.students || data.students.length === 0)) {
+  if (dataLoading && (!data || !data.students || data.students.length === 0) && (!supabaseStudentCount || supabaseStudentCount === 0)) {
     return (
       <div className="min-h-screen bg-[#0f2948] text-white flex flex-col items-center justify-center font-sans">
         <div className="w-12 h-12 border-4 border-white/20 border-t-sky-400 rounded-full animate-spin mb-4" />
@@ -680,14 +639,23 @@ export default function App() {
   const handleAddStudent = async (student: Student) => {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleAddStudent):", schoolId);
+
+    // Ensure we assign a valid UUID
+    const isUuid = typeof student.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(student.id);
+    const validId = isUuid ? student.id : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+      const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
+    });
+
     const studentWithId = {
       ...student,
-      id: student.id || Date.now(),
+      id: validId,
       school_id: schoolId
     };
 
     try {
-      await supabase.from('students').upsert(studentWithId, { onConflict: 'id' });
+      const dbRow = toSupabaseStudent(studentWithId, schoolId);
+      await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
     } catch (e) {
       console.warn("Error upserting student in Supabase:", e);
     }
@@ -703,11 +671,27 @@ export default function App() {
   const handleBulkAddStudents = async (newStudents: Student[]) => {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleBulkAddStudents):", schoolId);
+
+    const processedStudents = newStudents.map(s => {
+      const isUuid = typeof s.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.id);
+      const validId = isUuid ? s.id : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+      return {
+        ...s,
+        id: validId,
+        school_id: schoolId
+      };
+    });
+
     try {
-      await supabase.from('students').upsert(
-        newStudents.map(s => ({ ...s, school_id: schoolId })),
-        { onConflict: 'id' }
-      );
+      const rowsToPush = processedStudents.map(s => toSupabaseStudent(s, schoolId));
+      const chunkSize = 100;
+      for (let i = 0; i < rowsToPush.length; i += chunkSize) {
+        const chunk = rowsToPush.slice(i, i + chunkSize);
+        await supabase.from('students').upsert(chunk, { onConflict: 'id' });
+      }
     } catch (e) {
       console.warn("Error bulk upserting students in Supabase:", e);
     }
@@ -718,7 +702,7 @@ export default function App() {
       `Imported ${newStudents.length} students via CSV`
     );
     updateRemoteData({
-      students: [...data.students, ...newStudents],
+      students: [...data.students, ...processedStudents],
       activityLogs
     });
   };
@@ -761,10 +745,8 @@ export default function App() {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleUpdateStudent):", schoolId);
     try {
-      await supabase.from('students').upsert({
-        ...student,
-        school_id: schoolId
-      }, { onConflict: 'id' });
+      const dbRow = toSupabaseStudent(student, schoolId);
+      await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
     } catch (e) {
       console.warn("Error updating student doc in Supabase:", e);
     }
@@ -1307,6 +1289,7 @@ export default function App() {
               sessions={data.sessions}
               isCloudSynced={isCloudSynced}
               isSyncing={isSyncing}
+              isLoading={dataLoading}
               onForceRefreshSync={handleForceRefreshSync}
               syncToast={syncToast}
               schoolInfo={data.schoolInfo}
@@ -1314,6 +1297,7 @@ export default function App() {
               activityLogs={data.activityLogs || []}
               schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
               currentUser={userAccount}
+              supabaseStudentCount={supabaseStudentCount}
             />
           )}
 
@@ -1450,6 +1434,12 @@ export default function App() {
                 setActiveView('markentry');
               }}
               teachers={data.teachers}
+              ledgerSubjectKeys={data.ledgerSubjectKeys?.[data.schoolInfo.name || 'default'] || []}
+              onUpdateLedgerSubjectKeys={keys => {
+                const updated = { ...(data.ledgerSubjectKeys || {}) };
+                updated[data.schoolInfo.name || 'default'] = keys;
+                updateRemoteData({ ledgerSubjectKeys: updated });
+              }}
             />
           )}
 
@@ -1508,6 +1498,8 @@ export default function App() {
               schoolId={userAccount?.schoolId || 'DEMO_SCHOOL'}
               schoolInfo={data.schoolInfo}
               students={data.students}
+              parents={data.parents || []}
+              parentStudents={data.parentStudents || []}
               initialExamType={smsTargetExam.examType || 'CSEE'}
               initialYear={smsTargetExam.year || '2026'}
               onNavigateToAnalyzer={() => setActiveView('nectaanalyzer')}
@@ -1687,6 +1679,7 @@ export default function App() {
               institutionalPolicy={data.institutionalPolicy}
               subjectPeriodAllocations={data.subjectPeriodAllocations || []}
               teacherAssignments={data.teacherAssignments || []}
+              journalRecords={data.journalRecords || {}}
               initialTab="journal"
               onUpdateAssignments={assignments => {
                 updateRemoteData({ timetableAssignments: assignments });
@@ -1715,6 +1708,9 @@ export default function App() {
               onUpdateTeacherAssignments={teacherAssignments => {
                 updateRemoteData({ teacherAssignments });
               }}
+              onUpdateJournal={journalRecords => {
+                updateRemoteData({ journalRecords });
+              }}
             />
           )}
 
@@ -1733,6 +1729,7 @@ export default function App() {
               institutionalPolicy={data.institutionalPolicy}
               subjectPeriodAllocations={data.subjectPeriodAllocations || []}
               teacherAssignments={data.teacherAssignments || []}
+              journalRecords={data.journalRecords || {}}
               onUpdateAssignments={assignments => {
                 const activityLogs = logActivity(
                   'TIMETABLE_UPDATE',
@@ -1795,6 +1792,9 @@ export default function App() {
                   `Assigned faculty to levels, subjects, and streams`
                 );
                 updateRemoteData({ teacherAssignments, activityLogs });
+              }}
+              onUpdateJournal={journalRecords => {
+                updateRemoteData({ journalRecords });
               }}
             />
           )}

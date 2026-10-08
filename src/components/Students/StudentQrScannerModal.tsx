@@ -217,15 +217,6 @@ export const StudentQrScannerModal: React.FC<StudentQrScannerModalProps> = ({
   const handleQuickAttendance = (status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED') => {
     if (!matchedStudent) return;
     
-    // Save to local daily attendance
-    try {
-      const today = new Date().toISOString().split('T')[0];
-      const saved = localStorage.getItem(`haby_attendance_${today}`) || '{}';
-      const parsed = JSON.parse(saved);
-      parsed[matchedStudent.id] = status;
-      localStorage.setItem(`haby_attendance_${today}`, JSON.stringify(parsed));
-    } catch {}
-
     if (onLogAttendance) {
       onLogAttendance(matchedStudent.id, status);
     }

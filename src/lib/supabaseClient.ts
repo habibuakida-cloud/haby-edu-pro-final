@@ -115,7 +115,18 @@ export const toSupabaseStudent = (s: any, schoolId: string) => {
     class: s.className || s.class || 'Form 1',
     stream: s.stream || 'STREAM A',
     gender: s.gender || 'Male',
-    school_id: schoolId
+    school_id: schoolId,
+    parent_phone: s.parentPhone || s.phone || '',
+    phone: s.phone || s.parentPhone || '',
+    reg_no: s.regNo || '',
+    level: s.level || 'CSEE',
+    dob: s.dob || '2010-01-01',
+    passport_photo: s.passportPhoto || s.photo || '',
+    subjects: Array.isArray(s.subjects) ? s.subjects : [],
+    marks: s.marks || {},
+    total: Number(s.total) || 0,
+    average: String(s.average || '0.0'),
+    division: s.division || '-'
   };
   if (s.id && typeof s.id === 'string' && s.id.includes('-')) {
     row.id = s.id;
@@ -148,7 +159,17 @@ export const toSupabaseTeacher = (t: any, schoolId: string) => {
   const row: Record<string, any> = {
     name: t.name,
     subject: (t.subjects && t.subjects[0]) || t.subject || 'Basic Mathematics',
-    school_id: schoolId
+    school_id: schoolId,
+    gender: t.gender || 'Male',
+    school_role: t.schoolRole || t.role || 'Subject Teacher',
+    initial: t.initial || (t.name ? t.name.split(' ').map((n: string) => n[0]).join('').slice(0, 3).toUpperCase() : 'MWL'),
+    phone: t.phone || '',
+    email: t.email || '',
+    subjects: Array.isArray(t.subjects) ? t.subjects : [t.subject || 'Basic Mathematics'],
+    teaching_streams: Array.isArray(t.teachingStreams) ? t.teachingStreams : [],
+    color: t.color || '#1d4ed8',
+    max_periods_per_week: Number(t.maxPeriodsPerWeek) || 20,
+    exclude_invigilation: Boolean(t.excludeInvigilation || t.exclude_invigilation)
   };
   if (t.id && typeof t.id === 'string' && t.id.includes('-')) {
     row.id = t.id;
@@ -180,7 +201,10 @@ export const toSupabaseExam = (e: any, schoolId: string) => {
     term: e.term || e.type || 'Term 1',
     year: String(e.year || new Date().getFullYear()),
     class: e.className || e.class || 'All',
-    school_id: schoolId
+    school_id: schoolId,
+    level: e.level || 'CSEE',
+    date: e.date || new Date().toISOString().slice(0, 10),
+    status: e.status || 'Active'
   };
   if (e.id && typeof e.id === 'string' && e.id.includes('-')) {
     row.id = e.id;
@@ -197,6 +221,33 @@ export const fromSupabaseExam = (row: any, idx = 0) => {
     className: row.class || row.className || 'All',
     date: row.date || row.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
     status: (row.status as any) || 'Active'
+  };
+};
+
+// Parent Serializers
+export const toSupabaseParent = (p: any, schoolId: string) => {
+  const row: Record<string, any> = {
+    school_id: schoolId,
+    phone: p.phone_255 || p.phone || '',
+    full_name: p.parent_name || p.full_name || 'Mzazi',
+    password_hash: p.password || p.password_hash || '123456'
+  };
+  if (p.id && typeof p.id === 'string' && p.id.includes('-')) {
+    row.id = p.id;
+  }
+  return row;
+};
+
+export const fromSupabaseParent = (row: any) => {
+  return {
+    id: row.id,
+    school_id: row.school_id,
+    phone_255: row.phone,
+    phone: row.phone,
+    parent_name: row.full_name,
+    full_name: row.full_name,
+    password: row.password_hash,
+    created_at: row.created_at
   };
 };
 

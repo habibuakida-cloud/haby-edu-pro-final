@@ -98,21 +98,15 @@ export const saveRemedialTimetable = async (schoolId: string, entry: RemedialTim
     created_at: entry.created_at || new Date().toISOString()
   };
 
-  // 1. Save to LocalStorage cache
+  // 1. Sync to Supabase (Priority - Single Source of Truth)
   try {
-    const localKey = `haby_remedial_timetable_${schoolId}`;
-    const raw = localStorage.getItem(localKey);
-    let list: RemedialTimetableEntry[] = raw ? JSON.parse(raw) : [];
-    const existingIdx = list.findIndex(e => e.id === entryId);
-    if (existingIdx >= 0) {
-      list[existingIdx] = fullEntry;
-    } else {
-      list.unshift(fullEntry);
-    }
-    localStorage.setItem(localKey, JSON.stringify(list));
-  } catch (e) {}
+    const { error: supError } = await supabase.from('remedial_timetable').upsert(fullEntry, { onConflict: 'id' });
+    if (supError) console.warn("Supabase remedial save error:", supError);
+  } catch (e) {
+    console.error("Supabase remedial exception:", e);
+  }
 
-  // 2. Sync to Firestore
+  // 2. Sync to Firestore (Backup)
   try {
     const cleanDoc = sanitizeForFirestore({
       ...fullEntry,
@@ -123,33 +117,29 @@ export const saveRemedialTimetable = async (schoolId: string, entry: RemedialTim
     console.warn("Firestore remedial save error:", e);
   }
 
-  // 3. Sync to Supabase
-  try {
-    await supabase.from('remedial_timetable').upsert(fullEntry, { onConflict: 'id' });
-  } catch (e) {}
-
   return { data: fullEntry, error: null };
 };
 
 export const getRemedialTimetable = async (schoolId: string, className?: string) => {
-  // 1. Try LocalStorage for instant hydration
-  let localData: RemedialTimetableEntry[] = [];
+  // 1. Prioritize Supabase (The real SAAS database)
   try {
-    const localKey = `haby_remedial_timetable_${schoolId}`;
-    const raw = localStorage.getItem(localKey);
-    if (raw) localData = JSON.parse(raw);
-  } catch (e) {}
+    const { data, error } = await supabase.from('remedial_timetable').select('*').eq('school_id', schoolId);
+    if (!error && data && data.length > 0) {
+      if (className && className !== 'All') {
+        return { data: data.filter((d: any) => d.class_name.toLowerCase() === className.toLowerCase()), error: null };
+      }
+      return { data, error: null };
+    }
+  } catch (e) {
+    console.warn("Supabase remedial fetch error:", e);
+  }
 
-  // 2. Try Firestore
+  // 2. Fallback to Firestore
   try {
     const q = query(collection(db, 'remedial_timetable'), where('school_id', '==', schoolId));
     const snap = await getDocs(q);
     if (!snap.empty) {
       const fsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as RemedialTimetableEntry));
-      try {
-        localStorage.setItem(`haby_remedial_timetable_${schoolId}`, JSON.stringify(fsData));
-      } catch (e) {}
-      
       if (className && className !== 'All') {
         return { data: fsData.filter(d => d.class_name.toLowerCase() === className.toLowerCase()), error: null };
       }
@@ -157,37 +147,19 @@ export const getRemedialTimetable = async (schoolId: string, className?: string)
     }
   } catch (e) {}
 
-  // 3. Fallback to Supabase
-  try {
-    const { data, error } = await supabase.from('remedial_timetable').select('*').eq('school_id', schoolId);
-    if (!error && data && data.length > 0) {
-      return { data, error: null };
-    }
-  } catch (e) {}
-
-  return { data: localData, error: null };
+  return { data: [], error: null };
 };
 
 export const deleteRemedialTimetableEntry = async (schoolId: string, id: string) => {
-  // 1. Remove from local storage
+  // 1. Delete from Supabase
   try {
-    const localKey = `haby_remedial_timetable_${schoolId}`;
-    const raw = localStorage.getItem(localKey);
-    if (raw) {
-      const list: RemedialTimetableEntry[] = JSON.parse(raw);
-      const filtered = list.filter(e => e.id !== id);
-      localStorage.setItem(localKey, JSON.stringify(filtered));
-    }
+    const { error } = await supabase.from('remedial_timetable').delete().eq('id', id);
+    if (error) console.warn("Supabase remedial delete error:", error);
   } catch (e) {}
 
   // 2. Delete from Firestore
   try {
     await deleteDoc(doc(db, 'remedial_timetable', id));
-  } catch (e) {}
-
-  // 3. Delete from Supabase
-  try {
-    await supabase.from('remedial_timetable').delete().eq('id', id);
   } catch (e) {}
 
   return { success: true };

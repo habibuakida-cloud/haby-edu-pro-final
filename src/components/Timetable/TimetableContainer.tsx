@@ -125,6 +125,8 @@ interface TimetableContainerProps {
   currentUser?: UserAccount | null;
   students?: Student[];
   initialTab?: 'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings';
+  journalRecords?: Record<string, any>;
+  onUpdateJournal?: (records: Record<string, any>) => void;
   onUpdateAssignments: (assignments: TimetableAssignment[]) => void;
   onUpdatePeriodSettings: (settings: PeriodSetting[]) => void;
   onUpdateStreamSettings: (settings: StreamSetting[]) => void;
@@ -2678,6 +2680,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           currentUser={currentUser}
           students={students}
           institutionalPolicy={institutionalPolicy}
+          journalRecords={journalRecords}
+          onUpdateJournal={onUpdateJournal}
         />
       )}
 
