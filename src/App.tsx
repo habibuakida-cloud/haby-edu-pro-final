@@ -230,104 +230,27 @@ export default function App() {
       }
     }).catch(e => console.warn("Initial IDB cache load error:", e));
 
-    // 0. Primary Database Load: Prioritize Supabase Relational Tables
+    // 0. Primary Database Load: Prioritize Firestore Snapshot
     const loadFromDatabase = async (isInitialBoot = false) => {
-      console.log("Loading single source of truth from Supabase Tables for school:", schoolId);
-
-      // Process any pending offline changes before loading
-      if (navigator.onLine) {
-        await processSyncQueue();
-      }
+      console.log("Loading single source of truth from Firestore for school:", schoolId);
 
       try {
-        // Fetch Relational Data from Tables + Firestore Snapshot
-        const [studRes, recRes, teachRes, examRes, parentRes, psRes, actRes, discRes, gateRes, schoolDataRes, firestoreData] = await Promise.all([
-          supabase.from('students').select('*').eq('school_id', schoolId),
-          supabase.from('exam_records').select('*').eq('school_id', schoolId),
-          supabase.from('teachers').select('*').eq('school_id', schoolId),
-          supabase.from('exams').select('*').eq('school_id', schoolId),
-          supabase.from('parents').select('*').eq('school_id', schoolId),
-          supabase.from('parent_students').select('*'),
-          supabase.from('activity_logs').select('*').eq('school_id', schoolId).order('timestamp', { ascending: false }).limit(100),
-          supabase.from('discipline_records').select('*').eq('school_id', schoolId),
-          supabase.from('gate_pass_logs').select('*').eq('school_id', schoolId).order('timestamp', { ascending: false }).limit(50),
-          supabase.from('school_data').select('*').eq('school_id', schoolId).maybeSingle(),
-          getSchoolData(schoolId).catch(() => null)
-        ]);
+        // Fetch Snapshot from Firestore as Single Source of Truth
+        const firestoreData = await getSchoolData(schoolId).catch(() => null);
 
-        const studData = studRes?.data || [];
-        const recData = recRes?.data || [];
-        const teachData = teachRes?.data || [];
-        const examData = examRes?.data || [];
-        const parentData = parentRes?.data || [];
-        const psData = psRes?.data || [];
-        const actData = actRes?.data || [];
-        const discData = discRes?.data || [];
-        const gateData = gateRes?.data || [];
-        const rawSchoolData = (firestoreData || schoolDataRes?.data || {}) as Record<string, any>;
+        const rawSchoolData = (firestoreData || {}) as Record<string, any>;
         const remoteData = { ...rawSchoolData } as Partial<AppData>;
-        delete (remoteData as any).periodSettings;
-        delete (remoteData as any).period_settings;
-        delete (remoteData as any).streamSettings;
-        delete (remoteData as any).stream_settings;
-        delete (remoteData as any).timetableAssignments;
-        delete (remoteData as any).timetable_assignments;
-
-        setSupabaseStudentCount(studData.length);
-
-        // Serialize data from Tables
-        const remoteStudents = studData.map((s, idx) => fromSupabaseStudent(s, idx));
-        const remoteTeachers = teachData.map((t, idx) => fromSupabaseTeacher(t, idx));
-        const remoteExams = examData.map((e, idx) => fromSupabaseExam(e, idx));
-        const remoteParents = parentData.map((p) => fromSupabaseParent(p));
-        const remoteActivity = actData.map(a => fromSupabaseActivityLog(a));
-        const remoteDiscipline = discData.map(d => fromSupabaseDiscipline(d));
-        const remoteGatePass = gateData.map(l => fromSupabaseGatePass(l));
-
-        const mappedStreamSettings = rawSchoolData.streamSettings !== undefined 
-          ? rawSchoolData.streamSettings 
-          : (rawSchoolData.stream_settings !== undefined ? rawSchoolData.stream_settings : undefined);
-
-        const mappedPeriodSettings = rawSchoolData.periodSettings !== undefined 
-          ? rawSchoolData.periodSettings 
-          : (rawSchoolData.period_settings !== undefined ? rawSchoolData.period_settings : undefined);
-
-        const mappedTimetableAssignments = rawSchoolData.timetableAssignments !== undefined 
-          ? rawSchoolData.timetableAssignments 
-          : (rawSchoolData.timetable_assignments !== undefined ? rawSchoolData.timetable_assignments : undefined);
-
-        const isOld35Periods = Array.isArray(mappedPeriodSettings) &&
-          mappedPeriodSettings.length === 35 &&
-          mappedPeriodSettings[0]?.name === 'Period 1' &&
-          mappedPeriodSettings[0]?.start === '08:00';
-        const cleanPeriodSettings = isOld35Periods ? [] : mappedPeriodSettings;
-
-        const isOld17Streams = Array.isArray(mappedStreamSettings) &&
-          mappedStreamSettings.length === 17 &&
-          mappedStreamSettings[0]?.className === 'Nursery';
-        const cleanStreamSettings = isOld17Streams ? [] : mappedStreamSettings;
-
+        
         setData(prev => {
-          // Merge Table data with Snapshot settings
+          // Merge Snapshot settings
           const updatedState: AppData = {
             ...prev,
             ...remoteData,
-            streamSettings: (cleanStreamSettings !== undefined && Array.isArray(cleanStreamSettings) && cleanStreamSettings.length > 0) ? cleanStreamSettings : prev.streamSettings,
-            periodSettings: (cleanPeriodSettings !== undefined && Array.isArray(cleanPeriodSettings) && cleanPeriodSettings.length > 0) ? cleanPeriodSettings : prev.periodSettings,
-            timetableAssignments: (mappedTimetableAssignments !== undefined && Array.isArray(mappedTimetableAssignments) && mappedTimetableAssignments.length > 0) ? mappedTimetableAssignments : prev.timetableAssignments,
-            students: remoteStudents.length > 0 ? remoteStudents : prev.students,
-            teachers: remoteTeachers.length > 0 ? remoteTeachers : prev.teachers,
-            exams: remoteExams.length > 0 ? remoteExams : prev.exams,
-            parents: remoteParents.length > 0 ? remoteParents : prev.parents,
-            parentStudents: psData.length > 0 ? psData : prev.parentStudents,
-            activityLogs: remoteActivity.length > 0 ? remoteActivity : prev.activityLogs,
-            disciplineRecords: remoteDiscipline.length > 0 ? remoteDiscipline : prev.disciplineRecords,
-            examinationRecords: recData.length > 0 ? recData : prev.examinationRecords,
-            schemesOfWork: (rawSchoolData.schemesOfWork !== undefined && Array.isArray(rawSchoolData.schemesOfWork) && rawSchoolData.schemesOfWork.length > 0) ? rawSchoolData.schemesOfWork : ( (rawSchoolData.schemes_of_work !== undefined && Array.isArray(rawSchoolData.schemes_of_work) && rawSchoolData.schemes_of_work.length > 0) ? rawSchoolData.schemes_of_work : prev.schemesOfWork),
-            lessonPlans: (rawSchoolData.lessonPlans !== undefined && Array.isArray(rawSchoolData.lessonPlans) && rawSchoolData.lessonPlans.length > 0) ? rawSchoolData.lessonPlans : ( (rawSchoolData.lesson_plans !== undefined && Array.isArray(rawSchoolData.lesson_plans) && rawSchoolData.lesson_plans.length > 0) ? rawSchoolData.lesson_plans : prev.lessonPlans),
-            teacherEvaluations: (rawSchoolData.teacherEvaluations !== undefined && Array.isArray(rawSchoolData.teacherEvaluations) && rawSchoolData.teacherEvaluations.length > 0) ? rawSchoolData.teacherEvaluations : ( (rawSchoolData.teacher_evaluations !== undefined && Array.isArray(rawSchoolData.teacher_evaluations) && rawSchoolData.teacher_evaluations.length > 0) ? rawSchoolData.teacher_evaluations : prev.teacherEvaluations),
-            savedTimetableRecords: (rawSchoolData.savedTimetableRecords !== undefined && Array.isArray(rawSchoolData.savedTimetableRecords) && rawSchoolData.savedTimetableRecords.length > 0) ? rawSchoolData.savedTimetableRecords : ( (rawSchoolData.saved_timetable_records !== undefined && Array.isArray(rawSchoolData.saved_timetable_records) && rawSchoolData.saved_timetable_records.length > 0) ? rawSchoolData.saved_timetable_records : prev.savedTimetableRecords),
-            savedInvigilationRecords: (rawSchoolData.savedInvigilationRecords !== undefined && Array.isArray(rawSchoolData.savedInvigilationRecords) && rawSchoolData.savedInvigilationRecords.length > 0) ? rawSchoolData.savedInvigilationRecords : ( (rawSchoolData.saved_invigilation_records !== undefined && Array.isArray(rawSchoolData.saved_invigilation_records) && rawSchoolData.saved_invigilation_records.length > 0) ? rawSchoolData.saved_invigilation_records : prev.savedInvigilationRecords),
+            students: remoteData.students || prev.students,
+            teachers: remoteData.teachers || prev.teachers,
+            exams: remoteData.exams || prev.exams,
+            parents: remoteData.parents || prev.parents,
+            examinationRecords: remoteData.examinationRecords || prev.examinationRecords,
           };
 
           setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
