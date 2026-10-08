@@ -104,18 +104,16 @@ export const getAllAvailableClasses = (
 
   const uniqueClasses = new Set<string>();
 
-  // 1. Add all from streamSettings
+  // 1. Add all from streamSettings (User's configured classes)
   if (streamSettings && streamSettings.length > 0) {
     streamSettings.forEach(s => {
       if (s.className && s.className.trim()) {
         uniqueClasses.add(s.className.trim());
       }
     });
-  } else {
-    defaultOrderedList.forEach(c => uniqueClasses.add(c));
   }
 
-  // 2. Add any classes from students
+  // 2. Add any classes from registered students
   if (students && students.length > 0) {
     students.forEach(st => {
       if (st.className && st.className.trim()) {
@@ -123,9 +121,6 @@ export const getAllAvailableClasses = (
       }
     });
   }
-
-  // 3. Ensure baseline classes are present
-  defaultOrderedList.forEach(c => uniqueClasses.add(c));
 
   // Sort logically according to curriculum progression
   return Array.from(uniqueClasses).sort((a, b) => {
@@ -209,12 +204,9 @@ export const getStreamsForClass = (
     });
   }
 
-  // Default fallback if empty
+  // Default fallback if empty: return empty array so user can define their own streams
   if (streamsSet.size === 0) {
-    if (['Form 5', 'Form 6'].includes(className)) {
-      return ['PCM', 'PCB', 'CBG', 'HGE', 'HKL', 'EGM'];
-    }
-    return ['STREAM A', 'STREAM B'];
+    return [];
   }
 
   return Array.from(streamsSet).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
@@ -255,7 +247,7 @@ export const syncClassAndStreamToSettings = (
   } else {
     const classSetting = existing[classIndex];
     const streamExists = classSetting.streams.some(
-      st => st.toLowerCase().trim() === cleanStream.toLowerCase()
+      (st: string) => st.toLowerCase().trim() === cleanStream.toLowerCase()
     );
     if (!streamExists) {
       existing[classIndex] = {

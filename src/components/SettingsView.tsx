@@ -824,10 +824,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
             >
               <Sparkles className="w-4 h-4 text-yellow-300" />
-              <span>+ Register New Class / Stream</span>
+              <span>+ Usajili wa Madarasa & Mikondo</span>
             </button>
+
+            {onUpdateStreamSettings && streamSettings.length > 0 && (
+              <button
+                type="button"
+                onClick={() => onUpdateStreamSettings([])}
+                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                title="Futa madarasa yote ili kuanza upya"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Futa Madarasa Yote (Anza Upya)</span>
+              </button>
+            )}
           </div>
 
+          {streamSettings.length === 0 ? (
+            <div className="p-10 text-center bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl space-y-3">
+              <School className="w-12 h-12 text-slate-300 mx-auto" />
+              <h4 className="text-sm font-bold text-slate-700">Hakuna Madarasa au Mikondo Iliyosajiliwa</h4>
+              <p className="text-xs text-slate-500 max-w-md mx-auto">
+                Mfumo uko wazi na tayari kwa mipangilio yako. Bonyeza kitufe cha "+ Usajili wa Madarasa & Mikondo" hapo juu ili kuweka madarasa yako mwenyewe.
+              </p>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {streamSettings.map(setting => {
               const enrolledStudents = students.filter(s => s.className === setting.className);
@@ -843,9 +864,24 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         {setting.level || 'CSEE'}
                       </span>
                     </div>
-                    <span className="text-xs font-mono font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
-                      {enrolledStudents.length} Students
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-mono font-bold text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                        {enrolledStudents.length} Students
+                      </span>
+                      {onUpdateStreamSettings && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const updated = streamSettings.filter(s => s.className !== setting.className);
+                            onUpdateStreamSettings(updated);
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                          title={`Futa darasa la ${setting.className}`}
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="space-y-1">
@@ -857,19 +893,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <button
                           type="button"
                           onClick={() => {
-                            const streamToRemove = setting.streams[setting.streams.length - 1];
-                            if (confirm(`Punguza mkondo wa mwisho (${streamToRemove}) kutoka ${setting.className}?`)) {
-                              const updated = streamSettings.map(s => {
-                                if (s.className === setting.className) {
-                                  return {
-                                    ...s,
-                                    streams: s.streams.slice(0, s.streams.length - 1)
-                                  };
-                                }
-                                return s;
-                              });
-                              onUpdateStreamSettings(updated);
-                            }
+                            const updated = streamSettings.map(s => {
+                              if (s.className === setting.className) {
+                                return {
+                                  ...s,
+                                  streams: s.streams.slice(0, s.streams.length - 1)
+                                };
+                              }
+                              return s;
+                            });
+                            onUpdateStreamSettings(updated);
                           }}
                           className="text-[10px] text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer"
                         >
@@ -885,22 +918,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                             <button
                               type="button"
                               onClick={() => {
-                                if (setting.streams.length <= 1) {
-                                  alert(`Darasa la ${setting.className} lina mkondo mmoja tu. Huwezi kufuta mkondo wote.`);
-                                  return;
-                                }
-                                if (confirm(`Una uhakika unataka kufuta mkondo wa "${st}" kutoka ${setting.className}?`)) {
-                                  const updated = streamSettings.map(s => {
-                                    if (s.className === setting.className) {
-                                      return {
-                                        ...s,
-                                        streams: s.streams.filter(x => x !== st)
-                                      };
-                                    }
-                                    return s;
-                                  });
-                                  onUpdateStreamSettings(updated);
-                                }
+                                const updated = streamSettings.map(s => {
+                                  if (s.className === setting.className) {
+                                    return {
+                                      ...s,
+                                      streams: s.streams.filter(x => x !== st)
+                                    };
+                                  }
+                                  return s;
+                                });
+                                onUpdateStreamSettings(updated);
                               }}
                               className="text-slate-400 hover:text-rose-600 cursor-pointer p-0.5 rounded"
                               title={`Futa mkondo wa ${st}`}
@@ -916,6 +943,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               );
             })}
           </div>
+          )}
         </div>
       )}
 

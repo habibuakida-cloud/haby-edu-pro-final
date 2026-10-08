@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 import { EducationLevel, StreamSetting, Student } from '../../types';
 import { inferEducationLevel, normalizeStreamName, getNextLogicalStream } from '../../utils/classStreamUtils';
+import { TANZANIAN_TEMPLATE_STREAM_SETTINGS } from '../../constants/defaults';
 
 interface ClassStreamManagerModalProps {
   isOpen: boolean;
@@ -177,18 +178,11 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
     ).length;
     console.log(`[DEBUG] studentCount for normalized target ${normalizedTarget}: ${studentCount}`);
 
-    if (studentCount > 0) {
-      if (!window.confirm(`Kuna wanafunzi ${studentCount} walioandikishwa kwenye ${className} - ${streamName}. Una uhakika unataka kufuta mkondo huu?`)) {
-        return;
-      }
-    }
-
+    // Delete stream directly without blocking window.confirm in iframe
     const updated = streamSettings.map(setting => {
       if (setting.className === className) {
-        console.log(`[DEBUG] Found class ${className}, original streams:`, setting.streams);
         // Normalize streams in list for comparison during filter
         const filtered = setting.streams.filter(st => normalizeStreamName(st) !== normalizedTarget);
-        console.log(`[DEBUG] Streams after filter:`, filtered);
         return {
           ...setting,
           streams: filtered
@@ -197,26 +191,20 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
       return setting;
     });
 
-    console.log(`[DEBUG] Updated streamSettings:`, updated);
     onUpdateStreamSettings(updated);
     showSuccess(`Mkondo "${streamName}" umefutwa kutoka ${className}.`);
   };
 
   const handleDeleteClass = (className: string) => {
-    const studentCount = students.filter(s => s.className === className).length;
-    if (studentCount > 0) {
-      if (!window.confirm(`Kuna wanafunzi ${studentCount} waliosajiliwa kwenye ${className}. Kufuta darasa hili hakutafuta wanafunzi bali litaondolewa kwenye mipangilio. Je, una uhakika?`)) {
-        return;
-      }
-    } else {
-      if (!window.confirm(`Una uhakika unataka kufuta darasa la "${className}"?`)) {
-        return;
-      }
-    }
-
+    // Delete class directly without blocking window.confirm in iframe
     const updated = streamSettings.filter(setting => setting.className !== className);
     onUpdateStreamSettings(updated);
     showSuccess(`Darasa la "${className}" limefutwa kikamilifu.`);
+  };
+
+  const handleClearAllClasses = () => {
+    onUpdateStreamSettings([]);
+    showSuccess('Madarasa na mikondo yote yamefutwa! Unaweza kuanza upya kusajili madarasa yako.');
   };
 
   return (
@@ -336,16 +324,54 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
 
           {/* Section 2: Directory of All Registered Classes & Streams */}
           <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-                <School className="w-4 h-4 text-indigo-600" />
-                <span>Orodha ya Madarasa Yote Yaliyosajiliwa ({streamSettings.length})</span>
-              </h3>
-              <span className="text-xs text-slate-500 font-medium">
-                Jumla ya Wanafunzi Waliosajiliwa: <strong className="text-slate-900">{students.length}</strong>
-              </span>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
+              <div>
+                <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                  <School className="w-4 h-4 text-indigo-600" />
+                  <span>Orodha ya Madarasa Yote Yaliyosajiliwa ({streamSettings.length})</span>
+                </h3>
+                <span className="text-xs text-slate-500 font-medium">
+                  Jumla ya Wanafunzi Waliosajiliwa: <strong className="text-slate-900">{students.length}</strong>
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                {streamSettings.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={handleClearAllClasses}
+                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                    title="Futa madarasa yote ili kuanza upya"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Futa Madarasa Yote (Anza Upya)</span>
+                  </button>
+                )}
+                {streamSettings.length === 0 && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdateStreamSettings(TANZANIAN_TEMPLATE_STREAM_SETTINGS);
+                      showSuccess('Sampuli ya kawaida ya madarasa ya Tanzania imepakiwa!');
+                    }}
+                    className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                  >
+                    <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Pakia Sampuli ya Tanzania</span>
+                  </button>
+                )}
+              </div>
             </div>
 
+            {streamSettings.length === 0 ? (
+              <div className="p-8 text-center bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl space-y-2">
+                <School className="w-10 h-10 text-slate-300 mx-auto" />
+                <h4 className="text-sm font-bold text-slate-700">Hakuna Madarasa au Mikondo Iliyosajiliwa</h4>
+                <p className="text-xs text-slate-500 max-w-md mx-auto">
+                  Mfumo uko safi. Tumia fomu iliyo juu kusajili darasa na mikondo unayotaka mwenyewe (mfano: "Form 1", "Standard 1", "Nursery", au mikondo maalum).
+                </p>
+              </div>
+            ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
               {streamSettings.map(setting => {
                 const classStudents = students.filter(s => s.className === setting.className);
@@ -478,6 +504,7 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
                 );
               })}
             </div>
+            )}
           </div>
 
         </div>

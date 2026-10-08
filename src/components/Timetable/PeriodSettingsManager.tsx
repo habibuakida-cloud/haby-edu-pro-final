@@ -24,7 +24,7 @@ import {
   FileCheck
 } from 'lucide-react';
 import { PeriodSetting, TimetableAssignment } from '../../types';
-import { DAYS_OF_WEEK, EXTRA_CURRICULAR_ACTIVITIES } from '../../constants/defaults';
+import { DAYS_OF_WEEK, EXTRA_CURRICULAR_ACTIVITIES, TANZANIAN_TEMPLATE_PERIOD_SETTINGS } from '../../constants/defaults';
 import { getDayTheme } from '../../utils/colors';
 
 interface PeriodSettingsManagerProps {
@@ -424,52 +424,54 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     setPeriodToDelete(null);
   };
 
-  // Delete all selected
+  // Delete all selected directly without iframe blocking confirm
   const handleBulkDelete = () => {
     if (selectedIds.length === 0) return;
     const count = selectedIds.length;
-    if (!window.confirm(`Are you sure you want to delete all ${count} selected period(s)?`)) {
-      return;
-    }
-
     const selectedStr = selectedIds.map(String);
     const updated = periodSettings.filter(p => !selectedStr.includes(String(p.id)));
     onUpdatePeriodSettings(updated);
     setSelectedIds([]);
-    showFeedback(`Deleted ${count} selected period(s).`);
+    showFeedback(`Vipindi ${count} vimefutwa kikamilifu.`);
   };
 
-  // Clear all periods for the currently filtered day
+  // Clear all periods for the currently filtered day or completely
   const handleClearDayPeriods = () => {
     if (selectedDayFilter === 'All') {
-      if (window.confirm('DANGER: Are you sure you want to delete ALL periods across all days?')) {
-        onUpdatePeriodSettings([]);
-        showFeedback('All periods have been cleared.', 'info');
-      }
+      onUpdatePeriodSettings([]);
+      if (onUpdateAssignments) onUpdateAssignments([]);
+      showFeedback('Vipindi vyote katika siku zote vimefutwa!', 'info');
       return;
     }
 
-    if (window.confirm(`Are you sure you want to delete all periods configured for ${selectedDayFilter}?`)) {
-      const updated = periodSettings.filter(p => p.day !== selectedDayFilter);
-      onUpdatePeriodSettings(updated);
-      showFeedback(`All periods for ${selectedDayFilter} have been deleted.`);
-    }
+    const updated = periodSettings.filter(p => p.day !== selectedDayFilter);
+    onUpdatePeriodSettings(updated);
+    showFeedback(`Vipindi vyote vya siku ya ${selectedDayFilter} vimefutwa.`);
+  };
+
+  // Clear ALL periods across the entire school
+  const handleClearAllPeriods = () => {
+    onUpdatePeriodSettings([]);
+    if (onUpdateAssignments) onUpdateAssignments([]);
+    showFeedback('Vipindi vyote vimefutwa kikamilifu! Sasa unaweza kuanza upya kuweka muda wako.', 'info');
+  };
+
+  // Load standard Tanzanian timetable period template
+  const handleLoadTanzanianTemplatePeriods = () => {
+    onUpdatePeriodSettings(TANZANIAN_TEMPLATE_PERIOD_SETTINGS);
+    showFeedback('Sampuli ya kawaida ya vipindi vya Tanzania imepakiwa.', 'success');
   };
 
   // Replicate Monday periods to all weekdays
   const handleReplicateMondayToWeekdays = () => {
     const mondayPeriods = periodSettings.filter(p => p.day === 'Monday');
     if (mondayPeriods.length === 0) {
-      showFeedback('No periods found for Monday to replicate.', 'error');
+      showFeedback('Hakuna vipindi vilivyowekwa kwa siku ya Jumatatu vya kunakili.', 'error');
       return;
     }
 
     const weekdays = ['Tuesday', 'Wednesday', 'Thursday', 'Friday'];
     const count = mondayPeriods.length;
-
-    if (!window.confirm(`Replicate Monday's ${count} period(s) to Tuesday, Wednesday, Thursday, and Friday? Existing periods on those days will be preserved or supplemented.`)) {
-      return;
-    }
 
     const newEntries: PeriodSetting[] = [];
     let idCounter = Date.now();
@@ -577,7 +579,29 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {periodSettings.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearAllPeriods}
+              className="px-3 py-1.5 text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 rounded-lg hover:bg-rose-100 flex items-center gap-1.5 transition-colors cursor-pointer"
+              title="Futa vipindi vyote ili kuanza upya kuweka muda wako mwenyewe"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>Futa Vipindi Vyote (Anza Upya)</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={handleLoadTanzanianTemplatePeriods}
+            className="px-3 py-1.5 text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200 rounded-lg hover:bg-blue-100 flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Pakia mfano wa kawaida wa vipindi vya Tanzania"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+            <span>Pakia Sampuli ya Tanzania</span>
+          </button>
+
           <button
             type="button"
             onClick={handleReplicateMondayToWeekdays}

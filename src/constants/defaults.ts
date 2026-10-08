@@ -420,7 +420,8 @@ export const INITIAL_TEACHERS = [
   { id: 108, name: 'Hamisi Juma', initial: 'HJ', subjects: ['Physical Education', 'Sports and Games'], excludeInvigilation: false, color: '#ea580c', schoolRole: 'Sports & Games Master', phone: '+255 765 889 900', email: 'h.juma@school.ac.tz' }
 ];
 
-export const INITIAL_PERIOD_SETTINGS = [
+// Optional Tanzanian standard template references for quick setup
+export const TANZANIAN_TEMPLATE_PERIOD_SETTINGS = [
   // Monday
   { id: 1, day: 'Monday', name: 'Period 1', start: '08:00', end: '08:40' },
   { id: 2, day: 'Monday', name: 'Period 2', start: '08:40', end: '09:20' },
@@ -444,7 +445,7 @@ export const INITIAL_PERIOD_SETTINGS = [
   { id: 18, day: 'Wednesday', name: 'Period 4', start: '10:20', end: '11:00' },
   { id: 19, day: 'Wednesday', name: 'Period 5', start: '11:20', end: '12:00' },
   { id: 20, day: 'Wednesday', name: 'Period 6', start: '12:00', end: '12:40' },
-  { id: 21, day: 'Wednesday', name: 'Period 7', start: '14:00', end: '15:30' }, // Sports & Games block
+  { id: 21, day: 'Wednesday', name: 'Period 7', start: '14:00', end: '15:30' },
   // Thursday
   { id: 22, day: 'Thursday', name: 'Period 1', start: '08:00', end: '08:40' },
   { id: 23, day: 'Thursday', name: 'Period 2', start: '08:40', end: '09:20' },
@@ -460,16 +461,16 @@ export const INITIAL_PERIOD_SETTINGS = [
   { id: 32, day: 'Friday', name: 'Period 4', start: '10:20', end: '11:00' },
   { id: 33, day: 'Friday', name: 'Period 5', start: '11:20', end: '12:00' },
   { id: 34, day: 'Friday', name: 'Period 6', start: '12:00', end: '12:40' },
-  { id: 35, day: 'Friday', name: 'Period 7', start: '14:00', end: '15:00' } // Environmental Day / Debates
+  { id: 35, day: 'Friday', name: 'Period 7', start: '14:00', end: '15:00' }
 ];
 
-export const INITIAL_STREAM_SETTINGS = [
-  // Nursery Level (4 distinct nursery stages)
+export const INITIAL_PERIOD_SETTINGS: any[] = [];
+
+export const TANZANIAN_TEMPLATE_STREAM_SETTINGS = [
   { id: 101, className: 'Nursery', level: 'PRE_PRIMARY' as const, streams: ['STREAM A', 'STREAM B'] },
   { id: 102, className: 'Baby Class', level: 'PRE_PRIMARY' as const, streams: ['STREAM A', 'STREAM B'] },
   { id: 103, className: 'Middle Class', level: 'PRE_PRIMARY' as const, streams: ['STREAM A', 'STREAM B'] },
   { id: 104, className: 'Pre-Unit', level: 'PRE_PRIMARY' as const, streams: ['STREAM A', 'STREAM B'] },
-  // Primary Level (Standard 1 to 7 with ABC streams)
   { id: 105, className: 'Standard 1', level: 'PRIMARY' as const, streams: ['STREAM A', 'STREAM B', 'STREAM C'] },
   { id: 106, className: 'Standard 2', level: 'PRIMARY' as const, streams: ['STREAM A', 'STREAM B', 'STREAM C'] },
   { id: 107, className: 'Standard 3', level: 'PRIMARY' as const, streams: ['STREAM A', 'STREAM B', 'STREAM C'] },
@@ -477,7 +478,6 @@ export const INITIAL_STREAM_SETTINGS = [
   { id: 109, className: 'Standard 5', level: 'PRIMARY' as const, streams: ['STREAM A', 'STREAM B', 'STREAM C'] },
   { id: 110, className: 'Standard 6', level: 'PRIMARY' as const, streams: ['STREAM A', 'STREAM B', 'STREAM C'] },
   { id: 111, className: 'Standard 7', level: 'PRIMARY' as const, streams: ['STREAM A', 'STREAM B', 'STREAM C'] },
-  // Secondary Level (Form 1 to 4 with AB streams, Form 5-6 with combinations)
   { id: 1, className: 'Form 1', level: 'CSEE' as const, streams: ['STREAM A', 'STREAM B'] },
   { id: 2, className: 'Form 2', level: 'CSEE' as const, streams: ['STREAM A', 'STREAM B'] },
   { id: 3, className: 'Form 3', level: 'CSEE' as const, streams: ['STREAM A', 'STREAM B'] },
@@ -486,7 +486,9 @@ export const INITIAL_STREAM_SETTINGS = [
   { id: 6, className: 'Form 6', level: 'ACSEE' as const, streams: ['PCM', 'PCB', 'HKL'] }
 ];
 
-export const INITIAL_TIMETABLE_ASSIGNMENTS = [
+export const INITIAL_STREAM_SETTINGS: any[] = [];
+
+export const TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS = [
   // Form 1 STREAM A
   { id: 201, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 1 (08:00-08:40)', teacherId: 101, subject: 'Mathematics' },
   { id: 202, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 2 (08:40-09:20)', teacherId: 102, subject: 'English Language' },
@@ -519,6 +521,8 @@ export const INITIAL_TIMETABLE_ASSIGNMENTS = [
   { id: 221, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 5 (11:20-12:00)', subject: 'Religion', activityType: 'religion' as const, room: 'School Hall' },
   { id: 222, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 6 (12:00-12:40)', teacherId: 101, subject: 'Weekly Test', activityType: 'weekly_test' as const, room: 'Exam Hall / Class 1A', customNote: 'Weekly evaluation test' }
 ];
+
+export const INITIAL_TIMETABLE_ASSIGNMENTS: any[] = [];
 
 export const INITIAL_STUDENTS: Student[] = [
   { id: 1, name: 'Amina Juma Mohamed', regNo: 'S0123/0001/2026', sex: 'F', className: 'Form 1', stream: 'STREAM A', subjects: ['Basic Mathematics', 'English Language', 'Biology', 'History'], dob: '2010-05-15', status: 'ACTIVE' },

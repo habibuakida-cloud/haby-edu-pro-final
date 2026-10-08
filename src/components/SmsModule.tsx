@@ -187,6 +187,22 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   };
 
   useEffect(() => {
+    loadInbox();
+    loadAdminAnnouncements();
+
+    const inboxChannel = supabase
+      .channel('public:admin_parent_messages')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parent_messages' }, () => {
+        loadInbox();
+      })
+      .subscribe();
+
+    return () => {
+      inboxChannel.unsubscribe();
+    };
+  }, [schoolId]);
+
+  useEffect(() => {
     if (activeTab === 'inbox') loadInbox();
     if (activeTab === 'announcements') loadAdminAnnouncements();
   }, [activeTab]);
@@ -1055,6 +1071,13 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
         >
           <Inbox className="w-4 h-4" />
           <span>Inbox ya Wazazi</span>
+          {inboxMessages.filter(m => m.sender === 'parent').length > 0 && (
+            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
+              activeTab === 'inbox' ? 'bg-white text-blue-700' : 'bg-rose-500 text-white'
+            }`}>
+              {inboxMessages.filter(m => m.sender === 'parent').length}
+            </span>
+          )}
         </button>
 
         <button
@@ -1217,15 +1240,32 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                     </div>
                   </div>
                   <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                    {/* Simplified thread view: Show parent's message and all replies associated with this parent */}
-                    <div className="flex justify-start">
-                      <div className="max-w-[80%] p-3 bg-slate-100 rounded-2xl rounded-tl-none text-xs">
-                        <p className="font-bold mb-1">Mzazi</p>
-                        <p>{selectedInboxMessage.message}</p>
-                        <p className="text-[9px] text-slate-400 mt-1">{new Date(selectedInboxMessage.created_at).toLocaleString()}</p>
-                      </div>
-                    </div>
-                    {/* Fetch and show real thread if needed, but for now simple one-to-one reply UI */}
+                    {inboxMessages
+                      .filter(m => 
+                        (m.parent_phone && m.parent_phone === selectedInboxMessage.parent_phone) ||
+                        (m.parent_id && m.parent_id === selectedInboxMessage.parent_id)
+                      )
+                      .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+                      .map((msgItem, i) => (
+                        <div 
+                          key={msgItem.id || i} 
+                          className={`flex ${msgItem.sender === 'school' ? 'justify-end' : 'justify-start'}`}
+                        >
+                          <div className={`max-w-[80%] p-3 rounded-2xl text-xs ${
+                            msgItem.sender === 'school' 
+                              ? 'bg-blue-600 text-white rounded-tr-none' 
+                              : 'bg-slate-100 text-slate-800 rounded-tl-none'
+                          }`}>
+                            <p className="font-bold mb-1 text-[11px] opacity-80">
+                              {msgItem.sender === 'school' ? 'Uongozi wa Shule' : (msgItem.parent_name || 'Mzazi')}
+                            </p>
+                            <p className="whitespace-pre-wrap">{msgItem.message}</p>
+                            <p className={`text-[9px] mt-1 ${msgItem.sender === 'school' ? 'text-blue-200' : 'text-slate-400'}`}>
+                              {new Date(msgItem.created_at).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
                   </div>
                   <div className="p-4 border-t border-slate-100 flex gap-2">
                     <input

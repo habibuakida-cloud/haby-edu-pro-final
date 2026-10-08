@@ -47,13 +47,8 @@ export const getAvailableSchoolClasses = (
 ): string[] => {
   const classSet = new Set<string>();
 
-  // 1. Standard Tanzania curriculum classes
-  NURSERY_CLASSES.forEach(c => classSet.add(c));
-  PRIMARY_CLASSES.forEach(c => classSet.add(c));
-  SECONDARY_CLASSES.forEach(c => classSet.add(c));
-
-  // 2. Stream settings configured classes
-  if (Array.isArray(streamSettings)) {
+  // 1. Stream settings configured classes (User's active setting)
+  if (Array.isArray(streamSettings) && streamSettings.length > 0) {
     streamSettings.forEach(s => {
       if (s.className && s.className.trim()) {
         classSet.add(normalizeClassName(s.className));
@@ -61,8 +56,8 @@ export const getAvailableSchoolClasses = (
     });
   }
 
-  // 3. Registered students classes
-  if (Array.isArray(students)) {
+  // 2. Registered students classes
+  if (Array.isArray(students) && students.length > 0) {
     students.forEach(st => {
       if (st.className && st.className.trim()) {
         classSet.add(normalizeClassName(st.className));
@@ -95,7 +90,7 @@ export const getAvailableSchoolStreams = (
   streamSettings: StreamSetting[] = [],
   targetClass?: string
 ): string[] => {
-  const streamSet = new Set<string>(['STREAM A', 'STREAM B', 'STREAM C', 'STREAM D']);
+  const streamSet = new Set<string>();
 
   // From streamSettings
   if (Array.isArray(streamSettings)) {

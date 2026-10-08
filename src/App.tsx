@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppData, Student, Teacher, Exam, InvigilationSession, PeriodSetting, StreamSetting, TimetableAssignment, Supervisor, SchoolInfo, UserAccount, SchoolStatus, ActivityLog, ActivityAction, ActivityCategory, DisciplineRecord, TeacherEvaluation, UsalRecord, ExaminationRecord } from './types';
-import { setCachedData } from './lib/idbService';
+import { setCachedData, getCachedData } from './lib/idbService';
 import { DEFAULT_APP_DATA } from './constants/defaults';
 import { generateUsalRecordsForExam, ensureUsalRecordsForAllExams } from './utils/usalUtils';
 import { Navigation, ActiveView } from './components/Navigation';
@@ -196,6 +196,19 @@ export default function App() {
       });
     }
 
+    // Pre-populate state from IndexedDB cache immediately to respect user's deleted/configured state
+    getCachedData(schoolKey).then(cached => {
+      if (cached && typeof cached === 'object') {
+        setData(prev => ({
+          ...prev,
+          ...cached,
+          streamSettings: cached.streamSettings || [],
+          periodSettings: cached.periodSettings || [],
+          timetableAssignments: cached.timetableAssignments || []
+        }));
+      }
+    }).catch(e => console.warn("Initial IDB cache load error:", e));
+
     // 0. Primary Database Load: Prioritize Supabase Relational Tables
     const loadFromDatabase = async (isInitialBoot = false) => {
       console.log("Loading single source of truth from Supabase Tables for school:", schoolId);
@@ -229,7 +242,8 @@ export default function App() {
         const actData = actRes?.data || [];
         const discData = discRes?.data || [];
         const gateData = gateRes?.data || [];
-        const remoteData = (schoolDataRes?.data || {}) as Partial<AppData>;
+        const rawSchoolData = (schoolDataRes?.data || {}) as Record<string, any>;
+        const remoteData = rawSchoolData as Partial<AppData>;
 
         setSupabaseStudentCount(studData.length);
 
@@ -242,11 +256,26 @@ export default function App() {
         const remoteDiscipline = discData.map(d => fromSupabaseDiscipline(d));
         const remoteGatePass = gateData.map(l => fromSupabaseGatePass(l));
 
+        const mappedStreamSettings = rawSchoolData.stream_settings !== undefined 
+          ? rawSchoolData.stream_settings 
+          : (rawSchoolData.streamSettings !== undefined ? rawSchoolData.streamSettings : undefined);
+
+        const mappedPeriodSettings = rawSchoolData.period_settings !== undefined 
+          ? rawSchoolData.period_settings 
+          : (rawSchoolData.periodSettings !== undefined ? rawSchoolData.periodSettings : undefined);
+
+        const mappedTimetableAssignments = rawSchoolData.timetable_assignments !== undefined 
+          ? rawSchoolData.timetable_assignments 
+          : (rawSchoolData.timetableAssignments !== undefined ? rawSchoolData.timetableAssignments : undefined);
+
         setData(prev => {
           // Merge Table data with Snapshot settings
           const updatedState: AppData = {
             ...prev,
             ...remoteData,
+            streamSettings: mappedStreamSettings !== undefined ? mappedStreamSettings : prev.streamSettings,
+            periodSettings: mappedPeriodSettings !== undefined ? mappedPeriodSettings : prev.periodSettings,
+            timetableAssignments: mappedTimetableAssignments !== undefined ? mappedTimetableAssignments : prev.timetableAssignments,
             students: remoteStudents.length > 0 ? remoteStudents : (isInitialBoot ? [] : prev.students),
             teachers: remoteTeachers.length > 0 ? remoteTeachers : (isInitialBoot ? [] : prev.teachers),
             exams: remoteExams.length > 0 ? remoteExams : (isInitialBoot ? [] : prev.exams),

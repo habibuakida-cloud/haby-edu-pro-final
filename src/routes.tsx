@@ -170,7 +170,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     iconColor: 'text-cyan-400',
     badgeBg: 'bg-cyan-100 text-cyan-800 border-cyan-200',
     subModules: [
-      { id: 'sms', label: 'SMS Module', description: 'Send SMS broadcasts, exam results & attendance alerts to parents', badge: 'RESTORED' },
+      { id: 'sms', label: 'SMS & Ujumbe wa Wazazi (Inbox)', description: 'Soma ujumbe wa wazazi (Inbox), tuma majibu, na matangazo ya SMS', badge: 'INBOX' },
       { id: 'parentportal', label: 'Parent Portal', description: 'Parent login to view live results, attendance & fee balances', badge: 'RESTORED' }
     ]
   },

@@ -238,7 +238,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     const activeSettings = streamSettings && streamSettings.length > 0 ? streamSettings : INITIAL_STREAM_SETTINGS;
     activeSettings.forEach(setting => {
       const streamsMap = new Map<string, { streamName: string; total: number; boys: number; girls: number; studentList: Student[] }>();
-      (setting.streams || ['STREAM A', 'STREAM B']).forEach(st => {
+      (setting.streams || []).forEach(st => {
         streamsMap.set(st, { streamName: st, total: 0, boys: 0, girls: 0, studentList: [] });
       });
       classMap.set(setting.className, {
