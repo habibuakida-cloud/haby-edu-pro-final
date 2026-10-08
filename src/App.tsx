@@ -148,6 +148,27 @@ export default function App() {
         invigilation_assignments: snapData.invigilationAssignments || {},
         daily_attendance: snapData.dailyAttendance || {},
         journal_records: snapData.journalRecords || {},
+        schemesOfWork: snapData.schemesOfWork || [],
+        schemes_of_work: snapData.schemesOfWork || [],
+        lessonPlans: snapData.lessonPlans || [],
+        lesson_plans: snapData.lessonPlans || [],
+        teacherEvaluations: snapData.teacherEvaluations || [],
+        teacher_evaluations: snapData.teacherEvaluations || [],
+        savedTimetableRecords: snapData.savedTimetableRecords || [],
+        saved_timetable_records: snapData.savedTimetableRecords || [],
+        savedInvigilationRecords: snapData.savedInvigilationRecords || [],
+        saved_invigilation_records: snapData.savedInvigilationRecords || [],
+        gradeCutoffs: snapData.gradeCutoffs || {},
+        grade_cutoffs: snapData.gradeCutoffs || {},
+        ledgerSubjectKeys: snapData.ledgerSubjectKeys || {},
+        ledger_subject_keys: snapData.ledgerSubjectKeys || {},
+        subjectPeriodAllocations: snapData.subjectPeriodAllocations || [],
+        subject_period_allocations: snapData.subjectPeriodAllocations || [],
+        teacherAssignments: snapData.teacherAssignments || [],
+        teacher_assignments: snapData.teacherAssignments || [],
+        subjectPaperConfigs: snapData.subjectPaperConfigs || {},
+        subject_paper_configs: snapData.subjectPaperConfigs || {},
+        bubbleSettings: snapData.bubbleSettings || {},
         updated_at: new Date().toISOString()
       };
       
@@ -302,6 +323,11 @@ export default function App() {
             activityLogs: remoteActivity.length > 0 ? remoteActivity : prev.activityLogs,
             disciplineRecords: remoteDiscipline.length > 0 ? remoteDiscipline : prev.disciplineRecords,
             examinationRecords: recData.length > 0 ? recData : prev.examinationRecords,
+            schemesOfWork: rawSchoolData.schemesOfWork !== undefined ? rawSchoolData.schemesOfWork : (rawSchoolData.schemes_of_work !== undefined ? rawSchoolData.schemes_of_work : prev.schemesOfWork),
+            lessonPlans: rawSchoolData.lessonPlans !== undefined ? rawSchoolData.lessonPlans : (rawSchoolData.lesson_plans !== undefined ? rawSchoolData.lesson_plans : prev.lessonPlans),
+            teacherEvaluations: rawSchoolData.teacherEvaluations !== undefined ? rawSchoolData.teacherEvaluations : (rawSchoolData.teacher_evaluations !== undefined ? rawSchoolData.teacher_evaluations : prev.teacherEvaluations),
+            savedTimetableRecords: rawSchoolData.savedTimetableRecords !== undefined ? rawSchoolData.savedTimetableRecords : (rawSchoolData.saved_timetable_records !== undefined ? rawSchoolData.saved_timetable_records : prev.savedTimetableRecords),
+            savedInvigilationRecords: rawSchoolData.savedInvigilationRecords !== undefined ? rawSchoolData.savedInvigilationRecords : (rawSchoolData.saved_invigilation_records !== undefined ? rawSchoolData.saved_invigilation_records : prev.savedInvigilationRecords),
           };
 
           setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));

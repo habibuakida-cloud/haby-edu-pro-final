@@ -136,6 +136,10 @@ export const ScheduleExtraCurricularModal: React.FC<ScheduleExtraCurricularModal
         return { start: '14:00', end: '15:30', periodName: 'Clubs & Societies', room: 'School Hall & Clubs' };
       case 'library':
         return { start: '14:00', end: '15:00', periodName: 'Library & Private Study', room: 'School Library' };
+      case 'remedial':
+        return { start: '15:30', end: '16:30', periodName: 'Remedial Period', room: 'Classrooms' };
+      case 'options':
+        return { start: '15:30', end: '16:30', periodName: 'Options Period', room: 'Various' };
       case 'weekly_test':
         return { start: '07:30', end: '09:00', periodName: 'Weekly Test', room: 'Classrooms / Exam Hall' };
       default:

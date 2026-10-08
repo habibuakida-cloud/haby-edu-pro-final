@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import * as XLSX from 'xlsx';
 import { 
   FileSpreadsheet, 
@@ -60,6 +60,47 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
   const [subjectsList, setSubjectsList] = useState([]);
   const [saveStatus, setSaveStatus] = useState(null); // { type: 'success' | 'error', message: string }
   const [isSavingToDb, setIsSavingToDb] = useState(false);
+
+  // Restore saved analyzer state on mount to prevent data loss on page update/refresh
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('necta_analyzer_saved_state');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.parsedData && Array.isArray(parsed.parsedData) && parsed.parsedData.length > 0) {
+          setParsedData(parsed.parsedData);
+          if (parsed.subjectsList) setSubjectsList(parsed.subjectsList);
+          if (parsed.detectedSchoolName) setDetectedSchoolName(parsed.detectedSchoolName);
+          if (parsed.selectedExamType) setSelectedExamType(parsed.selectedExamType);
+          if (parsed.examYear) setExamYear(parsed.examYear);
+          if (parsed.inputText) setInputText(parsed.inputText);
+          if (parsed.nectaUrl) setNectaUrl(parsed.nectaUrl);
+        }
+      }
+    } catch (e) {
+      console.warn('Could not restore saved NectaAnalyzer state:', e);
+    }
+  }, []);
+
+  // Auto-save analyzer state whenever parsed data or settings update
+  useEffect(() => {
+    if (parsedData && parsedData.length > 0) {
+      try {
+        localStorage.setItem('necta_analyzer_saved_state', JSON.stringify({
+          parsedData,
+          subjectsList,
+          detectedSchoolName,
+          selectedExamType,
+          examYear,
+          inputText,
+          nectaUrl,
+          savedAt: new Date().toISOString()
+        }));
+      } catch (e) {
+        console.warn('Could not save NectaAnalyzer state to localStorage:', e);
+      }
+    }
+  }, [parsedData, subjectsList, detectedSchoolName, selectedExamType, examYear, inputText, nectaUrl]);
 
   // Quick paste & analyze helper from clipboard
   const handlePasteClipboard = async () => {

@@ -10,6 +10,42 @@ const ai = new GoogleGenAI({
   }
 });
 
+/**
+ * Robust Gemini generation with automated fallback models to prevent 503 Service Unavailable errors.
+ */
+async function generateWithFallback(config: {
+  contents: string;
+  systemInstruction?: string;
+  responseMimeType?: string;
+  temperature?: number;
+}) {
+  const models = ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
+  let lastError = null;
+
+  for (const model of models) {
+    try {
+      console.log(`[Gemini Fallback Client] Attempting generation with model: ${model}`);
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: config.contents,
+        config: {
+          systemInstruction: config.systemInstruction,
+          responseMimeType: config.responseMimeType as any,
+          temperature: config.temperature,
+        }
+      });
+      if (response && response.text) {
+        console.log(`[Gemini Fallback Client] Successfully generated content using model: ${model}`);
+        return response;
+      }
+    } catch (err: any) {
+      console.warn(`[Gemini Fallback Client] Model ${model} failed with message:`, err?.message || err);
+      lastError = err;
+    }
+  }
+  throw lastError || new Error('All Gemini models in fallback sequence failed to generate content');
+}
+
 export interface AISchemeRequest {
   subject: string;
   className: string;
@@ -91,13 +127,10 @@ Return a JSON object matching this structure:
   ]
 }`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.8-flash',
+  const response = await generateWithFallback({
     contents: prompt,
-    config: {
-      systemInstruction: 'You are an expert Tanzanian educator producing strict JSON schemes of work adhering to TIE and NECTA curriculum standards.',
-      responseMimeType: 'application/json'
-    }
+    systemInstruction: 'You are an expert Tanzanian educator producing strict JSON schemes of work adhering to TIE and NECTA curriculum standards.',
+    responseMimeType: 'application/json'
   });
 
   const text = response.text || '';
@@ -177,13 +210,10 @@ Return a JSON object matching this structure:
   ]
 }`;
 
-  const response = await ai.models.generateContent({
-    model: 'gemini-3.8-flash',
+  const response = await generateWithFallback({
     contents: prompt,
-    config: {
-      systemInstruction: 'You are an expert Tanzanian educator producing strict JSON lesson plans adhering to TIE and NECTA curriculum standards.',
-      responseMimeType: 'application/json'
-    }
+    systemInstruction: 'You are an expert Tanzanian educator producing strict JSON lesson plans adhering to TIE and NECTA curriculum standards.',
+    responseMimeType: 'application/json'
   });
 
   const text = response.text || '';
