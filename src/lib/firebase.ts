@@ -14,11 +14,8 @@ const firebaseConfig = {
   measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || defaultAppletConfig.measurementId
 };
 
-const databaseId = import.meta.env.VITE_FIREBASE_DATABASE_ID || defaultAppletConfig.firestoreDatabaseId;
-
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = (databaseId && databaseId !== '(default)') 
-  ? getFirestore(app, databaseId) 
-  : getFirestore(app);
+export const db = getFirestore(app);
 export const googleProvider = new GoogleAuthProvider();
+

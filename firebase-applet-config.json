@@ -1,12 +1,11 @@
 {
-  "projectId": "western-alcove-44r4b",
-  "appId": "1:936938588198:web:666cf6b6c2c4a79aefbee7",
-  "apiKey": "AIzaSyDJIxOrSz3Wo3VDHTKlgrUKVOYJ2Rz-52k",
-  "authDomain": "western-alcove-44r4b.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-habyeduproschool-cc2fceae-da7d-4432-aa72-125fe8c21f75",
-  "storageBucket": "western-alcove-44r4b.firebasestorage.app",
-  "messagingSenderId": "936938588198",
+  "projectId": "habyedupro-final",
+  "appId": "1:5469389965:web:923da452bae0b2160e8ec4",
+  "apiKey": "AIzaSyANah9nXCZHEcJ85U5grGmVNM2unWJHfKM",
+  "authDomain": "habyedupro-final.firebaseapp.com",
+  "storageBucket": "habyedupro-final.firebasestorage.app",
+  "messagingSenderId": "5469389965",
   "measurementId": "",
-  "oAuthClientId": "936938588198-kh2luc54fn7t6jh2bkm78rtkpkfevud7.apps.googleusercontent.com",
+  "oAuthClientId": "",
   "recaptchaSiteKey": ""
 }
