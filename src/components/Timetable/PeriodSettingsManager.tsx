@@ -1093,8 +1093,22 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
           <tbody>
             {filteredPeriods.length === 0 ? (
               <tr>
-                <td colSpan={8} className="p-8 text-center text-slate-400 italic">
-                  No periods found matching the filter criteria. Add a period above or change the day filter.
+                <td colSpan={8} className="p-8 text-center text-slate-500">
+                  <div className="flex flex-col items-center justify-center gap-2 max-w-md mx-auto">
+                    <Clock className="w-8 h-8 text-blue-500/50" />
+                    <p className="font-bold text-slate-700 text-sm">Hakuna vipindi vilivyowekwa kwa sasa.</p>
+                    <p className="text-xs text-slate-500 leading-relaxed">
+                      Uko tayari kuweka vipindi na muda wako mwenyewe! Tumia fomu ya juu kuongeza kipindi cha kwanza (k.m. Period 1, 08:00 - 08:40), au bofya kitufe cha chini kupakia sampuli ya kawaida ya Tanzania.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={handleLoadTanzanianTemplatePeriods}
+                      className="mt-2 px-3.5 py-2 text-xs font-bold bg-blue-600 text-white rounded-xl hover:bg-blue-700 flex items-center gap-1.5 cursor-pointer shadow-sm"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Pakia Sampuli ya Tanzania (Vipindi 7 / Siku)</span>
+                    </button>
+                  </div>
                 </td>
               </tr>
             ) : (

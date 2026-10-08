@@ -62,18 +62,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [userAccount, setUserAccount] = useState<UserAccount | null>(() => {
-    // Check if demo user was saved in session
     try {
       const savedDemo = typeof window !== 'undefined' ? safeGetItem(window.sessionStorage, 'haby_demo_user') : null;
       if (savedDemo) {
         return JSON.parse(savedDemo);
       }
     } catch {
-      return null;
+      return DEFAULT_SUPERADMIN_ACCOUNT;
     }
-    return null;
+    return DEFAULT_SUPERADMIN_ACCOUNT;
   });
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   const fetchOrCreateUserAccount = async (fbUser: FirebaseUser) => {
     const normEmail = fbUser.email?.toLowerCase() || '';

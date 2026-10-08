@@ -1038,6 +1038,25 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('inbox')}
+          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
+            activeTab === 'inbox'
+              ? 'bg-blue-600 text-white shadow-sm'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Inbox className="w-4 h-4" />
+          <span>Inbox ya Wazazi (Ujumbe wa Wazazi)</span>
+          {inboxMessages.filter(m => m.sender === 'parent').length > 0 && (
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+              activeTab === 'inbox' ? 'bg-white text-blue-700' : 'bg-rose-500 text-white'
+            }`}>
+              {inboxMessages.filter(m => m.sender === 'parent').length}
+            </span>
+          )}
+        </button>
+
+        <button
           onClick={() => setActiveTab('announcements')}
           className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
             activeTab === 'announcements'
@@ -1047,37 +1066,6 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
         >
           <MessageSquare className="w-4 h-4" />
           <span>Tuma Matangazo (Announcements)</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('announcements')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            activeTab === 'announcements'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Bell className="w-4 h-4" />
-          <span>Matangazo (Portal)</span>
-        </button>
-
-        <button
-          onClick={() => setActiveTab('inbox')}
-          className={`px-4 py-2.5 rounded-xl text-xs font-bold transition flex items-center gap-2 ${
-            activeTab === 'inbox'
-              ? 'bg-blue-600 text-white shadow-sm'
-              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
-          }`}
-        >
-          <Inbox className="w-4 h-4" />
-          <span>Inbox ya Wazazi</span>
-          {inboxMessages.filter(m => m.sender === 'parent').length > 0 && (
-            <span className={`px-1.5 py-0.5 rounded-full text-[10px] font-black ${
-              activeTab === 'inbox' ? 'bg-white text-blue-700' : 'bg-rose-500 text-white'
-            }`}>
-              {inboxMessages.filter(m => m.sender === 'parent').length}
-            </span>
-          )}
         </button>
 
         <button

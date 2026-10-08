@@ -83,10 +83,10 @@ export const Navigation: React.FC<NavigationProps> = ({
       people_management: true,
       teaching: false,
       academic_exams: true,
-      timetable_invigilation: false,
+      timetable_invigilation: true,
       student_affairs: false,
       finance_management: false,
-      communication: false,
+      communication: true,
       remedial_program: false,
       system_settings: false
     };

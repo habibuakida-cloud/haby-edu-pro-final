@@ -111,7 +111,7 @@ export default function App() {
       );
     }
   }
-  const [dataLoading, setDataLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(false);
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [schoolStatus, setSchoolStatus] = useState<SchoolStatus>('ACTIVE');
   const [saveStatus, setSaveStatus] = useState<'saved' | 'saving' | 'offline' | 'error'>('saved');
@@ -276,14 +276,14 @@ export default function App() {
             streamSettings: mappedStreamSettings !== undefined ? mappedStreamSettings : prev.streamSettings,
             periodSettings: mappedPeriodSettings !== undefined ? mappedPeriodSettings : prev.periodSettings,
             timetableAssignments: mappedTimetableAssignments !== undefined ? mappedTimetableAssignments : prev.timetableAssignments,
-            students: remoteStudents.length > 0 ? remoteStudents : (isInitialBoot ? [] : prev.students),
-            teachers: remoteTeachers.length > 0 ? remoteTeachers : (isInitialBoot ? [] : prev.teachers),
-            exams: remoteExams.length > 0 ? remoteExams : (isInitialBoot ? [] : prev.exams),
-            parents: remoteParents.length > 0 ? remoteParents : (isInitialBoot ? [] : prev.parents),
-            parentStudents: psData.length > 0 ? psData : (isInitialBoot ? [] : prev.parentStudents),
-            activityLogs: remoteActivity.length > 0 ? remoteActivity : (isInitialBoot ? [] : prev.activityLogs),
-            disciplineRecords: remoteDiscipline.length > 0 ? remoteDiscipline : (isInitialBoot ? [] : prev.disciplineRecords),
-            examinationRecords: recData.length > 0 ? recData : (isInitialBoot ? [] : prev.examinationRecords),
+            students: remoteStudents.length > 0 ? remoteStudents : prev.students,
+            teachers: remoteTeachers.length > 0 ? remoteTeachers : prev.teachers,
+            exams: remoteExams.length > 0 ? remoteExams : prev.exams,
+            parents: remoteParents.length > 0 ? remoteParents : prev.parents,
+            parentStudents: psData.length > 0 ? psData : prev.parentStudents,
+            activityLogs: remoteActivity.length > 0 ? remoteActivity : prev.activityLogs,
+            disciplineRecords: remoteDiscipline.length > 0 ? remoteDiscipline : prev.disciplineRecords,
+            examinationRecords: recData.length > 0 ? recData : prev.examinationRecords,
           };
 
           setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
