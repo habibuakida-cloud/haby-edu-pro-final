@@ -33,7 +33,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount } from '../types';
+import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting } from '../types';
 import { subDays, format, startOfDay } from 'date-fns';
 import { NURSERY_CLASSES, PRIMARY_CLASSES, SECONDARY_CLASSES } from '../constants/defaults';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
@@ -41,12 +41,16 @@ import { getRemedialTimetable, RemedialTimetableEntry } from '../lib/remedialSer
 import { exportRemedialTimetablePDF } from '../utils/remedialPdfExport';
 import { isSameClass } from '../utils/reportCardUtils';
 import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
+import { TeacherDailyScheduleSummary } from './Dashboard/TeacherDailyScheduleSummary';
 
 interface DashboardViewProps {
   students: Student[];
   teachers: Teacher[];
   exams: Exam[];
   sessions: InvigilationSession[];
+  timetableAssignments?: TimetableAssignment[];
+  periodSettings?: PeriodSetting[];
+  streamSettings?: StreamSetting[];
   isCloudSynced?: boolean;
   isSyncing?: boolean;
   isLoading?: boolean;
@@ -65,6 +69,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   teachers = [],
   exams = [],
   sessions = [],
+  timetableAssignments = [],
+  periodSettings = [],
+  streamSettings = [],
   isCloudSynced = false,
   isSyncing = false,
   isLoading = false,
@@ -599,6 +606,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* TEACHER DAILY TEACHING TIMETABLE D3 VISUAL SUMMARY */}
+      <TeacherDailyScheduleSummary
+        assignments={timetableAssignments}
+        teachers={teachers}
+        periodSettings={periodSettings}
+        streamSettings={streamSettings}
+        currentUser={currentUser}
+        schoolInfo={schoolInfo}
+        onSelectView={onSelectView}
+      />
 
       {/* MY REMEDIAL TIMETABLE SECTION (Class & Teacher Personalized View) */}
       <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">

@@ -1314,6 +1314,9 @@ export default function App() {
               teachers={data.teachers}
               exams={data.exams}
               sessions={data.sessions}
+              timetableAssignments={data.timetableAssignments || []}
+              periodSettings={data.periodSettings || []}
+              streamSettings={data.streamSettings || []}
               isCloudSynced={isCloudSynced}
               isSyncing={isSyncing}
               isLoading={dataLoading}

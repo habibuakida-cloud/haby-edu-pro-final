@@ -90,6 +90,7 @@ import { ConstraintConfigurationPanel } from './ConstraintConfigurationPanel';
 import { SubjectPeriodAllocationTab } from './SubjectPeriodAllocationTab';
 import { TeacherAssignmentsTab } from './TeacherAssignmentsTab';
 import { ClassJournalTab } from './ClassJournalTab';
+import { AITimetableAssistantModal } from './AITimetableAssistantModal';
 
 export const renderActivityIcon = (iconName: string, className = "w-3 h-3") => {
   switch (iconName) {
@@ -193,6 +194,9 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   
   // Timetable Integrity Report Modal state
   const [integrityReportModalOpen, setIntegrityReportModalOpen] = useState(false);
+
+  // AI Timetable Assistant Modal state
+  const [aiModalOpen, setAiModalOpen] = useState(false);
 
   const handleShareTimetableWhatsApp = (scope: string) => {
     const text = `*HABY EDUPRO TIMETABLE (RATIBA YA MASOMO)*
@@ -772,6 +776,16 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         <div className="flex items-center gap-2 pr-1 shrink-0 flex-wrap">
           <button
             type="button"
+            onClick={() => setAiModalOpen(true)}
+            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold text-xs rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95 border border-indigo-400"
+            title="Tumia Msaidizi wa AI kujaza ratiba kulingana na idadi ya vipindi na walimu waliosajiliwa"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+            <span>⚡ Jaza na AI (AI Timetable)</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setIntegrityReportModalOpen(true)}
             className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
             title="Kagua na utatue migongano yote ya walimu (Resolve Clashes)"
@@ -879,6 +893,15 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setAiModalOpen(true)}
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95 border border-indigo-400"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              <span>Jaza Ratiba Yote na AI</span>
+            </button>
+
             <button
               type="button"
               onClick={() => {
@@ -2640,6 +2663,22 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           schoolName={schoolName}
           onUpdateAssignments={onUpdateAssignments}
           onEditSlot={slot => setEditingSlot(slot)}
+        />
+      )}
+
+      {/* AI Timetable Assistant Modal */}
+      {aiModalOpen && (
+        <AITimetableAssistantModal
+          isOpen={aiModalOpen}
+          onClose={() => setAiModalOpen(false)}
+          teachers={teachers}
+          periodSettings={periodSettings}
+          streamSettings={streamSettings}
+          existingAssignments={assignments}
+          subjectPeriodAllocations={subjectPeriodAllocations}
+          onApplyTimetable={(newAssignments) => {
+            onUpdateAssignments(newAssignments);
+          }}
         />
       )}
     </div>

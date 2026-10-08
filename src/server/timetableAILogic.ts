@@ -24,6 +24,13 @@ export interface GenerateTimetableRequest {
     streams: string[];
   }[];
   existingAssignments?: any[];
+  baseAssignments?: any[]; // Uploaded or pre-fed template slots with breaks, extra-curriculars, etc.
+  subjectPeriodAllocations?: {
+    className?: string;
+    stream?: string;
+    subject: string;
+    periodsPerWeek: number;
+  }[];
   options?: {
     respectSpecialization?: boolean;
     preventClashes?: boolean;
@@ -48,6 +55,13 @@ export interface TimetableSlotOutput {
   customNote?: string;
 }
 
+export interface SubjectQuotaProgress {
+  subject: string;
+  targetPeriods: number;
+  allocatedPeriods: number;
+  percentage: number;
+}
+
 export interface GenerateTimetableResponse {
   success: boolean;
   generatedAssignments: TimetableSlotOutput[];
@@ -62,6 +76,7 @@ export interface GenerateTimetableResponse {
     periodsAllocated: number;
     subjects: string[];
   }[];
+  subjectQuotaProgress: SubjectQuotaProgress[];
   classCoverage: {
     className: string;
     stream: string;
@@ -111,8 +126,12 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
   });
 
   const existingMap = new Map<string, any>();
-  if (req.existingAssignments && req.existingAssignments.length > 0) {
-    req.existingAssignments.forEach(a => {
+  const initialSource = (req.baseAssignments && req.baseAssignments.length > 0)
+    ? req.baseAssignments
+    : (req.existingAssignments && req.existingAssignments.length > 0 ? req.existingAssignments : []);
+
+  if (initialSource.length > 0) {
+    initialSource.forEach(a => {
       const key = `${a.className}|${a.stream}|${a.day}|${a.period}`;
       existingMap.set(key, a);
 
@@ -138,18 +157,39 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
     });
   });
 
-  const standardSubjects = [
-    'Mathematics',
-    'English Language',
-    'Kiswahili',
-    'Biology',
-    'Chemistry',
-    'Physics',
-    'Geography',
-    'History',
-    'Civics',
-    'Computer Studies'
-  ];
+  // Track global subject allocations
+  const subjectTargetMap: Record<string, number> = {};
+  if (req.subjectPeriodAllocations && req.subjectPeriodAllocations.length > 0) {
+    req.subjectPeriodAllocations.forEach(spa => {
+      const sub = spa.subject.trim();
+      const periods = Number(spa.periodsPerWeek) || 0;
+      if (periods > 0) {
+        subjectTargetMap[sub] = Math.max(subjectTargetMap[sub] || 0, periods);
+      }
+    });
+  }
+
+  // Fallback defaults if none configured
+  const defaultAllocations: Record<string, number> = {
+    'Mathematics': 6,
+    'English Language': 5,
+    'Kiswahili': 4,
+    'Biology': 4,
+    'Chemistry': 4,
+    'Physics': 4,
+    'Geography': 3,
+    'History': 3,
+    'Civics': 3,
+    'Computer Studies': 2
+  };
+
+  Object.entries(defaultAllocations).forEach(([sub, cnt]) => {
+    if (!subjectTargetMap[sub]) {
+      subjectTargetMap[sub] = cnt;
+    }
+  });
+
+  const standardSubjects = Object.keys(subjectTargetMap);
 
   let nextId = Date.now() + Math.floor(Math.random() * 10000);
 
@@ -171,11 +211,34 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
     }
   });
 
+  // Track allocation counts per subject
+  const totalAllocatedPerSubject: Record<string, number> = {};
+  standardSubjects.forEach(s => { totalAllocatedPerSubject[s] = 0; });
+
   targetClassList.forEach(target => {
-    let subjectCycleIndex = 0;
+    // Build subject bucket for this class according to subject period quotas
+    const classQuotaMap: Record<string, number> = {};
+    if (req.subjectPeriodAllocations && req.subjectPeriodAllocations.length > 0) {
+      req.subjectPeriodAllocations
+        .filter(spa => !spa.className || spa.className === target.className || spa.className === 'All')
+        .forEach(spa => {
+          classQuotaMap[spa.subject.trim()] = Number(spa.periodsPerWeek) || 0;
+        });
+    }
+
+    // Fill missing with subjectTargetMap
+    standardSubjects.forEach(sub => {
+      if (!classQuotaMap[sub]) {
+        classQuotaMap[sub] = subjectTargetMap[sub] || 3;
+      }
+    });
+
+    const classAllocatedCount: Record<string, number> = {};
+    Object.keys(classQuotaMap).forEach(k => { classAllocatedCount[k] = 0; });
 
     targetDays.forEach(day => {
       const dayPeriods = periodsByDay[day] || [];
+      const dailySubjectCount: Record<string, number> = {};
 
       dayPeriods.forEach(p => {
         const periodKey = `${p.name} (${p.start}-${p.end})`;
@@ -198,6 +261,10 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
             });
             if (existing.teacherId) {
               teacherLoadMap[existing.teacherId] = (teacherLoadMap[existing.teacherId] || 0) + 1;
+            }
+            if (existing.subject) {
+              classAllocatedCount[existing.subject] = (classAllocatedCount[existing.subject] || 0) + 1;
+              totalAllocatedPerSubject[existing.subject] = (totalAllocatedPerSubject[existing.subject] || 0) + 1;
             }
             return;
           }
@@ -268,37 +335,46 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
           return;
         }
 
-        let chosenSubject = standardSubjects[subjectCycleIndex % standardSubjects.length];
-        subjectCycleIndex++;
+        // Smart selection based on remaining quota for this class
+        const candidateSubjects = Object.keys(classQuotaMap).filter(sub => {
+          const targetPeriods = classQuotaMap[sub] || 0;
+          const currentAllocated = classAllocatedCount[sub] || 0;
+          const todayCount = dailySubjectCount[sub] || 0;
+          return currentAllocated < targetPeriods && todayCount < 2; // max 2 per day
+        });
 
+        let chosenSubject = '';
         let chosenTeacher: (typeof req.teachers)[0] | undefined;
-        const normChosenSub = chosenSubject.toLowerCase();
-        let qualifiedTeachers = subjectToTeachers[normChosenSub] || [];
+        const dayBusy = busyTeachers[day]?.[periodKey] || new Set();
 
-        if (qualifiedTeachers.length === 0) {
-          qualifiedTeachers = req.teachers.filter(t => 
-            t.subjects.some(s => s.toLowerCase().includes(normChosenSub) || normChosenSub.includes(s.toLowerCase()))
-          );
-        }
+        // Try candidate subjects that still need periods
+        const poolToTry = candidateSubjects.length > 0 ? candidateSubjects : Object.keys(classQuotaMap);
+        
+        for (const sub of poolToTry) {
+          const normSub = sub.toLowerCase();
+          let qualifiedTeachers = subjectToTeachers[normSub] || [];
+          if (qualifiedTeachers.length === 0) {
+            qualifiedTeachers = req.teachers.filter(t => 
+              t.subjects.some(s => s.toLowerCase().includes(normSub) || normSub.includes(s.toLowerCase()))
+            );
+          }
 
-        if (qualifiedTeachers.length > 0) {
-          const dayBusy = busyTeachers[day]?.[periodKey] || new Set();
           const availableTeachers = qualifiedTeachers.filter(t => !dayBusy.has(t.id));
-
           if (availableTeachers.length > 0) {
             availableTeachers.sort((a, b) => (teacherLoadMap[a.id] || 0) - (teacherLoadMap[b.id] || 0));
+            chosenSubject = sub;
             chosenTeacher = availableTeachers[0];
-          } else {
-            for (let retry = 0; retry < standardSubjects.length; retry++) {
-              const altSub = standardSubjects[(subjectCycleIndex + retry) % standardSubjects.length];
-              const altTeachers = (subjectToTeachers[altSub.toLowerCase()] || []).filter(t => !dayBusy.has(t.id));
-              if (altTeachers.length > 0) {
-                altTeachers.sort((a, b) => (teacherLoadMap[a.id] || 0) - (teacherLoadMap[b.id] || 0));
-                chosenSubject = altSub;
-                chosenTeacher = altTeachers[0];
-                break;
-              }
-            }
+            break;
+          }
+        }
+
+        // Fallback if all specialized teachers are busy
+        if (!chosenSubject) {
+          chosenSubject = standardSubjects[0] || 'General Studies';
+          const anyAvailable = req.teachers.filter(t => !dayBusy.has(t.id));
+          if (anyAvailable.length > 0) {
+            anyAvailable.sort((a, b) => (teacherLoadMap[a.id] || 0) - (teacherLoadMap[b.id] || 0));
+            chosenTeacher = anyAvailable[0];
           }
         }
 
@@ -309,6 +385,10 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
           busyTeachers[day][periodKey].add(chosenTeacher.id);
           teacherLoadMap[chosenTeacher.id] = (teacherLoadMap[chosenTeacher.id] || 0) + 1;
         }
+
+        classAllocatedCount[chosenSubject] = (classAllocatedCount[chosenSubject] || 0) + 1;
+        totalAllocatedPerSubject[chosenSubject] = (totalAllocatedPerSubject[chosenSubject] || 0) + 1;
+        dailySubjectCount[chosenSubject] = (dailySubjectCount[chosenSubject] || 0) + 1;
 
         generatedAssignments.push({
           id: ++nextId,
@@ -324,6 +404,19 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
         });
       });
     });
+  });
+
+  const subjectQuotaProgress: SubjectQuotaProgress[] = Object.keys(subjectTargetMap).map(sub => {
+    const target = subjectTargetMap[sub] || 1;
+    // Calculate average allocated per stream
+    const totalAllocated = totalAllocatedPerSubject[sub] || 0;
+    const avgPerClass = targetClassList.length > 0 ? Math.round(totalAllocated / targetClassList.length) : totalAllocated;
+    return {
+      subject: sub,
+      targetPeriods: target,
+      allocatedPeriods: avgPerClass,
+      percentage: Math.min(100, Math.round((avgPerClass / target) * 100))
+    };
   });
 
   const teacherWorkload = req.teachers.map(t => ({
@@ -369,6 +462,7 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
       'Preserved scheduled institutional breaks, sports afternoons, and religious devotion slots.'
     ],
     teacherWorkload,
+    subjectQuotaProgress,
     classCoverage
   };
 }
@@ -410,25 +504,46 @@ export async function generateAITimetable(req: GenerateTimetableRequest): Promis
       .map(s => `- ${s.className}: ${s.streams.join(', ')}`)
       .join('\n');
 
+    const baseSource = (req.baseAssignments && req.baseAssignments.length > 0)
+      ? req.baseAssignments
+      : (req.existingAssignments && req.existingAssignments.length > 0 ? req.existingAssignments : []);
+
+    const baseAssignmentsStr = baseSource
+      .filter(a => a.activityType && a.activityType !== 'academic')
+      .slice(0, 40)
+      .map(a => `- Day: ${a.day}, Period: ${a.period}, Activity: ${a.subject} (${a.activityType}), Class: ${a.className || 'All'}`)
+      .join('\n');
+
+    const subjectAllocationsStr = req.subjectPeriodAllocations && req.subjectPeriodAllocations.length > 0
+      ? req.subjectPeriodAllocations.map(spa => `- Subject: ${spa.subject}, Required Periods/Week: ${spa.periodsPerWeek} (Class: ${spa.className || 'All'})`).join('\n')
+      : 'Mathematics: 6, English Language: 5, Kiswahili: 4, Biology: 4, Chemistry: 4, Physics: 4, Geography: 3, History: 3, Civics: 3, Computer Studies: 2';
+
     const promptText = `
-You are the Academic Dean and Timetable Optimization Engine for a top-tier school in Tanzania.
+You are the Academic Dean and Timetable Optimization Engine for a school in Tanzania.
 Your task is to generate a comprehensive, clash-free, pedagogically sound weekly timetable schedule.
 
 ### RULES & CONSTRAINTS:
 1. NO TEACHER DOUBLE-BOOKING: A teacher can NEVER teach more than one class stream during the same day and period.
 2. STRICT SUBJECT SPECIALIZATION: Assign teachers ONLY to subjects in their declared subject expertise list.
-3. BALANCED COGNITIVE LOAD:
+3. SUBJECT PERIOD QUOTAS:
+   Strictly distribute the number of periods per week for each subject according to the configured subject allocations below.
+   Ensure core subjects are distributed evenly throughout the week (no 4 periods of the same subject on one day).
+4. BALANCED COGNITIVE LOAD:
    - Schedule demanding subjects (Mathematics, Physics, Chemistry, Biology, English) primarily in morning periods (Periods 1 to 4).
-   - Distribute heavy subjects evenly across Monday through Friday (avoid placing 4 periods of Math on the same day).
-4. SPECIAL PERIODS:
-   - Wednesday afternoon (Period 7 / after 14:00) is dedicated to "Sports and Games".
-   - Friday afternoon is dedicated to "Religion / Devotion" or "Environmental Day".
-5. CLASS COVERAGE:
+5. SPECIAL & EXTRA-CURRICULAR PERIODS:
+   - Preserve all predefined breaks, lunch, sports afternoons (e.g. Wednesday Period 7), and religious devotion (Friday afternoon).
+6. CLASS COVERAGE:
    - Target Scope: Class "${targetClass}", Stream "${targetStream}" across days: ${targetDays.join(', ')}.
 ${req.options?.customPrompt ? `\nUSER SPECIAL INSTRUCTION: ${req.options.customPrompt}\n` : ''}
 
-### REGISTERED FACULTY & SUBJECT EXPERTISE:
+### REGISTERED FACULTY & DECLARED SUBJECTS:
 ${teachersListStr}
+
+### SUBJECT PERIOD ALLOCATIONS (REQUIRED PERIODS PER WEEK):
+${subjectAllocationsStr}
+
+### PREDEFINED BREAKS & EXTRA-CURRICULAR SLOTS (DO NOT OVERWRITE):
+${baseAssignmentsStr || 'Morning Break (Tea/Chai), Lunch Break, Sports and Games (Wed afternoon), Devotion (Fri afternoon)'}
 
 ### TIMETABLE PERIOD DEFINITIONS:
 ${periodsListStr || 'Standard 7 periods per day: Period 1 (08:00-08:40) to Period 7 (14:00-14:40)'}
@@ -535,6 +650,67 @@ Respond strictly with a JSON object adhering to this schema:
       });
     });
 
+    // Merge preserved base/extra-curricular slots so breaks and special periods are never lost
+    const existingSlotKeys = new Set(validatedAssignments.map(a => `${a.className}|${a.stream}|${a.day}|${a.period}`));
+    baseSource.forEach((ba: any) => {
+      const key = `${ba.className}|${ba.stream}|${ba.day}|${ba.period}`;
+      const isExtra = ba.activityType && ba.activityType !== 'academic';
+      if (isExtra && !existingSlotKeys.has(key)) {
+        validatedAssignments.push({
+          id: ++nextId,
+          className: ba.className || targetClass,
+          stream: ba.stream || 'STREAM A',
+          day: ba.day,
+          period: ba.period,
+          periodName: ba.periodName || ba.period?.split(' (')[0],
+          subject: ba.subject,
+          teacherId: ba.teacherId,
+          room: ba.room,
+          activityType: ba.activityType,
+          customNote: ba.customNote
+        });
+        existingSlotKeys.add(key);
+      }
+    });
+
+    // Compute subjectQuotaProgress for Gemini AI output
+    const subjectTargetMap: Record<string, number> = {};
+    if (req.subjectPeriodAllocations && req.subjectPeriodAllocations.length > 0) {
+      req.subjectPeriodAllocations.forEach(spa => {
+        const sub = spa.subject.trim();
+        const p = Number(spa.periodsPerWeek) || 0;
+        if (p > 0) subjectTargetMap[sub] = Math.max(subjectTargetMap[sub] || 0, p);
+      });
+    } else {
+      subjectTargetMap['Mathematics'] = 6;
+      subjectTargetMap['English Language'] = 5;
+      subjectTargetMap['Kiswahili'] = 4;
+      subjectTargetMap['Biology'] = 4;
+      subjectTargetMap['Chemistry'] = 4;
+      subjectTargetMap['Physics'] = 4;
+    }
+
+    const totalAllocatedPerSubject: Record<string, number> = {};
+    Object.keys(subjectTargetMap).forEach(s => { totalAllocatedPerSubject[s] = 0; });
+    validatedAssignments.forEach(a => {
+      if (a.subject && totalAllocatedPerSubject[a.subject] !== undefined) {
+        totalAllocatedPerSubject[a.subject]++;
+      }
+    });
+
+    const uniqueClassesCount = new Set(validatedAssignments.map(a => `${a.className}_${a.stream}`)).size || 1;
+    const subjectQuotaProgress: SubjectQuotaProgress[] = Object.keys(subjectTargetMap).map(sub => {
+      const target = subjectTargetMap[sub] || 1;
+      const total = totalAllocatedPerSubject[sub] || 0;
+      const avg = Math.round(total / uniqueClassesCount);
+      return {
+        subject: sub,
+        targetPeriods: target,
+        allocatedPeriods: avg,
+        percentage: Math.min(100, Math.round((avg / target) * 100))
+      };
+    });
+
     const teacherWorkload = req.teachers.map(t => ({
       teacherId: t.id,
       teacherName: t.name,
@@ -579,6 +755,7 @@ Respond strictly with a JSON object adhering to this schema:
             'Clashes verified and eliminated across all parallel stream classrooms.'
           ],
       teacherWorkload,
+      subjectQuotaProgress,
       classCoverage
     };
   } catch (error) {
