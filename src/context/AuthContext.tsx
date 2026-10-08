@@ -529,6 +529,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (typeof window !== 'undefined') {
       safeSetItem(window.sessionStorage, 'haby_explicit_logout', 'true');
       safeRemoveItem(window.sessionStorage, 'haby_demo_user');
+      safeRemoveItem(window.sessionStorage, 'haby_school_id');
+      safeRemoveItem(window.localStorage, 'currentSchoolId');
+      safeRemoveItem(window.localStorage, 'schoolId');
     }
     setUserAccount(null);
     setUser(null);

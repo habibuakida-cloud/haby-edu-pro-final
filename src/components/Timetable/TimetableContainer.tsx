@@ -620,7 +620,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         @media print {
           @page {
             size: ${printOrientation};
-            margin: 6mm 6mm;
+            margin: 5mm;
           }
 
           body * {
@@ -669,22 +669,24 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           .master-timetable-container table {
             width: 100% !important;
             border-collapse: collapse !important;
-            page-break-inside: auto !important;
-            break-inside: auto !important;
-            font-size: 8pt !important;
+            table-layout: fixed !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            font-size: 7pt !important;
             background: #ffffff !important;
             color: #000000 !important;
-            margin-top: 4px !important;
-            margin-bottom: 6px !important;
+            margin: 0 !important;
           }
 
           .master-timetable-container th,
           .master-timetable-container td {
             border: 1px solid #000000 !important;
-            padding: 3px 4px !important;
-            font-size: 8pt !important;
+            padding: 2px !important;
+            font-size: 7pt !important;
             color: #000000 !important;
             text-align: center !important;
+            overflow: hidden !important;
+            word-wrap: break-word !important;
           }
 
           .master-timetable-container thead th {

@@ -312,9 +312,9 @@ export default function App() {
           const updatedState: AppData = {
             ...prev,
             ...remoteData,
-            streamSettings: cleanStreamSettings !== undefined ? cleanStreamSettings : prev.streamSettings,
-            periodSettings: cleanPeriodSettings !== undefined ? cleanPeriodSettings : prev.periodSettings,
-            timetableAssignments: mappedTimetableAssignments !== undefined ? mappedTimetableAssignments : prev.timetableAssignments,
+            streamSettings: (cleanStreamSettings !== undefined && Array.isArray(cleanStreamSettings) && cleanStreamSettings.length > 0) ? cleanStreamSettings : prev.streamSettings,
+            periodSettings: (cleanPeriodSettings !== undefined && Array.isArray(cleanPeriodSettings) && cleanPeriodSettings.length > 0) ? cleanPeriodSettings : prev.periodSettings,
+            timetableAssignments: (mappedTimetableAssignments !== undefined && Array.isArray(mappedTimetableAssignments) && mappedTimetableAssignments.length > 0) ? mappedTimetableAssignments : prev.timetableAssignments,
             students: remoteStudents.length > 0 ? remoteStudents : prev.students,
             teachers: remoteTeachers.length > 0 ? remoteTeachers : prev.teachers,
             exams: remoteExams.length > 0 ? remoteExams : prev.exams,
@@ -323,11 +323,11 @@ export default function App() {
             activityLogs: remoteActivity.length > 0 ? remoteActivity : prev.activityLogs,
             disciplineRecords: remoteDiscipline.length > 0 ? remoteDiscipline : prev.disciplineRecords,
             examinationRecords: recData.length > 0 ? recData : prev.examinationRecords,
-            schemesOfWork: rawSchoolData.schemesOfWork !== undefined ? rawSchoolData.schemesOfWork : (rawSchoolData.schemes_of_work !== undefined ? rawSchoolData.schemes_of_work : prev.schemesOfWork),
-            lessonPlans: rawSchoolData.lessonPlans !== undefined ? rawSchoolData.lessonPlans : (rawSchoolData.lesson_plans !== undefined ? rawSchoolData.lesson_plans : prev.lessonPlans),
-            teacherEvaluations: rawSchoolData.teacherEvaluations !== undefined ? rawSchoolData.teacherEvaluations : (rawSchoolData.teacher_evaluations !== undefined ? rawSchoolData.teacher_evaluations : prev.teacherEvaluations),
-            savedTimetableRecords: rawSchoolData.savedTimetableRecords !== undefined ? rawSchoolData.savedTimetableRecords : (rawSchoolData.saved_timetable_records !== undefined ? rawSchoolData.saved_timetable_records : prev.savedTimetableRecords),
-            savedInvigilationRecords: rawSchoolData.savedInvigilationRecords !== undefined ? rawSchoolData.savedInvigilationRecords : (rawSchoolData.saved_invigilation_records !== undefined ? rawSchoolData.saved_invigilation_records : prev.savedInvigilationRecords),
+            schemesOfWork: (rawSchoolData.schemesOfWork !== undefined && Array.isArray(rawSchoolData.schemesOfWork) && rawSchoolData.schemesOfWork.length > 0) ? rawSchoolData.schemesOfWork : ( (rawSchoolData.schemes_of_work !== undefined && Array.isArray(rawSchoolData.schemes_of_work) && rawSchoolData.schemes_of_work.length > 0) ? rawSchoolData.schemes_of_work : prev.schemesOfWork),
+            lessonPlans: (rawSchoolData.lessonPlans !== undefined && Array.isArray(rawSchoolData.lessonPlans) && rawSchoolData.lessonPlans.length > 0) ? rawSchoolData.lessonPlans : ( (rawSchoolData.lesson_plans !== undefined && Array.isArray(rawSchoolData.lesson_plans) && rawSchoolData.lesson_plans.length > 0) ? rawSchoolData.lesson_plans : prev.lessonPlans),
+            teacherEvaluations: (rawSchoolData.teacherEvaluations !== undefined && Array.isArray(rawSchoolData.teacherEvaluations) && rawSchoolData.teacherEvaluations.length > 0) ? rawSchoolData.teacherEvaluations : ( (rawSchoolData.teacher_evaluations !== undefined && Array.isArray(rawSchoolData.teacher_evaluations) && rawSchoolData.teacher_evaluations.length > 0) ? rawSchoolData.teacher_evaluations : prev.teacherEvaluations),
+            savedTimetableRecords: (rawSchoolData.savedTimetableRecords !== undefined && Array.isArray(rawSchoolData.savedTimetableRecords) && rawSchoolData.savedTimetableRecords.length > 0) ? rawSchoolData.savedTimetableRecords : ( (rawSchoolData.saved_timetable_records !== undefined && Array.isArray(rawSchoolData.saved_timetable_records) && rawSchoolData.saved_timetable_records.length > 0) ? rawSchoolData.saved_timetable_records : prev.savedTimetableRecords),
+            savedInvigilationRecords: (rawSchoolData.savedInvigilationRecords !== undefined && Array.isArray(rawSchoolData.savedInvigilationRecords) && rawSchoolData.savedInvigilationRecords.length > 0) ? rawSchoolData.savedInvigilationRecords : ( (rawSchoolData.saved_invigilation_records !== undefined && Array.isArray(rawSchoolData.saved_invigilation_records) && rawSchoolData.saved_invigilation_records.length > 0) ? rawSchoolData.saved_invigilation_records : prev.savedInvigilationRecords),
           };
 
           setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
