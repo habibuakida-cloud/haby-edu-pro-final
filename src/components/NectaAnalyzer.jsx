@@ -61,12 +61,37 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
   const [saveStatus, setSaveStatus] = useState(null); // { type: 'success' | 'error', message: string }
   const [isSavingToDb, setIsSavingToDb] = useState(false);
 
+  // Quick paste & analyze helper from clipboard
+  const handlePasteClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        const cleanText = text.trim();
+        setNectaUrl(cleanText);
+        if (cleanText.includes('http://') || cleanText.includes('https://') || cleanText.includes('necta.go.tz') || cleanText.includes('.htm')) {
+          handleFetchUrl(cleanText);
+        } else {
+          setInputText(cleanText);
+          setImportMethod('text');
+        }
+      }
+    } catch (err) {
+      console.warn('Clipboard access not granted:', err);
+      alert('Tafadhali tumia Ctrl+V au Pasting ya kawaida kuweka link.');
+    }
+  };
+
   // Fetch and parse results directly from NECTA URL
   const handleFetchUrl = async (overrideUrl) => {
-    const targetUrl = (overrideUrl || nectaUrl || '').trim();
+    let targetUrl = (overrideUrl || nectaUrl || '').trim();
     if (!targetUrl) {
       alert('Tafadhali ingiza au bandika link ya matokeo ya NECTA (URL).');
       return;
+    }
+
+    if (!targetUrl.startsWith('http://') && !targetUrl.startsWith('https://')) {
+      targetUrl = 'https://' + targetUrl;
+      setNectaUrl(targetUrl);
     }
 
     setSaveStatus(null);
@@ -778,6 +803,15 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
                     className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
+                <button
+                  type="button"
+                  onClick={handlePasteClipboard}
+                  className="w-full sm:w-auto px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl border border-slate-300 transition flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                  title="Bandika Link kutoka Clipboard"
+                >
+                  <ClipboardCopy className="w-4 h-4 text-indigo-600" />
+                  <span>Bandika Link</span>
+                </button>
                 <button
                   type="button"
                   disabled={isFetchingUrl}
