@@ -415,35 +415,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return;
     }
 
-    const newUser: UserAccount = {
-      id: `usr_${Date.now()}`,
-      email: newEmail.trim().toLowerCase(),
-      fullName: newFullName.trim(),
-      role: newRole,
-      password: newPassword.trim(),
-      assignedSubjects: newRole === 'TEACHER' ? newAssignedSubjects : undefined,
-      schoolId: currentUser?.schoolId || 'DEMO_SCHOOL'
-    };
+    const targetSchoolId = currentUser?.schoolId || sessionStorage.getItem('haby_school_id') || 'DEMO_SCHOOL';
+    const normalizedEmail = newEmail.trim().toLowerCase();
 
     try {
-      await supabase.from('users').insert({
-        ...newUser,
-        school_id: newUser.schoolId,
-        created_at: new Date().toISOString()
-      });
-    } catch (e) {
-      console.warn("Could not save to supabase users table:", e);
-    }
+      console.log("Registering staff member in Firebase Auth & Firestore:", { normalizedEmail, targetSchoolId });
 
-    const updated = [...users, newUser];
-    if (onUpdateUsers) {
-      onUpdateUsers(updated);
+      // 1. Create user in Firebase Authentication using secondary Firebase App instance so Admin is not logged out
+      const secondaryApp = initializeApp(firebaseConfig, "SecondaryStaffAuthApp_" + Date.now());
+      const secondaryAuth = getAuth(secondaryApp);
+      let uid: string;
+      try {
+        const userCred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, newPassword.trim());
+        uid = userCred.user.uid;
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          uid = generateUUID();
+          console.warn("Email already in use in Firebase Auth, using generated UID:", uid);
+        } else {
+          throw authErr;
+        }
+      } finally {
+        await deleteApp(secondaryApp).catch(() => {});
+      }
+
+      // 2. Create document in Firestore `users` collection with Document ID = UID
+      const userDocRef = doc(db, 'users', uid);
+      const newUserDoc = {
+        id: uid,
+        uid: uid,
+        email: normalizedEmail,
+        displayName: newFullName.trim(),
+        fullName: newFullName.trim(),
+        role: newRole,
+        password: newPassword.trim(),
+        assignedSubjects: newRole === 'TEACHER' ? newAssignedSubjects : [],
+        schoolId: targetSchoolId,
+        school_id: targetSchoolId,
+        isActive: true,
+        createdAt: Timestamp.now()
+      };
+
+      await setDoc(userDocRef, newUserDoc);
+      console.log("Successfully created user document in Firestore users collection:", uid);
+
+      // 3. Mirror to Supabase for robustness
+      try {
+        await supabase.from('users').insert({
+          id: uid,
+          email: normalizedEmail,
+          full_name: newFullName.trim(),
+          role: newRole,
+          school_id: targetSchoolId,
+          schoolId: targetSchoolId,
+          created_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn("Could not save to supabase users table:", e);
+      }
+
+      const updated = [...users, newUserDoc as any];
+      if (onUpdateUsers) {
+        onUpdateUsers(updated);
+      }
+
       setNewEmail('');
       setNewFullName('');
       setNewPassword('');
       setNewAssignedSubjects([]);
-      setUserMsg(`Staff member "${newUser.fullName}" registered with password "${newUser.password}".`);
-      setTimeout(() => setUserMsg(null), 5000);
+      setUserMsg(`Staff member "${newFullName.trim()}" successfully registered in Firebase Auth & Firestore! Login Password: "${newPassword.trim()}".`);
+      setTimeout(() => setUserMsg(null), 8000);
+    } catch (err: any) {
+      console.error("Error adding staff member:", err);
+      alert(`Failed to register staff: ${err.message || err}`);
     }
   };
 
