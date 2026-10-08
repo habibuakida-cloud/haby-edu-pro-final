@@ -152,9 +152,6 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     } else if (act.id === 'debates') {
       start = '14:00';
       end = '15:00';
-    } else if (act.id === 'remedial') {
-      start = '14:00';
-      end = '14:40';
     } else if (act.id === 'assembly') {
       start = '07:30';
       end = '08:00';

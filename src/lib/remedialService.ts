@@ -120,6 +120,77 @@ export const saveRemedialTimetable = async (schoolId: string, entry: RemedialTim
   return { data: fullEntry, error: null };
 };
 
+export const saveRemedialTimetableBatch = async (schoolId: string, entries: RemedialTimetableEntry[]) => {
+  const preparedEntries = entries.map(entry => {
+    const entryId = entry.id || `rem_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+    const periodTime = entry.start_time && entry.end_time ? `${entry.start_time}-${entry.end_time}` : (entry.period_time || '16:00-17:00');
+    return {
+      ...entry,
+      id: entryId,
+      period_time: periodTime,
+      school_id: schoolId,
+      created_at: entry.created_at || new Date().toISOString()
+    };
+  });
+
+  // 1. Supabase upsert
+  try {
+    const { error } = await supabase.from('remedial_timetable').upsert(preparedEntries, { onConflict: 'id' });
+    if (error) console.warn('Supabase batch remedial save error:', error);
+  } catch (e) {
+    console.warn('Supabase batch exception:', e);
+  }
+
+  // 2. Firestore backup
+  try {
+    for (const item of preparedEntries) {
+      const cleanDoc = sanitizeForFirestore({
+        ...item,
+        updatedAt: Timestamp.now()
+      });
+      await setDoc(doc(db, 'remedial_timetable', item.id!), cleanDoc, { merge: true });
+    }
+  } catch (e) {
+    console.warn('Firestore batch error:', e);
+  }
+
+  return { data: preparedEntries, error: null };
+};
+
+export const clearRemedialTimetable = async (schoolId: string, className?: string, streamName?: string) => {
+  // 1. Supabase delete
+  try {
+    let q = supabase.from('remedial_timetable').delete().eq('school_id', schoolId);
+    if (className && className !== 'ALL') {
+      q = q.eq('class_name', className);
+    }
+    if (streamName && streamName !== 'ALL' && streamName !== 'All Streams') {
+      q = q.eq('stream', streamName);
+    }
+    await q;
+  } catch (e) {
+    console.warn('Supabase clear error:', e);
+  }
+
+  // 2. Firestore delete matching
+  try {
+    const qFs = query(collection(db, 'remedial_timetable'), where('school_id', '==', schoolId));
+    const snap = await getDocs(qFs);
+    for (const d of snap.docs) {
+      const data = d.data();
+      const matchClass = !className || className === 'ALL' || data.class_name?.toLowerCase() === className.toLowerCase();
+      const matchStream = !streamName || streamName === 'ALL' || streamName === 'All Streams' || data.stream?.toLowerCase() === streamName.toLowerCase();
+      if (matchClass && matchStream) {
+        await deleteDoc(d.ref);
+      }
+    }
+  } catch (e) {
+    console.warn('Firestore clear error:', e);
+  }
+
+  return { success: true };
+};
+
 export const getRemedialTimetable = async (schoolId: string, className?: string) => {
   // 1. Prioritize Supabase (The real SAAS database)
   try {

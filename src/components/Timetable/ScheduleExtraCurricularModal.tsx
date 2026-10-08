@@ -130,8 +130,6 @@ export const ScheduleExtraCurricularModal: React.FC<ScheduleExtraCurricularModal
         return { start: '14:00', end: '15:00', periodName: 'Period 7 (Environment)', room: 'School Compound' };
       case 'debates':
         return { start: '14:00', end: '15:00', periodName: 'Debates & Speech', room: 'Main School Hall' };
-      case 'remedial':
-        return { start: '14:00', end: '14:40', periodName: 'Period 7 (Remedial)', room: 'Assigned Classrooms' };
       case 'assembly':
         return { start: '07:30', end: '08:00', periodName: 'General Assembly', room: 'Assembly Grounds' };
       case 'clubs':
@@ -478,7 +476,7 @@ export const ScheduleExtraCurricularModal: React.FC<ScheduleExtraCurricularModal
                 <div>
                   <span className="text-xs font-bold text-slate-800 block">Single Class & Stream Only</span>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    Schedule for one specific form stream (e.g. Form 1 STREAM A Remedial or Debates).
+                    Schedule for one specific form stream (e.g. Form 1 STREAM A Sports or Debates).
                   </p>
                 </div>
               </label>

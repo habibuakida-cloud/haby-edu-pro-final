@@ -200,7 +200,6 @@ export const SUBJECT_LIST = [
   'Environmental Day',
   'Sports and Games',
   'Debates',
-  'Remedial Classes',
   'General Assembly',
   'Clubs & Societies',
   'Library & Private Study',
@@ -218,7 +217,6 @@ export const EXTRA_CURRICULAR_ACTIVITIES = [
   { id: 'environmental', name: 'Environmental Day', icon: 'Trees', color: '#059669', bg: '#ecfdf5', border: '#a7f3d0', text: '#065f46', cellBg: '#ecfdf5' },
   { id: 'sports', name: 'Sports and Games', icon: 'Trophy', color: '#ea580c', bg: '#fff7ed', border: '#fed7aa', text: '#9a3412', cellBg: '#fff7ed' },
   { id: 'debates', name: 'Debates & Public Speaking', icon: 'MessageSquare', color: '#7c3aed', bg: '#f5f3ff', border: '#ddd6fe', text: '#5b21b6', cellBg: '#f5f3ff' },
-  { id: 'remedial', name: 'Remedial Classes', icon: 'BookOpen', color: '#2563eb', bg: '#eff6ff', border: '#bfdbfe', text: '#1d4ed8', cellBg: '#eff6ff' },
   { id: 'assembly', name: 'General Assembly', icon: 'Users', color: '#4b5563', bg: '#f3f4f6', border: '#e5e7eb', text: '#1f2937', cellBg: '#f3f4f6' },
   { id: 'clubs', name: 'Clubs & Societies', icon: 'Sparkles', color: '#db2777', bg: '#fdf2f8', border: '#fbcfe8', text: '#9d174d', cellBg: '#fdf2f8' },
   { id: 'library', name: 'Library & Private Study', icon: 'Library', color: '#0d9488', bg: '#f0fdfa', border: '#99f6e4', text: '#115e59', cellBg: '#f0fdfa' }
@@ -496,7 +494,7 @@ export const TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS = [
   { id: 204, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 4 (10:20-11:00)', teacherId: 104, subject: 'Geography' },
   { id: 205, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 5 (11:20-12:00)', teacherId: 105, subject: 'Kiswahili' },
   { id: 206, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 6 (12:00-12:40)', teacherId: 106, subject: 'Computer Studies' },
-  { id: 207, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 7 (14:00-14:40)', teacherId: 101, subject: 'Remedial Classes', activityType: 'remedial' as const },
+  { id: 207, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 7 (14:00-14:40)', teacherId: 101, subject: 'Library & Private Study', activityType: 'library' as const },
 
   // Form 1 STREAM B
   { id: 208, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 1 (08:00-08:40)', teacherId: 102, subject: 'English Language' },
