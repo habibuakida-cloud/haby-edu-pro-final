@@ -19,6 +19,11 @@ import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { SUBJECT_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
 import { saveSchoolData } from '../lib/firestoreService';
+import { initializeApp, deleteApp } from 'firebase/app';
+import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
+import { doc, setDoc, Timestamp, collection, getDocs, query, where } from 'firebase/firestore';
+import { db } from '../lib/firebase';
+import firebaseConfig from '../../firebase-applet-config.json';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -519,26 +524,64 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const schoolDisplayName = targetSchool ? targetSchool.name : targetSchoolId;
       const normalizedEmail = adminEmail.trim().toLowerCase();
 
-      const newAdminUserId = generateUUID();
-      const newAdminUser = {
-        id: newAdminUserId,
+      console.log("Registering school admin in Firebase Auth & Firestore atomically:", { normalizedEmail, targetSchoolId });
+
+      // 1. Create user in Firebase Authentication using secondary Firebase App instance so Superadmin doesn't log out
+      const secondaryApp = initializeApp(firebaseConfig, "SecondaryAuthApp_" + Date.now());
+      const secondaryAuth = getAuth(secondaryApp);
+      let uid: string;
+      try {
+        const userCred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, adminPassword.trim());
+        uid = userCred.user.uid;
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          uid = generateUUID();
+          console.warn("Email already in use in Auth, using generated UID:", uid);
+        } else {
+          throw authErr;
+        }
+      } finally {
+        await deleteApp(secondaryApp).catch(() => {});
+      }
+
+      // 2. Create document in Firestore `users` collection with ID = UID
+      const userDocRef = doc(db, 'users', uid);
+      const userDocData = {
+        id: uid,
+        uid: uid,
+        email: normalizedEmail,
+        displayName: adminFullName.trim(),
+        fullName: adminFullName.trim(),
+        role: 'HEADMASTER',
+        schoolId: targetSchoolId,
+        school_id: targetSchoolId,
+        createdAt: Timestamp.now(),
+        isActive: true,
+        password: adminPassword.trim()
+      };
+
+      await setDoc(userDocRef, userDocData);
+      console.log("Successfully created user document in Firestore users collection:", uid);
+
+      // Also mirror to Supabase for robustness
+      await supabase.from('users').insert({
+        id: uid,
         email: normalizedEmail,
         full_name: adminFullName.trim(),
         role: 'HEADMASTER',
         school_id: targetSchoolId,
+        schoolId: targetSchoolId,
         created_at: new Date().toISOString()
-      };
+      }).catch(e => console.warn("Supabase user insert warning:", e));
 
-      const { error: userError } = await supabase.from('users').insert(newAdminUser);
-      if (userError) throw new Error(`Supabase User Error: ${userError.message}`);
-
-      await supabase.from('schools').update({
-        code: `ADM-${newAdminUserId.slice(0, 4)}`, // Optional: update something if needed
-      }).eq('id', targetSchoolId);
+      // Update local users list if provided
+      if (onUpdateUsers && users) {
+        onUpdateUsers([...users, userDocData as any]);
+      }
 
       setAdminRegisterMsg({
         type: 'success',
-        text: `School Administrator "${adminFullName.trim()}" registered successfully! They can now log in to manage "${schoolDisplayName}" and register their school staff.`,
+        text: `School Administrator "${adminFullName.trim()}" registered successfully! UID: ${uid}. They can now log in to manage "${schoolDisplayName}".`,
         creds: {
           email: normalizedEmail,
           pass: adminPassword.trim(),
@@ -555,6 +598,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         type: 'error',
         text: `Failed to register school admin: ${err.message || 'Firestore write error'}`
       });
+      alert(`Registration error: ${err.message || err}`);
     } finally {
       setRegisteringAdmin(false);
     }

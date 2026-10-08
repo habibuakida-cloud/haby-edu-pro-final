@@ -65,7 +65,7 @@ import {
 import { getSchoolData, saveSchoolData, subscribeSchoolData } from './lib/firestoreService';
 import { saveTimetableAssignments } from './lib/timetableService';
 import { Loader2, Shield, Menu, RotateCw, Check } from 'lucide-react';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
 
 const mergeById = (arr1: any[], arr2: any[]) => {
@@ -237,6 +237,23 @@ export default function App() {
       try {
         // Fetch Snapshot from Firestore as Single Source of Truth
         const firestoreData = await getSchoolData(schoolId).catch(() => null);
+
+        // Fetch users from Firestore users collection for this school
+        try {
+          const uQuery1 = query(collection(db, 'users'), where('schoolId', '==', schoolId));
+          const uSnap1 = await getDocs(uQuery1);
+          let schoolUsers = uSnap1.docs.map(d => ({ id: d.id, ...d.data() } as UserAccount));
+          if (schoolUsers.length === 0) {
+            const uQuery2 = query(collection(db, 'users'), where('school_id', '==', schoolId));
+            const uSnap2 = await getDocs(uQuery2);
+            schoolUsers = uSnap2.docs.map(d => ({ id: d.id, ...d.data() } as UserAccount));
+          }
+          if (schoolUsers.length > 0) {
+            setUsers(schoolUsers);
+          }
+        } catch (uErr) {
+          console.warn("Could not load users from Firestore:", uErr);
+        }
 
         const rawSchoolData = (firestoreData || {}) as Record<string, any>;
         const remoteData = { ...rawSchoolData } as Partial<AppData>;
