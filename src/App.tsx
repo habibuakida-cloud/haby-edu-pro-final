@@ -93,6 +93,12 @@ export default function App() {
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
   const [data, setData] = useState<AppData>(DEFAULT_APP_DATA);
 
+  useEffect(() => {
+    if (userAccount?.role === 'TEACHER' && activeView !== 'teacherportal') {
+      setActiveView('teacherportal');
+    }
+  }, [userAccount, activeView]);
+
   if (typeof window !== 'undefined') {
     const urlParams = new URLSearchParams(window.location.search);
     const verifyReg = urlParams.get('verifyStudent');

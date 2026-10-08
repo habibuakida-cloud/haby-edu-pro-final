@@ -122,6 +122,21 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   // Real-time search filtering across module titles, sub-modules and descriptions
   const filteredModuleGroups = useMemo(() => {
+    if (isTeacher) {
+      return [
+        {
+          id: 'teacher_portal_group',
+          title: 'TEACHER PORTAL',
+          icon: <BookOpen className="w-4 h-4" />,
+          iconColor: 'text-amber-400',
+          badgeBg: 'bg-amber-100 text-amber-800 border-amber-200',
+          subModules: [
+            { id: 'teacherportal', label: 'Sehemu ya Mwalimu (Teacher Hub)', description: 'Kuita majina, kuingiza marks, ripoti za darasa na ufuatiliaji wa vipindi', badge: 'MWALIMU' }
+          ]
+        }
+      ];
+    }
+
     if (!searchQuery.trim()) return MAIN_MODULE_GROUPS;
 
     const q = searchQuery.toLowerCase().trim();
@@ -141,7 +156,7 @@ export const Navigation: React.FC<NavigationProps> = ({
         subModules: matchingSub
       };
     }).filter(group => group.subModules.length > 0);
-  }, [searchQuery]);
+  }, [searchQuery, isTeacher]);
 
   // Total matching submodules count
   const totalMatchingSubModules = useMemo(() => {

@@ -77,7 +77,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'users' | 'audit' | 'network' | 'github' | 'backup' | 'dbhealth'>('periods');
   const [allSchools, setAllSchools] = useState<SchoolType[]>([]);
-  const { switchSchool } = useAuth();
+  const { switchSchool, createSchoolUser } = useAuth();
   const [schoolsLoading, setSchoolsLoading] = useState(false);
 
   // GitHub Integration State
@@ -419,18 +419,31 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     const normalizedEmail = newEmail.trim().toLowerCase();
 
     try {
-      // 1. Create secondary app so superadmin stays logged in
-      const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp-"+Date.now());
-      const secondaryAuth = getAuth(secondaryApp);
-      
-      // 2. Create Auth user
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, newPassword.trim());
-      const uid = cred.user.uid;
-      
-      // 3. Create Firestore user doc IN MAIN DB - THIS IS NOW INCLUDED
+      if (createSchoolUser) {
+        await createSchoolUser(normalizedEmail, newPassword.trim(), newFullName.trim(), newRole);
+      } else {
+        const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp-"+Date.now());
+        const secondaryAuth = getAuth(secondaryApp);
+        const cred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, newPassword.trim());
+        const uid = cred.user.uid;
+        await setDoc(doc(db, "users", uid), {
+          uid,
+          email: normalizedEmail,
+          displayName: newFullName.trim(),
+          fullName: newFullName.trim(),
+          role: String(newRole).toUpperCase(),
+          schoolId: targetSchoolId,
+          school_id: targetSchoolId,
+          isActive: true,
+          createdAt: serverTimestamp(),
+          createdBy: currentUser?.id || 'admin'
+        });
+        await signOut(secondaryAuth);
+        await deleteApp(secondaryApp);
+      }
+
       const newUserDoc = {
-        id: uid,
-        uid: uid,
+        id: 'usr_' + Date.now(),
         email: normalizedEmail,
         displayName: newFullName.trim(),
         fullName: newFullName.trim(),
@@ -438,33 +451,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         password: newPassword.trim(),
         assignedSubjects: newRole === 'TEACHER' ? newAssignedSubjects : [],
         schoolId: targetSchoolId,
-        school_id: targetSchoolId,
-        isActive: true,
-        createdAt: serverTimestamp(),
-        createdBy: currentUser?.id || currentUser?.email || 'admin'
+        isActive: true
       };
-
-      await setDoc(doc(db, "users", uid), newUserDoc);
-      console.log("Successfully created user document in Firestore users collection:", uid);
-      
-      // 4. Cleanup
-      await signOut(secondaryAuth);
-      await deleteApp(secondaryApp);
-
-      // 5. Mirror to Supabase for robustness
-      try {
-        await supabase.from('users').insert({
-          id: uid,
-          email: normalizedEmail,
-          full_name: newFullName.trim(),
-          role: String(newRole).toUpperCase(),
-          school_id: targetSchoolId,
-          schoolId: targetSchoolId,
-          created_at: new Date().toISOString()
-        });
-      } catch (e) {
-        console.warn("Could not save to supabase users table:", e);
-      }
 
       const updated = [...users, newUserDoc as any];
       if (onUpdateUsers) {
@@ -475,9 +463,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setNewFullName('');
       setNewPassword('');
       setNewAssignedSubjects([]);
-      setUserMsg("User created: " + uid);
+      setUserMsg("User created successfully in Auth & Firestore!");
       setTimeout(() => setUserMsg(null), 8000);
-      alert("User created: " + uid);
+      alert("User created successfully!");
       
     } catch (error: any) {
       console.error("ADD USER ERROR:", error);
