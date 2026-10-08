@@ -77,6 +77,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // GitHub Integration State
   const [githubToken, setGithubToken] = useState<string | null>(() => localStorage.getItem('haby_github_token'));
+  const [manualTokenInput, setManualTokenInput] = useState('');
   const [githubRepoName, setGithubRepoName] = useState<string>(() => localStorage.getItem('haby_github_repo') || 'habibuakida-cloud/haby-edu-pro-3A-pro');
   const [pushStatus, setPushStatus] = useState<'idle' | 'pushing' | 'success' | 'error'>('idle');
   const [pushError, setPushError] = useState<string | null>(null);
@@ -2240,11 +2241,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <button
                     type="button"
                     onClick={handleGithubConnect}
-                    className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95"
+                    className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 shadow-sm transition-all active:scale-95 cursor-pointer"
                   >
                     <Github className="w-4 h-4" />
-                    Connect your GitHub Account
+                    Connect via GitHub OAuth
                   </button>
+
+                  <div className="relative flex py-1 items-center">
+                    <div className="flex-grow border-t border-slate-200"></div>
+                    <span className="flex-shrink mx-2 text-[10px] font-bold text-slate-400 uppercase">Au Tumia Personal Token</span>
+                    <div className="flex-grow border-t border-slate-200"></div>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="text-[10px] font-black text-slate-500 uppercase tracking-wider block">GitHub Personal Access Token (classic / fine-grained):</label>
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        placeholder="ghp_xxxxxxxxxxxx"
+                        value={manualTokenInput}
+                        onChange={(e) => setManualTokenInput(e.target.value)}
+                        className="flex-1 px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-mono focus:ring-2 focus:ring-blue-500 outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!manualTokenInput.trim()) return;
+                          setGithubToken(manualTokenInput.trim());
+                          localStorage.setItem('haby_github_token', manualTokenInput.trim());
+                          setManualTokenInput('');
+                        }}
+                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold cursor-pointer transition-colors"
+                      >
+                        Hifadhi
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400">
+                      Unaweza kutengeneza token kwenye <b>GitHub &gt; Settings &gt; Developer Settings &gt; Personal access tokens</b> ukiweka ruhusa ya <code>repo</code>.
+                    </p>
+                  </div>
                 </div>
               )}
             </div>
