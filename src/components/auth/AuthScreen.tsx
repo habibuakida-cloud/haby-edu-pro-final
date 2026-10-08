@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { supabase } from '../../lib/supabaseClient';
-import { LogIn, School as SchoolIcon, Loader2, User, KeyRound, ShieldAlert, CheckCircle2, Eye, EyeOff, Shield, Phone, Lock, Award } from 'lucide-react';
+import { LogIn, School as SchoolIcon, Loader2, User, KeyRound, ShieldAlert, CheckCircle2, Eye, EyeOff, Shield, Phone, Lock, Award, ArrowRight } from 'lucide-react';
 import { HabyEduProLogo } from '../common/HabyEduProLogo';
 
 export const AuthScreen: React.FC = () => {

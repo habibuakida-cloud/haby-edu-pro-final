@@ -283,10 +283,10 @@ export const EditSlotModal: React.FC<EditSlotModalProps> = ({
             />
             <label htmlFor="isLockedPeriod" className="text-xs text-emerald-950 cursor-pointer">
               <span className="font-bold block flex items-center gap-1.5">
-                <span>🔒 Linda Kipindi hiki dhidi ya Auto-Generator (Lock from Auto-Generate)</span>
+                <span>🔒 Linda Kipindi hiki (Lock Lesson Slot)</span>
                 <span className="px-1.5 py-0.2 rounded bg-emerald-200 text-emerald-900 text-[10px] font-black uppercase">Manual Protection</span>
               </span>
-              Kipindi hiki kitalindwa na hakitafutwa wala kuingiliwa unapofanya Auto-Generate au AI scheduling.
+              Kipindi hiki kitalindwa na hakitafutwa wala kubadilishwa kimakosa wakati wa kupanga ratiba.
             </label>
           </div>
 

@@ -62,7 +62,7 @@ import {
   upsertRecord,
   getCurrentSchoolId
 } from './lib/supabaseClient';
-import { getSchoolData, subscribeSchoolData } from './lib/firestoreService';
+import { getSchoolData, saveSchoolData, subscribeSchoolData } from './lib/firestoreService';
 import { saveTimetableAssignments } from './lib/timetableService';
 import { Loader2, Shield, Menu, RotateCw, Check } from 'lucide-react';
 import { doc, setDoc } from 'firebase/firestore';
@@ -127,19 +127,20 @@ export default function App() {
   const debounceTimer = useRef<NodeJS.Timeout | undefined>(undefined);
   const [supabaseStudentCount, setSupabaseStudentCount] = useState<number | null>(null);
 
-  // Helper function to persist school state snapshot to Supabase
+  // Helper function to persist school state snapshot to Firestore & Supabase
   const saveSchoolDataToSupabase = async (schId: string, snapData: any) => {
     if (!schId) return;
     try {
-      // ONE SOURCE OF TRUTH: Relational data are REMOVED 
-      // from this JSON snapshot to ensure they only live in their respective tables.
       const payload = {
         id: schId,
         school_id: schId,
         school_info: snapData.schoolInfo || {},
         timetable_assignments: snapData.timetableAssignments || [],
+        timetableAssignments: snapData.timetableAssignments || [],
         period_settings: snapData.periodSettings || [],
+        periodSettings: snapData.periodSettings || [],
         stream_settings: snapData.streamSettings || [],
+        streamSettings: snapData.streamSettings || [],
         institutional_policy: snapData.institutionalPolicy || {},
         sessions: snapData.sessions || [],
         supervisors: snapData.supervisors || [],
@@ -150,9 +151,10 @@ export default function App() {
         updated_at: new Date().toISOString()
       };
       
-      await upsertRecord('school_data', payload, 'school_id');
+      // Save directly to Firestore as single source of truth for settings
+      await saveSchoolData(schId, payload);
     } catch (err) {
-      console.warn("Error saving school snapshot to Supabase school_data:", err);
+      console.warn("Error saving school snapshot:", err);
     }
   };
 
@@ -165,28 +167,12 @@ export default function App() {
 
     const schoolId = userAccount.schoolId;
     console.log("Current school_id:", schoolId);
-    // Removed localStorage.setItem for schoolId
     const schoolKey = `haby_school_data_${schoolId}`;
 
     // Check subscription
     if (userAccount?.schoolId) {
       getSchoolSubscription(userAccount.schoolId).then(async (sub) => {
         if (!sub) {
-          // Initialize trial for new school
-          const newSub = await initializeTrial(userAccount.schoolId);
-          setSubscription(newSub);
-        } else {
-          setSubscription(sub);
-        }
-        setCheckingSub(false);
-      });
-    }
-
-    // Check subscription
-    if (userAccount?.schoolId) {
-      getSchoolSubscription(userAccount.schoolId).then(async (sub) => {
-        if (!sub) {
-          // Initialize trial for new school
           const newSub = await initializeTrial(userAccount.schoolId);
           setSubscription(newSub);
         } else {
@@ -199,12 +185,26 @@ export default function App() {
     // Pre-populate state from IndexedDB cache immediately to respect user's deleted/configured state
     getCachedData(schoolKey).then(cached => {
       if (cached && typeof cached === 'object') {
+        // If cached periodSettings contains the old default 35 template periods, reset them to empty array so user starts fresh!
+        const isOldDefault35Periods = Array.isArray(cached.periodSettings) &&
+          cached.periodSettings.length === 35 &&
+          cached.periodSettings[0]?.name === 'Period 1' &&
+          cached.periodSettings[0]?.start === '08:00';
+
+        const isOldDefault17Streams = Array.isArray(cached.streamSettings) &&
+          cached.streamSettings.length === 17 &&
+          cached.streamSettings[0]?.className === 'Nursery';
+
+        const cleanPeriods = isOldDefault35Periods ? [] : (cached.periodSettings || []);
+        const cleanStreams = isOldDefault17Streams ? [] : (cached.streamSettings || []);
+        const cleanAssignments = isOldDefault35Periods ? [] : (cached.timetableAssignments || []);
+
         setData(prev => ({
           ...prev,
           ...cached,
-          streamSettings: cached.streamSettings || [],
-          periodSettings: cached.periodSettings || [],
-          timetableAssignments: cached.timetableAssignments || []
+          streamSettings: cleanStreams,
+          periodSettings: cleanPeriods,
+          timetableAssignments: cleanAssignments
         }));
       }
     }).catch(e => console.warn("Initial IDB cache load error:", e));
@@ -219,8 +219,8 @@ export default function App() {
       }
 
       try {
-        // Fetch Relational Data from Tables
-        const [studRes, recRes, teachRes, examRes, parentRes, psRes, actRes, discRes, gateRes, schoolDataRes] = await Promise.all([
+        // Fetch Relational Data from Tables + Firestore Snapshot
+        const [studRes, recRes, teachRes, examRes, parentRes, psRes, actRes, discRes, gateRes, schoolDataRes, firestoreData] = await Promise.all([
           supabase.from('students').select('*').eq('school_id', schoolId),
           supabase.from('exam_records').select('*').eq('school_id', schoolId),
           supabase.from('teachers').select('*').eq('school_id', schoolId),
@@ -230,7 +230,8 @@ export default function App() {
           supabase.from('activity_logs').select('*').eq('school_id', schoolId).order('timestamp', { ascending: false }).limit(100),
           supabase.from('discipline_records').select('*').eq('school_id', schoolId),
           supabase.from('gate_pass_logs').select('*').eq('school_id', schoolId).order('timestamp', { ascending: false }).limit(50),
-          supabase.from('school_data').select('*').eq('school_id', schoolId).maybeSingle()
+          supabase.from('school_data').select('*').eq('school_id', schoolId).maybeSingle(),
+          getSchoolData(schoolId).catch(() => null)
         ]);
 
         const studData = studRes?.data || [];
@@ -242,8 +243,14 @@ export default function App() {
         const actData = actRes?.data || [];
         const discData = discRes?.data || [];
         const gateData = gateRes?.data || [];
-        const rawSchoolData = (schoolDataRes?.data || {}) as Record<string, any>;
-        const remoteData = rawSchoolData as Partial<AppData>;
+        const rawSchoolData = (firestoreData || schoolDataRes?.data || {}) as Record<string, any>;
+        const remoteData = { ...rawSchoolData } as Partial<AppData>;
+        delete (remoteData as any).periodSettings;
+        delete (remoteData as any).period_settings;
+        delete (remoteData as any).streamSettings;
+        delete (remoteData as any).stream_settings;
+        delete (remoteData as any).timetableAssignments;
+        delete (remoteData as any).timetable_assignments;
 
         setSupabaseStudentCount(studData.length);
 
@@ -256,25 +263,36 @@ export default function App() {
         const remoteDiscipline = discData.map(d => fromSupabaseDiscipline(d));
         const remoteGatePass = gateData.map(l => fromSupabaseGatePass(l));
 
-        const mappedStreamSettings = rawSchoolData.stream_settings !== undefined 
-          ? rawSchoolData.stream_settings 
-          : (rawSchoolData.streamSettings !== undefined ? rawSchoolData.streamSettings : undefined);
+        const mappedStreamSettings = rawSchoolData.streamSettings !== undefined 
+          ? rawSchoolData.streamSettings 
+          : (rawSchoolData.stream_settings !== undefined ? rawSchoolData.stream_settings : undefined);
 
-        const mappedPeriodSettings = rawSchoolData.period_settings !== undefined 
-          ? rawSchoolData.period_settings 
-          : (rawSchoolData.periodSettings !== undefined ? rawSchoolData.periodSettings : undefined);
+        const mappedPeriodSettings = rawSchoolData.periodSettings !== undefined 
+          ? rawSchoolData.periodSettings 
+          : (rawSchoolData.period_settings !== undefined ? rawSchoolData.period_settings : undefined);
 
-        const mappedTimetableAssignments = rawSchoolData.timetable_assignments !== undefined 
-          ? rawSchoolData.timetable_assignments 
-          : (rawSchoolData.timetableAssignments !== undefined ? rawSchoolData.timetableAssignments : undefined);
+        const mappedTimetableAssignments = rawSchoolData.timetableAssignments !== undefined 
+          ? rawSchoolData.timetableAssignments 
+          : (rawSchoolData.timetable_assignments !== undefined ? rawSchoolData.timetable_assignments : undefined);
+
+        const isOld35Periods = Array.isArray(mappedPeriodSettings) &&
+          mappedPeriodSettings.length === 35 &&
+          mappedPeriodSettings[0]?.name === 'Period 1' &&
+          mappedPeriodSettings[0]?.start === '08:00';
+        const cleanPeriodSettings = isOld35Periods ? [] : mappedPeriodSettings;
+
+        const isOld17Streams = Array.isArray(mappedStreamSettings) &&
+          mappedStreamSettings.length === 17 &&
+          mappedStreamSettings[0]?.className === 'Nursery';
+        const cleanStreamSettings = isOld17Streams ? [] : mappedStreamSettings;
 
         setData(prev => {
           // Merge Table data with Snapshot settings
           const updatedState: AppData = {
             ...prev,
             ...remoteData,
-            streamSettings: mappedStreamSettings !== undefined ? mappedStreamSettings : prev.streamSettings,
-            periodSettings: mappedPeriodSettings !== undefined ? mappedPeriodSettings : prev.periodSettings,
+            streamSettings: cleanStreamSettings !== undefined ? cleanStreamSettings : prev.streamSettings,
+            periodSettings: cleanPeriodSettings !== undefined ? cleanPeriodSettings : prev.periodSettings,
             timetableAssignments: mappedTimetableAssignments !== undefined ? mappedTimetableAssignments : prev.timetableAssignments,
             students: remoteStudents.length > 0 ? remoteStudents : prev.students,
             teachers: remoteTeachers.length > 0 ? remoteTeachers : prev.teachers,
@@ -322,12 +340,6 @@ export default function App() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'parents', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
       .subscribe();
 
-    // Auto re-sync when window gains focus (e.g., opening on phone or switching tabs)
-    const handleWindowFocus = () => {
-      loadFromDatabase();
-    };
-    window.addEventListener('focus', handleWindowFocus);
-
     // Check school status from schools table
     Promise.resolve(supabase.from('schools').select('*').eq('id', schoolId).single())
       .then(({ data: sData }) => {
@@ -338,7 +350,6 @@ export default function App() {
       .catch((err: any) => console.warn("School status error:", err));
 
     return () => {
-      window.removeEventListener('focus', handleWindowFocus);
       supabase.removeChannel(studentsSub);
       supabase.removeChannel(teachersSub);
       supabase.removeChannel(examsSub);
@@ -450,9 +461,16 @@ export default function App() {
     setData(prev => {
       const nextData: AppData = { ...prev, ...updates };
 
+      // Immediately persist to IndexedDB so any fast navigation or reload retains changes
+      setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
+
+      // If periodSettings or streamSettings are directly modified, push snapshot immediately
+      if (updates.periodSettings !== undefined || updates.streamSettings !== undefined || updates.timetableAssignments !== undefined) {
+        saveSchoolDataToSupabase(schoolId, nextData).catch(e => console.warn("Direct snapshot sync error:", e));
+      }
+
       if (debounceTimer.current) clearTimeout(debounceTimer.current);
       debounceTimer.current = setTimeout(async () => {
-        setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
         
         // 1. Relational Table Updates (Targeted mutations) with Offline Support
         if (updates.students && Array.isArray(updates.students)) {

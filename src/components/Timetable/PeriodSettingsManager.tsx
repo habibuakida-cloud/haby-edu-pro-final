@@ -357,26 +357,31 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     } else {
       // ADD MODE
       // Check for duplicate period name on same day
-      const duplicate = periodSettings.find(
+      const duplicateIndex = periodSettings.findIndex(
         p => p.day === formDay && p.name.toLowerCase() === trimmedName.toLowerCase()
       );
-      if (duplicate) {
-        const proceed = window.confirm(
-          `A period named "${trimmedName}" already exists on ${formDay}. Do you want to add it anyway?`
-        );
-        if (!proceed) return;
+      if (duplicateIndex > -1) {
+        // If already exists on that day, update the time slot without blocking window.confirm
+        const updated = [...periodSettings];
+        updated[duplicateIndex] = {
+          ...updated[duplicateIndex],
+          start: formStart,
+          end: formEnd
+        };
+        onUpdatePeriodSettings(updated);
+        showFeedback(`Kipindi "${trimmedName}" (${formDay}) kimesasishwa: ${formStart} - ${formEnd}!`);
+      } else {
+        const newPeriod: PeriodSetting = {
+          id: Date.now(),
+          day: formDay,
+          name: trimmedName,
+          start: formStart,
+          end: formEnd
+        };
+
+        onUpdatePeriodSettings([...periodSettings, newPeriod]);
+        showFeedback(`Kipindi kipya "${trimmedName}" (${formDay}) kimeongezwa!`);
       }
-
-      const newPeriod: PeriodSetting = {
-        id: Date.now(),
-        day: formDay,
-        name: trimmedName,
-        start: formStart,
-        end: formEnd
-      };
-
-      onUpdatePeriodSettings([...periodSettings, newPeriod]);
-      showFeedback(`Added new period "${trimmedName}" for ${formDay}!`);
 
       // Increment period name for next addition if standard period
       const match = trimmedName.match(/^Period\s*(\d+)$/i);
@@ -387,29 +392,19 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     }
   };
 
-  // Request deletion with confirmation dialog
+  // Immediate deletion without blocking modal or alert
   const promptDeletePeriod = (p: PeriodSetting) => {
-    setPeriodToDelete(p);
-  };
-
-  // Confirm delete
-  const confirmDeletePeriod = () => {
-    if (!periodToDelete) return;
-    const targetId = periodToDelete.id;
+    const targetId = p.id;
 
     // Check affected assignments
-    const affected = assignments.filter(
-      a => a.day === periodToDelete.day && a.period === periodToDelete.name
-    );
-
-    if (affected.length > 0 && onUpdateAssignments) {
+    if (assignments.length > 0 && onUpdateAssignments) {
       const updatedAssignments = assignments.filter(
-        a => !(a.day === periodToDelete.day && a.period === periodToDelete.name)
+        a => !(a.day === p.day && (a.period === p.name || a.periodName === p.name))
       );
       onUpdateAssignments(updatedAssignments);
     }
 
-    const updatedPeriods = periodSettings.filter(p => String(p.id) !== String(targetId));
+    const updatedPeriods = periodSettings.filter(item => String(item.id) !== String(targetId));
     onUpdatePeriodSettings(updatedPeriods);
 
     if (String(editingPeriodId) === String(targetId)) {
@@ -419,8 +414,13 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
       setInlineEditingId(null);
     }
     setSelectedIds(prev => prev.filter(id => String(id) !== String(targetId)));
+    showFeedback(`Kipindi "${p.name}" (${p.day}) kimefutwa.`);
+  };
 
-    showFeedback(`Period "${periodToDelete.name}" on ${periodToDelete.day} deleted.`);
+  // Confirm delete (if modal is opened)
+  const confirmDeletePeriod = () => {
+    if (!periodToDelete) return;
+    promptDeletePeriod(periodToDelete);
     setPeriodToDelete(null);
   };
 
@@ -431,8 +431,11 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     const selectedStr = selectedIds.map(String);
     const updated = periodSettings.filter(p => !selectedStr.includes(String(p.id)));
     onUpdatePeriodSettings(updated);
+    if (updated.length === 0 && onUpdateAssignments) {
+      onUpdateAssignments([]);
+    }
     setSelectedIds([]);
-    showFeedback(`Vipindi ${count} vimefutwa kikamilifu.`);
+    showFeedback(`Vipindi vyote ${count} vilivyochaguliwa vimefutwa kikamilifu.`);
   };
 
   // Clear all periods for the currently filtered day or completely
@@ -440,12 +443,17 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     if (selectedDayFilter === 'All') {
       onUpdatePeriodSettings([]);
       if (onUpdateAssignments) onUpdateAssignments([]);
+      setSelectedIds([]);
       showFeedback('Vipindi vyote katika siku zote vimefutwa!', 'info');
       return;
     }
 
     const updated = periodSettings.filter(p => p.day !== selectedDayFilter);
     onUpdatePeriodSettings(updated);
+    setSelectedIds(prev => prev.filter(id => {
+      const p = periodSettings.find(x => x.id === id);
+      return p && p.day !== selectedDayFilter;
+    }));
     showFeedback(`Vipindi vyote vya siku ya ${selectedDayFilter} vimefutwa.`);
   };
 
@@ -453,6 +461,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
   const handleClearAllPeriods = () => {
     onUpdatePeriodSettings([]);
     if (onUpdateAssignments) onUpdateAssignments([]);
+    setSelectedIds([]);
     showFeedback('Vipindi vyote vimefutwa kikamilifu! Sasa unaweza kuanza upya kuweka muda wako.', 'info');
   };
 
