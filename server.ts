@@ -7,6 +7,8 @@ import axios from 'axios';
 import { simpleGit } from 'simple-git';
 import AdmZip from 'adm-zip';
 import { generateAITimetable } from './src/server/timetableAILogic.ts';
+import { generateAISchemeOfWork, generateAILessonPlan } from './src/server/schemeAILogic.ts';
+import { fetchAndParseNectaUrl } from './src/server/nectaFetchLogic.ts';
 import { normalizeTzPhone, sendBeemSMS } from './src/server/smsUtils.ts';
 import {
   queryTimetable,
@@ -284,6 +286,52 @@ app.post('/api/ai/generate-timetable', async (req, res) => {
   }
 });
 
+// Scheme of Work AI generation endpoint
+app.post('/api/ai/generate-scheme', async (req, res) => {
+  try {
+    const result = await generateAISchemeOfWork(req.body);
+    res.json(result);
+  } catch (error: any) {
+    console.error('API Error in /api/ai/generate-scheme:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error while generating scheme of work'
+    });
+  }
+});
+
+// Lesson Plan AI generation endpoint
+app.post('/api/ai/generate-lesson-plan', async (req, res) => {
+  try {
+    const result = await generateAILessonPlan(req.body);
+    res.json(result);
+  } catch (error: any) {
+    console.error('API Error in /api/ai/generate-lesson-plan:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error while generating lesson plan'
+    });
+  }
+});
+
+// NECTA URL Results Fetcher & Parser
+app.post('/api/necta/fetch-url', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) {
+      return res.status(400).json({ success: false, error: 'URL is required' });
+    }
+    const result = await fetchAndParseNectaUrl(url);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error in /api/necta/fetch-url:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Internal server error while fetching NECTA URL'
+    });
+  }
+});
+
 // GITHUB INTEGRATION
 app.get('/api/auth/github/url', (req, res) => {
   const { origin } = req.query;
@@ -452,6 +500,8 @@ async function startServer() {
     console.log(`HABY EDU PRO server listening on http://0.0.0.0:${port} (production: ${isProduction})`);
   });
 }
+
+export default app;
 
 startServer().catch(err => {
   console.error('Failed to start server:', err);

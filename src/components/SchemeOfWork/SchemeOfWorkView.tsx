@@ -75,6 +75,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
 
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -96,6 +97,92 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
     );
     setCurrentScheme(generated);
     showToast(`Generated complete 12-week Scheme of Work & Log Book for ${selectedSubject} (${curriculumType === 'NEW_CBC_2023' ? 'New CBC 2023' : 'Old Curriculum'})!`);
+  };
+
+  // AI-Powered Smart Scheme Generation
+  const handleAIGenerate = async () => {
+    setIsGeneratingAI(true);
+    try {
+      const res = await fetch('/api/ai/generate-scheme', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: selectedSubject,
+          className: selectedClass,
+          stream: selectedStream,
+          curriculumType,
+          academicYear,
+          term: selectedTerm,
+          teacherName: currentUser?.fullName || 'Teacher',
+          schoolName: schoolInfo.name || 'HABY EDU PRO',
+          periodsPerWeek
+        })
+      });
+
+      const json = await res.json();
+      if (json.success && json.data) {
+        const aiData = json.data;
+        const items: SchemeOfWorkItem[] = (aiData.items || []).map((item: any, idx: number) => ({
+          id: `scheme_item_ai_${idx}_${Date.now()}`,
+          weekNumber: item.weekNumber || idx + 1,
+          datesOrMonth: item.datesOrMonth || `Week ${idx + 1}`,
+          mainTopicOrCompetence: item.mainTopicOrCompetence || 'Main Topic',
+          subTopicOrSpecificCompetence: item.subTopicOrSpecificCompetence || 'Subtopic',
+          learningActivitiesOrObjectives: item.learningActivitiesOrObjectives || 'Activities',
+          teachingActivities: item.teachingActivities || 'Teaching activities',
+          teachingMaterials: item.teachingMaterials || 'Materials',
+          assessmentMethods: item.assessmentMethods || 'Assessment',
+          references: item.references || `TIE ${selectedSubject} for ${selectedClass}`,
+          periodsCount: periodsPerWeek,
+          remarks: item.remarks || 'Covered as scheduled'
+        }));
+
+        const logBookEntries: TeachingLogBookEntry[] = (aiData.logBookEntries || []).map((log: any, idx: number) => ({
+          id: `log_entry_ai_${idx}_${Date.now()}`,
+          schemeItemId: items[idx]?.id || `scheme_item_ai_${idx}`,
+          date: log.date || `2026-0${Math.min(1 + Math.floor(idx / 4), 4)}-${String(12 + (idx % 4) * 7).padStart(2, '0')}`,
+          className: selectedClass,
+          stream: selectedStream || 'Stream A',
+          periodTime: log.periodTime || 'Period 2 & 3 (08:40 - 10:00)',
+          subTopicTaught: log.subTopicTaught || items[idx]?.subTopicOrSpecificCompetence || 'Subtopic',
+          workCoveredSummary: log.workCoveredSummary || `Delivered lesson on ${selectedSubject}.`,
+          studentsPresent: log.studentsPresent || 43,
+          studentsTotal: log.studentsTotal || 45,
+          comprehensionEvaluation: log.comprehensionEvaluation || 'GOOD',
+          teacherSignature: currentUser?.fullName ? currentUser.fullName.split(' ').map(n => n[0]).join('.') : 'TR.'
+        }));
+
+        setCurrentScheme({
+          id: `scheme_ai_${Date.now()}`,
+          schoolId: schoolInfo.schoolNumber || 'DEMO_SCHOOL',
+          teacherName: currentUser?.fullName || 'Teacher',
+          className: selectedClass,
+          stream: selectedStream || 'All Streams',
+          subject: selectedSubject,
+          curriculumType,
+          academicYear,
+          term: selectedTerm,
+          periodsPerWeek,
+          totalWeeks: items.length,
+          department: aiData.department || 'Science & Mathematics',
+          competenceSummary: aiData.competenceSummary || `AI Generated 12-week Scheme of Work for ${selectedSubject}`,
+          items,
+          logBookEntries,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        });
+
+        showToast(`✨ Gemini AI generated complete Scheme of Work & Log Book for ${selectedSubject}!`);
+      } else {
+        // Fallback to local smart generator
+        handleGenerate();
+      }
+    } catch (err) {
+      console.warn('AI Generation offline or key missing, falling back to local generator:', err);
+      handleGenerate();
+    } finally {
+      setIsGeneratingAI(false);
+    }
   };
 
   // Cell editing helper
@@ -311,9 +398,16 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
               onChange={e => setSelectedSubject(e.target.value)}
               className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 focus:bg-white"
             >
-              {['Physics', 'Basic Mathematics', 'Chemistry', 'Biology', 'English Language', 'Kiswahili', 'Geography', 'History', 'Civics', 'Science & Technology', 'Social Studies'].map(s => (
-                <option key={s} value={s}>{s}</option>
-              ))}
+              <optgroup label="Secondary Subjects">
+                {['Physics', 'Chemistry', 'Biology', 'Basic Mathematics', 'English Language', 'Kiswahili', 'Geography', 'History', 'Civics', 'Commerce', 'Bookkeeping', 'Information and Computer Studies (ICS)', 'Agricultural Science', 'Food & Nutrition', 'Bible Knowledge', 'Elimu ya Dini ya Kiislamu (EDK)'].map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </optgroup>
+              <optgroup label="Primary & Pre-Primary Subjects">
+                {['Science & Technology', 'Social Studies', 'Hisabati', 'Kiswahili (Primary)', 'English (Primary)', 'Kutunza Afya na Mazingira', 'Sanaa na Michezo'].map(s => (
+                  <option key={s} value={s}>{s}</option>
+                ))}
+              </optgroup>
             </select>
           </div>
 
@@ -355,15 +449,15 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           </div>
 
           {/* Curriculum */}
-          <div className="lg:col-span-2">
+          <div>
             <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Curriculum Framework</label>
             <select
               value={curriculumType}
               onChange={e => setCurriculumType(e.target.value as CurriculumType)}
               className="w-full px-2.5 py-1.5 text-xs font-bold border border-blue-300 rounded-xl bg-blue-50/60 text-blue-950 focus:bg-white"
             >
-              <option value="NEW_CBC_2023">Mtaala Mpya wa Ujuzi (New CBC 2023 - Competence Based)</option>
-              <option value="OLD_CONTENT_BASED">Mtaala wa Zamani (Old Content-Based Curriculum)</option>
+              <option value="NEW_CBC_2023">New CBC 2023 (Competence Based)</option>
+              <option value="OLD_CONTENT_BASED">Old Content-Based Curriculum</option>
             </select>
           </div>
 
@@ -381,15 +475,23 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
             </select>
           </div>
 
-          {/* Generate Button */}
-          <div className="flex items-end">
+          {/* Action Buttons */}
+          <div className="lg:col-span-2 flex items-end gap-2">
+            <button
+              type="button"
+              disabled={isGeneratingAI}
+              onClick={handleAIGenerate}
+              className="flex-1 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+            >
+              <Sparkles className={`w-3.5 h-3.5 text-amber-300 ${isGeneratingAI ? 'animate-spin' : ''}`} />
+              <span>{isGeneratingAI ? 'AI Generating...' : '✨ AI Smart Generate'}</span>
+            </button>
             <button
               type="button"
               onClick={handleGenerate}
-              className="w-full py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+              className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold border border-slate-300 flex items-center justify-center gap-1 cursor-pointer transition"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>Auto-Generate</span>
+              <span>Instant</span>
             </button>
           </div>
         </div>

@@ -14,12 +14,24 @@ import {
   ChevronRight,
   ClipboardCopy,
   Trash2,
-  Upload
+  Upload,
+  Globe,
+  Link,
+  Loader2,
+  ExternalLink,
+  ArrowRight
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
 // Common NECTA Exam Types
 const EXAM_TYPES = ['STNA', 'SFNA', 'PSLE', 'FTNA', 'CSEE', 'ACSEE'];
+
+// Sample NECTA Result URLs for quick testing
+const SAMPLE_NECTA_URLS = [
+  { label: 'CSEE 2023 Sample (Kiomoni)', url: 'https://matokeo.necta.go.tz/csee2023/results/s0372.htm' },
+  { label: 'ACSEE 2024 Sample', url: 'https://matokeo.necta.go.tz/acsee2024/results/s0372.htm' },
+  { label: 'FTNA 2023 Sample', url: 'https://matokeo.necta.go.tz/ftna2023/results/s0372.htm' }
+];
 
 // Sample realistic NECTA data for quick testing
 const SAMPLE_NECTA_DATA = `S0372/0001 F 22 III CIV - C HIST - C GEO - C KISW - D ENGL - C PHY - D CHEM - D BIO - C B/MATH - F
@@ -37,7 +49,10 @@ S0372/0012 F 21 III CIV - C HIST - C GEO - C KISW - B ENGL - C PHY - D CHEM - C 
 
 export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
   const [inputText, setInputText] = useState('');
-  const [importMethod, setImportMethod] = useState('text'); // 'text' or 'csv'
+  const [nectaUrl, setNectaUrl] = useState('https://matokeo.necta.go.tz/csee2023/results/s0372.htm');
+  const [importMethod, setImportMethod] = useState('url'); // 'url', 'text', or 'csv'
+  const [isFetchingUrl, setIsFetchingUrl] = useState(false);
+  const [detectedSchoolName, setDetectedSchoolName] = useState('');
   const [selectedExamType, setSelectedExamType] = useState('CSEE');
   const [examYear, setExamYear] = useState(new Date().getFullYear().toString());
   const [activeTab, setActiveTab] = useState('raw'); // 'raw', 'grades', 'division'
@@ -45,6 +60,77 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
   const [subjectsList, setSubjectsList] = useState([]);
   const [saveStatus, setSaveStatus] = useState(null); // { type: 'success' | 'error', message: string }
   const [isSavingToDb, setIsSavingToDb] = useState(false);
+
+  // Fetch and parse results directly from NECTA URL
+  const handleFetchUrl = async (overrideUrl) => {
+    const targetUrl = (overrideUrl || nectaUrl || '').trim();
+    if (!targetUrl) {
+      alert('Tafadhali ingiza au bandika link ya matokeo ya NECTA (URL).');
+      return;
+    }
+
+    setSaveStatus(null);
+    setIsFetchingUrl(true);
+
+    try {
+      const res = await fetch('/api/necta/fetch-url', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: targetUrl })
+      });
+
+      const data = await res.json();
+
+      if (data.success && data.candidates && data.candidates.length > 0) {
+        if (data.examType) setSelectedExamType(data.examType);
+        if (data.examYear) setExamYear(data.examYear);
+        if (data.schoolName) setDetectedSchoolName(data.schoolName);
+
+        setInputText(data.rawText || '');
+        setNectaUrl(data.url || targetUrl);
+
+        const subjectsSet = new Set();
+        const parsedRows = data.candidates.map(c => {
+          Object.keys(c.subjects || {}).forEach(s => subjectsSet.add(s));
+          return {
+            cno: c.cno,
+            sex: c.sex,
+            aggt: c.aggt,
+            div: c.div,
+            subjects: c.subjects || {}
+          };
+        });
+
+        const coreOrder = ['CIV', 'HIST', 'GEO', 'KISW', 'ENGL', 'PHY', 'CHEM', 'BIO', 'B/MATH'];
+        const otherSubjects = Array.from(subjectsSet).filter(s => !coreOrder.includes(s)).sort();
+        const orderedSubjects = [
+          ...coreOrder.filter(s => subjectsSet.has(s)),
+          ...otherSubjects
+        ];
+
+        setSubjectsList(orderedSubjects);
+        setParsedData(parsedRows);
+
+        setSaveStatus({
+          type: 'success',
+          message: `✨ Matokeo yamepakuliwa na kuchakatwa kutoka link ya NECTA! Watahiniwa ${parsedRows.length} wamepatikana kwa shule: ${data.schoolName || 'NECTA'}`
+        });
+      } else {
+        setSaveStatus({
+          type: 'error',
+          message: data.error || 'Haikuweza kupata matokeo kutoka link uliyoweka. Hakikisha ni link sahihi ya matokeo ya NECTA.'
+        });
+      }
+    } catch (err) {
+      console.error('Error fetching NECTA URL:', err);
+      setSaveStatus({
+        type: 'error',
+        message: 'Hitilafu ya mtandao wakati wa kufungua link ya NECTA: ' + err.message
+      });
+    } finally {
+      setIsFetchingUrl(false);
+    }
+  };
 
   // Download a CSV Template for quick batch importing
   const handleDownloadTemplate = () => {
@@ -187,8 +273,15 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
   // Parse NECTA Text
   const handleParse = () => {
     setSaveStatus(null);
-    if (!inputText.trim()) {
-      alert('Tafadhali weka data ya NECTA kwenye sanduku la maandishi.');
+    const trimmed = inputText.trim();
+    if (!trimmed) {
+      alert('Tafadhali weka data au link ya matokeo ya NECTA kwenye sanduku la maandishi.');
+      return;
+    }
+
+    // Auto-detect if user pasted a NECTA URL into the text box
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.includes('necta.go.tz') || trimmed.includes('/results/')) {
+      handleFetchUrl(trimmed);
       return;
     }
 
@@ -622,35 +715,120 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
 
       {/* Import Methods Selector */}
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        <div className="flex border-b border-slate-200 bg-slate-50">
+        <div className="flex flex-wrap border-b border-slate-200 bg-slate-50">
+          <button
+            type="button"
+            onClick={() => setImportMethod('url')}
+            className={`flex items-center gap-2 px-5 py-3 font-bold text-xs transition-colors border-b-2 cursor-pointer ${
+              importMethod === 'url'
+                ? 'border-blue-600 text-blue-600 bg-white'
+                : 'border-transparent text-slate-500 hover:text-slate-800'
+            }`}
+          >
+            <Globe className="w-4.5 h-4.5 text-blue-600" />
+            <span>Njia ya 1: Weka Link ya Matokeo (Paste NECTA Result Link)</span>
+          </button>
           <button
             type="button"
             onClick={() => setImportMethod('text')}
-            className={`flex items-center gap-2 px-6 py-3 font-bold text-xs transition-colors border-b-2 ${
+            className={`flex items-center gap-2 px-5 py-3 font-bold text-xs transition-colors border-b-2 cursor-pointer ${
               importMethod === 'text'
                 ? 'border-blue-600 text-blue-600 bg-white'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <FileText className="w-4.5 h-4.5" />
-            <span>Njia ya 1: Bandika Nakala (Paste Raw Text)</span>
+            <FileText className="w-4.5 h-4.5 text-indigo-600" />
+            <span>Njia ya 2: Bandika Nakala (Paste Raw Text)</span>
           </button>
           <button
             type="button"
             onClick={() => setImportMethod('csv')}
-            className={`flex items-center gap-2 px-6 py-3 font-bold text-xs transition-colors border-b-2 ${
+            className={`flex items-center gap-2 px-5 py-3 font-bold text-xs transition-colors border-b-2 cursor-pointer ${
               importMethod === 'csv'
                 ? 'border-blue-600 text-blue-600 bg-white'
                 : 'border-transparent text-slate-500 hover:text-slate-800'
             }`}
           >
-            <FileSpreadsheet className="w-4.5 h-4.5" />
-            <span>Njia ya 2: Pakia Faili la CSV / Excel (Batch Upload)</span>
+            <FileSpreadsheet className="w-4.5 h-4.5 text-emerald-600" />
+            <span>Njia ya 3: Pakia Faili la CSV / Excel (Batch Upload)</span>
           </button>
         </div>
 
         <div className="p-6 space-y-4">
-          {importMethod === 'text' ? (
+          {importMethod === 'url' ? (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                  <Globe className="w-4 h-4 text-blue-600" />
+                  <span>Ingiza au Bandika Link ya Matokeo ya NECTA (URL)</span>
+                </label>
+                <span className="text-[11px] text-blue-700 bg-blue-50 font-bold px-2 py-0.5 rounded border border-blue-200">
+                  Live Web Scraper & Auto-Parser
+                </span>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-center gap-2">
+                <div className="relative flex-1 w-full">
+                  <Link className="w-4 h-4 text-slate-400 absolute left-3 top-3" />
+                  <input
+                    type="url"
+                    value={nectaUrl}
+                    onChange={e => setNectaUrl(e.target.value)}
+                    placeholder="https://matokeo.necta.go.tz/csee2023/results/s0372.htm"
+                    className="w-full pl-9 pr-3 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-mono text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <button
+                  type="button"
+                  disabled={isFetchingUrl}
+                  onClick={() => handleFetchUrl()}
+                  className="w-full sm:w-auto px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+                >
+                  {isFetchingUrl ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-amber-300" />
+                      <span>Inapakua na Kuchakata...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Globe className="w-4 h-4 text-amber-300" />
+                      <span>Pakua & Chakata Matokeo</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* Sample Preset Links */}
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] font-bold text-slate-600 uppercase tracking-wider">
+                    Jaribu kwa Mfano wa Links za NECTA (Click to Test Sample Links):
+                  </span>
+                  {detectedSchoolName && (
+                    <span className="text-xs font-bold text-blue-900 bg-blue-100 px-2 py-0.5 rounded">
+                      Shule Iliyotambuliwa: {detectedSchoolName}
+                    </span>
+                  )}
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  {SAMPLE_NECTA_URLS.map((sample, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => {
+                        setNectaUrl(sample.url);
+                        handleFetchUrl(sample.url);
+                      }}
+                      className="px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-800 text-[11px] font-semibold rounded-lg border border-slate-300 hover:border-blue-400 transition flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <ExternalLink className="w-3 h-3 text-blue-600" />
+                      <span>{sample.label}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          ) : importMethod === 'text' ? (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">

@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   BookOpen, 
   Sparkles, 
@@ -18,7 +18,8 @@ import {
   GraduationCap,
   Award,
   Search,
-  Check
+  Check,
+  Loader2
 } from 'lucide-react';
 import { LessonPlan, CurriculumType, LessonPlanStep } from '../../types/lessonPlan';
 import { generateAutoLessonPlan, SYLLABUS_KNOWLEDGE_BASE } from '../../utils/lessonPlanGenerator';
@@ -63,6 +64,7 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
   const [lessonDate, setLessonDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [registeredStudents, setRegisteredStudents] = useState<number>(45);
   const [presentStudents, setPresentStudents] = useState<number>(43);
+  const [isGeneratingAI, setIsGeneratingAI] = useState<boolean>(false);
 
   // Active generated or loaded plan
   const [currentPlan, setCurrentPlan] = useState<LessonPlan>(() => {
@@ -116,6 +118,17 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
     ];
   }, [selectedSubject]);
 
+  // Auto-sync topic inputs when subject changes
+  useEffect(() => {
+    if (suggestedTopics && suggestedTopics.length > 0) {
+      setTopicInput(suggestedTopics[0].mainTopic);
+      setSubtopicInput(suggestedTopics[0].subtopics[0] || `Introduction to ${suggestedTopics[0].mainTopic}`);
+    } else {
+      setTopicInput(`${selectedSubject} Core Topic`);
+      setSubtopicInput(`Introduction to ${selectedSubject}`);
+    }
+  }, [selectedSubject, suggestedTopics]);
+
   // Handle Generate
   const handleGenerate = () => {
     const newPlan = generateAutoLessonPlan({
@@ -140,6 +153,86 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
     setActiveTab('generator');
     setSaveToast(`Generated new lesson plan for ${newPlan.subject} (${newPlan.className})!`);
     setTimeout(() => setSaveToast(null), 3000);
+  };
+
+  // AI-Powered Lesson Plan Generation
+  const handleAIGenerate = async () => {
+    setIsGeneratingAI(true);
+    try {
+      const res = await fetch('/api/ai/generate-lesson-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          subject: selectedSubject,
+          className: selectedClass,
+          stream: selectedStream,
+          topic: topicInput.trim() || 'Core Topic',
+          subtopic: subtopicInput.trim() || undefined,
+          curriculumType: selectedCurriculum,
+          durationMinutes,
+          teacherName: currentUser?.fullName || 'Subject Teacher',
+          schoolName: schoolInfo.name || 'HABY EDU PRO',
+          registeredStudentsCount: registeredStudents,
+          presentStudentsCount: presentStudents
+        })
+      });
+
+      const json = await res.json();
+      if (json.success && json.data) {
+        const aiData = json.data;
+        const steps: LessonPlanStep[] = (aiData.steps || []).map((step: any) => ({
+          stage: step.stage || 'Stage',
+          timeMinutes: step.timeMinutes || 10,
+          teacherActivities: step.teacherActivities || 'Teacher activity',
+          learnerActivities: step.learnerActivities || 'Learner activity',
+          assessmentCriteria: step.assessmentCriteria || 'Assessment criteria',
+          teachingMedia: step.teachingMedia || 'Teaching media'
+        }));
+
+        const newPlan: LessonPlan = {
+          id: `plan_ai_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+          schoolId: currentUser?.schoolId || 'DEMO_SCHOOL',
+          teacherId: currentUser?.id,
+          teacherName: currentUser?.fullName || 'Subject Teacher',
+          className: selectedClass,
+          stream: selectedStream,
+          subject: selectedSubject,
+          curriculumType: selectedCurriculum,
+          date: lessonDate,
+          timeSlot: '08:00 - 08:40',
+          periodNumber,
+          durationMinutes,
+          registeredStudentsCount: registeredStudents,
+          presentStudentsCount: presentStudents,
+          mainTopic: topicInput.trim() || 'Core Topic',
+          subTopic: subtopicInput.trim() || 'Key Concepts',
+          mainCompetence: aiData.mainCompetence,
+          specificCompetence: aiData.specificCompetence,
+          generalObjective: aiData.generalObjective,
+          specificObjectives: aiData.specificObjectives || [`Understand ${topicInput}`],
+          teachingMaterials: aiData.teachingMaterials || [`TIE ${selectedSubject} textbook`],
+          references: aiData.references || [`TIE ${selectedSubject} for ${selectedClass}`],
+          steps,
+          evaluationStrategy: aiData.evaluationStrategy || 'Formative assessment',
+          teacherRemarks: aiData.teacherRemarks || `Kipindi kilikwenda vizuri. Wanafunzi ${presentStudents} kati ya ${registeredStudents} walishiriki.`,
+          isSaved: false,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        setCurrentPlan(newPlan);
+        setActiveTab('generator');
+        setSaveToast(`✨ Gemini AI generated Lesson Plan for ${newPlan.subject} (${topicInput})!`);
+        setTimeout(() => setSaveToast(null), 3500);
+      } else {
+        handleGenerate();
+      }
+    } catch (err) {
+      console.warn('AI Lesson plan generation offline, using smart local fallback:', err);
+      handleGenerate();
+    } finally {
+      setIsGeneratingAI(false);
+    }
   };
 
   // Handle Save
@@ -479,15 +572,25 @@ export const LessonPlanView: React.FC<LessonPlanViewProps> = ({
                 </div>
               </div>
 
-              {/* Generate Button */}
-              <button
-                type="button"
-                onClick={handleGenerate}
-                className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition transform active:scale-[0.98]"
-              >
-                <Sparkles className="w-4 h-4 text-amber-300 fill-amber-300" />
-                <span>Auto-Generate Full Lesson Plan</span>
-              </button>
+              {/* Generate Buttons */}
+              <div className="flex flex-col gap-2 pt-1">
+                <button
+                  type="button"
+                  disabled={isGeneratingAI}
+                  onClick={handleAIGenerate}
+                  className="w-full py-3 px-4 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-2 cursor-pointer transition transform active:scale-[0.98]"
+                >
+                  <Sparkles className={`w-4 h-4 text-amber-300 fill-amber-300 ${isGeneratingAI ? 'animate-spin' : ''}`} />
+                  <span>{isGeneratingAI ? 'AI Generating Lesson Plan...' : '✨ AI Smart Generate Lesson Plan'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleGenerate}
+                  className="w-full py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold border border-slate-300 flex items-center justify-center gap-1.5 cursor-pointer transition"
+                >
+                  <span>Instant Auto-Generate</span>
+                </button>
+              </div>
             </div>
           </div>
 
