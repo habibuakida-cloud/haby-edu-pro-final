@@ -20,8 +20,8 @@ import { useAuth } from '../context/AuthContext';
 import { SUBJECT_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
 import { saveSchoolData } from '../lib/firestoreService';
 import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
-import { doc, setDoc, Timestamp, collection, getDocs, query, where } from 'firebase/firestore';
+import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { doc, setDoc, Timestamp, serverTimestamp, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
 
@@ -415,57 +415,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       return;
     }
 
-    const targetSchoolId = currentUser?.schoolId || sessionStorage.getItem('haby_school_id') || 'DEMO_SCHOOL';
+    const targetSchoolId = currentUser?.schoolId || sessionStorage.getItem('haby_school_id') || 'd7764dfd-3b13-43df-a914-4c598c82a33f';
     const normalizedEmail = newEmail.trim().toLowerCase();
 
     try {
-      console.log("Registering staff member in Firebase Auth & Firestore:", { normalizedEmail, targetSchoolId });
-
-      // 1. Create user in Firebase Authentication using secondary Firebase App instance so Admin is not logged out
-      const secondaryApp = initializeApp(firebaseConfig, "SecondaryStaffAuthApp_" + Date.now());
+      // 1. Create secondary app so superadmin stays logged in
+      const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp-"+Date.now());
       const secondaryAuth = getAuth(secondaryApp);
-      let uid: string;
-      try {
-        const userCred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, newPassword.trim());
-        uid = userCred.user.uid;
-      } catch (authErr: any) {
-        if (authErr.code === 'auth/email-already-in-use') {
-          uid = generateUUID();
-          console.warn("Email already in use in Firebase Auth, using generated UID:", uid);
-        } else {
-          throw authErr;
-        }
-      } finally {
-        await deleteApp(secondaryApp).catch(() => {});
-      }
-
-      // 2. Create document in Firestore `users` collection with Document ID = UID
-      const userDocRef = doc(db, 'users', uid);
+      
+      // 2. Create Auth user
+      const cred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, newPassword.trim());
+      const uid = cred.user.uid;
+      
+      // 3. Create Firestore user doc IN MAIN DB - THIS IS NOW INCLUDED
       const newUserDoc = {
         id: uid,
         uid: uid,
         email: normalizedEmail,
         displayName: newFullName.trim(),
         fullName: newFullName.trim(),
-        role: newRole,
+        role: String(newRole).toUpperCase(),
         password: newPassword.trim(),
         assignedSubjects: newRole === 'TEACHER' ? newAssignedSubjects : [],
         schoolId: targetSchoolId,
         school_id: targetSchoolId,
         isActive: true,
-        createdAt: Timestamp.now()
+        createdAt: serverTimestamp(),
+        createdBy: currentUser?.id || currentUser?.email || 'admin'
       };
 
-      await setDoc(userDocRef, newUserDoc);
+      await setDoc(doc(db, "users", uid), newUserDoc);
       console.log("Successfully created user document in Firestore users collection:", uid);
+      
+      // 4. Cleanup
+      await signOut(secondaryAuth);
+      await deleteApp(secondaryApp);
 
-      // 3. Mirror to Supabase for robustness
+      // 5. Mirror to Supabase for robustness
       try {
         await supabase.from('users').insert({
           id: uid,
           email: normalizedEmail,
           full_name: newFullName.trim(),
-          role: newRole,
+          role: String(newRole).toUpperCase(),
           school_id: targetSchoolId,
           schoolId: targetSchoolId,
           created_at: new Date().toISOString()
@@ -478,16 +470,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (onUpdateUsers) {
         onUpdateUsers(updated);
       }
-
+      
       setNewEmail('');
       setNewFullName('');
       setNewPassword('');
       setNewAssignedSubjects([]);
-      setUserMsg(`Staff member "${newFullName.trim()}" successfully registered in Firebase Auth & Firestore! Login Password: "${newPassword.trim()}".`);
+      setUserMsg("User created: " + uid);
       setTimeout(() => setUserMsg(null), 8000);
-    } catch (err: any) {
-      console.error("Error adding staff member:", err);
-      alert(`Failed to register staff: ${err.message || err}`);
+      alert("User created: " + uid);
+      
+    } catch (error: any) {
+      console.error("ADD USER ERROR:", error);
+      alert(error.message || error);
     }
   };
 
