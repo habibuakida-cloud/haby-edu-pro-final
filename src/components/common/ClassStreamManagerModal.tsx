@@ -80,7 +80,7 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
       .filter(Boolean);
 
     const formattedStreams = rawStreams.length > 0 
-      ? rawStreams.map(st => st.toUpperCase().startsWith('STREAM ') || st.length <= 3 ? st.toUpperCase() : `STREAM ${st.toUpperCase()}`)
+      ? rawStreams.map(st => normalizeStreamName(st))
       : ['STREAM A', 'STREAM B'];
 
     const newSetting: StreamSetting = {

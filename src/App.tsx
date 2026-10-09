@@ -534,54 +534,59 @@ export default function App() {
     const schoolId = userAccount?.schoolId || getCurrentSchoolId();
     const schoolKey = `haby_school_data_${schoolId}`;
 
+    let nextData: AppData = {} as AppData;
     setData(prev => {
-      const nextData: AppData = { ...prev, ...updates };
+      nextData = { ...prev, ...updates };
+      return nextData;
+    });
 
-      // Immediately persist to IndexedDB so any fast navigation or reload retains changes
-      setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
+    // Immediately persist to IndexedDB so any fast navigation or reload retains changes
+    setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
 
-      // If periodSettings or streamSettings are directly modified, push snapshot immediately
-      if (updates.periodSettings !== undefined || updates.streamSettings !== undefined || updates.timetableAssignments !== undefined) {
-        saveSchoolDataToSupabase(schoolId, nextData).catch(e => console.warn("Direct snapshot sync error:", e));
+    // If periodSettings or streamSettings are directly modified, push snapshot immediately
+    if (updates.periodSettings !== undefined || updates.streamSettings !== undefined || updates.timetableAssignments !== undefined) {
+      saveSchoolDataToSupabase(schoolId, nextData).catch(e => console.warn("Direct snapshot sync error:", e));
+    }
+
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(async () => {
+      
+      // 1. Relational Table Updates (Targeted mutations) with Offline Support
+      if (updates.students && Array.isArray(updates.students)) {
+        // Guard: Never overwrite cloud data with 0 if it had data before
+        if (updates.students.length > 0) {
+          const chunk = updates.students.map(s => toSupabaseStudent(s, schoolId));
+          await upsertRecord('students', chunk, 'id');
+        }
       }
 
-      if (debounceTimer.current) clearTimeout(debounceTimer.current);
-      debounceTimer.current = setTimeout(async () => {
-        
-        // 1. Relational Table Updates (Targeted mutations) with Offline Support
-        if (updates.students && Array.isArray(updates.students)) {
-          // Guard: Never overwrite cloud data with 0 if it had data before
-          if (updates.students.length > 0 || (prev.students && prev.students.length === 0)) {
-            const chunk = updates.students.map(s => toSupabaseStudent(s, schoolId));
-            await upsertRecord('students', chunk, 'id');
-          }
+      if (updates.teachers && Array.isArray(updates.teachers)) {
+        if (updates.teachers.length > 0) {
+          const chunk = updates.teachers.map(t => toSupabaseTeacher(t, schoolId));
+          await upsertRecord('teachers', chunk, 'id');
         }
+      }
 
-        if (updates.teachers && Array.isArray(updates.teachers)) {
-          if (updates.teachers.length > 0 || (prev.teachers && prev.teachers.length === 0)) {
-            const chunk = updates.teachers.map(t => toSupabaseTeacher(t, schoolId));
-            await upsertRecord('teachers', chunk, 'id');
-          }
-        }
+      if (updates.exams && Array.isArray(updates.exams)) {
+        const chunk = updates.exams.map(e => toSupabaseExam(e, schoolId));
+        await upsertRecord('exams', chunk, 'id');
+      }
 
-        if (updates.exams && Array.isArray(updates.exams)) {
-          const chunk = updates.exams.map(e => toSupabaseExam(e, schoolId));
-          await upsertRecord('exams', chunk, 'id');
-        }
-
-        if (updates.streamSettings && Array.isArray(updates.streamSettings)) {
-          for (const s of updates.streamSettings) {
-            if (s.className) {
-              try {
-                await supabase.from('classes').upsert({
-                  name: s.className,
-                  level: s.level || 'CSEE',
-                  capacity: 45
-                }, { onConflict: 'name' });
-              } catch (e) {}
+      if (updates.streamSettings && Array.isArray(updates.streamSettings)) {
+        for (const s of updates.streamSettings) {
+          if (s.className?.trim()) {
+            try {
+              await supabase.from('classes').upsert({
+                name: s.className.trim(),
+                level: s.level || 'CSEE',
+                capacity: 45
+              }, { onConflict: 'name' });
+            } catch (e) {
+              console.warn("Class upsert notice:", e);
             }
           }
         }
+      }
 
         if (updates.periodSettings && Array.isArray(updates.periodSettings)) {
           for (const p of updates.periodSettings) {
@@ -628,9 +633,6 @@ export default function App() {
         setSaveStatus('saved');
         setIsCloudSynced(true);
       }, 500);
-
-      return nextData;
-    });
   }, [userAccount]);
 
   // Auto-ensure USAL records exist for all registered exams

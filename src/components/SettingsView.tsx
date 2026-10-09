@@ -15,6 +15,7 @@ import { PeriodSettingsManager } from './Timetable/PeriodSettingsManager';
 import { ClassStreamManagerModal } from './common/ClassStreamManagerModal';
 import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
 import { INITIAL_STREAM_SETTINGS } from '../constants/defaults';
+import { normalizeStreamName, getNextLogicalStream } from '../utils/classStreamUtils';
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { SUBJECT_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
@@ -79,6 +80,46 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [allSchools, setAllSchools] = useState<SchoolType[]>([]);
   const { switchSchool, createSchoolUser } = useAuth();
   const [schoolsLoading, setSchoolsLoading] = useState(false);
+
+  // Class & Stream Management Modal & Inline States
+  const [isClassStreamModalOpen, setIsClassStreamModalOpen] = useState(false);
+  const [addingStreamToClass, setAddingStreamToClass] = useState<string | null>(null);
+  const [inlineStreamInput, setInlineStreamInput] = useState('');
+
+  const handleInlineAddStream = (className: string) => {
+    if (!onUpdateStreamSettings || !inlineStreamInput.trim()) return;
+    const cleanStream = normalizeStreamName(inlineStreamInput.trim());
+    const updated = streamSettings.map(s => {
+      if (s.className === className) {
+        if (s.streams.includes(cleanStream)) return s;
+        return {
+          ...s,
+          streams: [...s.streams, cleanStream]
+        };
+      }
+      return s;
+    });
+    onUpdateStreamSettings(updated);
+    setInlineStreamInput('');
+    setAddingStreamToClass(null);
+  };
+
+  const handleInlineAutoAddNextStream = (className: string) => {
+    if (!onUpdateStreamSettings) return;
+    const current = streamSettings.find(s => s.className === className);
+    const nextStream = getNextLogicalStream(current ? current.streams : ['STREAM A', 'STREAM B']);
+    const updated = streamSettings.map(s => {
+      if (s.className === className) {
+        if (s.streams.includes(nextStream)) return s;
+        return {
+          ...s,
+          streams: [...s.streams, nextStream]
+        };
+      }
+      return s;
+    });
+    onUpdateStreamSettings(updated);
+  };
 
   // GitHub Integration State
   const [githubToken, setGithubToken] = useState<string | null>(() => localStorage.getItem('haby_github_token'));
@@ -1077,31 +1118,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={() => {
-                if (onUpdateStreamSettings) {
-                  const modalBtn = document.getElementById('open-class-stream-modal-btn');
-                  if (modalBtn) modalBtn.click();
-                }
-              }}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
-            >
-              <Sparkles className="w-4 h-4 text-yellow-300" />
-              <span>+ Usajili wa Madarasa & Mikondo</span>
-            </button>
-
-            {onUpdateStreamSettings && streamSettings.length > 0 && (
+            <div className="flex items-center gap-2">
               <button
+                id="open-class-stream-modal-btn"
                 type="button"
-                onClick={() => onUpdateStreamSettings([])}
-                className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0"
-                title="Futa madarasa yote ili kuanza upya"
+                onClick={() => setIsClassStreamModalOpen(true)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Futa Madarasa Yote (Anza Upya)</span>
+                <Sparkles className="w-4 h-4 text-yellow-300" />
+                <span>+ Usajili wa Madarasa & Mikondo</span>
               </button>
-            )}
+
+              {onUpdateStreamSettings && streamSettings.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onUpdateStreamSettings([])}
+                  className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-xl shadow-2xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                  title="Futa madarasa yote ili kuanza upya"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Futa Yote (Anza Upya)</span>
+                </button>
+              )}
+            </div>
           </div>
 
           {streamSettings.length === 0 ? (
@@ -1111,11 +1150,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <p className="text-xs text-slate-500 max-w-md mx-auto">
                 Mfumo uko wazi na tayari kwa mipangilio yako. Bonyeza kitufe cha "+ Usajili wa Madarasa & Mikondo" hapo juu ili kuweka madarasa yako mwenyewe.
               </p>
+              <button
+                type="button"
+                onClick={() => setIsClassStreamModalOpen(true)}
+                className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl cursor-pointer inline-flex items-center gap-1.5 shadow-sm"
+              >
+                <Sparkles className="w-4 h-4 text-yellow-300" />
+                <span>Sajili Darasa la Kwanza</span>
+              </button>
             </div>
           ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {streamSettings.map(setting => {
               const enrolledStudents = students.filter(s => s.className === setting.className);
+              const isAddingInline = addingStreamToClass === setting.className;
+
               return (
                 <div 
                   key={setting.className}
@@ -1148,32 +1197,86 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </div>
                   </div>
 
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-1 flex-wrap">
                       <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                        Active Streams ({setting.streams.length}):
+                        Mikondo ({setting.streams.length}):
                       </span>
-                      {onUpdateStreamSettings && setting.streams.length > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleInlineAutoAddNextStream(setting.className)}
+                          className="text-[10px] text-emerald-700 hover:text-emerald-900 font-bold bg-emerald-50 hover:bg-emerald-100 px-2 py-0.5 rounded border border-emerald-200 transition cursor-pointer flex items-center gap-0.5"
+                          title="Ongeza mkondo unaofuata kiotomatiki (mf. Stream C)"
+                        >
+                          <span>+ Ongeza Mkondo</span>
+                        </button>
                         <button
                           type="button"
                           onClick={() => {
-                            const updated = streamSettings.map(s => {
-                              if (s.className === setting.className) {
-                                return {
-                                  ...s,
-                                  streams: s.streams.slice(0, s.streams.length - 1)
-                                };
-                              }
-                              return s;
-                            });
-                            onUpdateStreamSettings(updated);
+                            if (isAddingInline) {
+                              setAddingStreamToClass(null);
+                            } else {
+                              setAddingStreamToClass(setting.className);
+                              setInlineStreamInput('');
+                            }
                           }}
-                          className="text-[10px] text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer"
+                          className="text-[10px] text-blue-700 hover:text-blue-900 font-bold bg-blue-50 hover:bg-blue-100 px-2 py-0.5 rounded border border-blue-200 transition cursor-pointer"
+                          title="Andika jina la mkondo maalum"
                         >
-                          - Punguza Mkondo
+                          <span>{isAddingInline ? 'Funga' : 'Andika Jina'}</span>
                         </button>
-                      )}
+                        {onUpdateStreamSettings && setting.streams.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const updated = streamSettings.map(s => {
+                                if (s.className === setting.className) {
+                                  return {
+                                    ...s,
+                                    streams: s.streams.slice(0, s.streams.length - 1)
+                                  };
+                                }
+                                return s;
+                              });
+                              onUpdateStreamSettings(updated);
+                            }}
+                            className="text-[10px] text-rose-600 hover:text-rose-800 font-bold hover:underline cursor-pointer"
+                            title="Punguza mkondo wa mwisho"
+                          >
+                            - Punguza
+                          </button>
+                        )}
+                      </div>
                     </div>
+
+                    {/* Inline input for custom stream name */}
+                    {isAddingInline && (
+                      <div className="flex items-center gap-1.5 p-1.5 bg-blue-50/60 rounded-lg border border-blue-200">
+                        <input
+                          type="text"
+                          placeholder="Jina la mkondo (mf. STREAM C au PCM)..."
+                          value={inlineStreamInput}
+                          onChange={e => setInlineStreamInput(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleInlineAddStream(setting.className);
+                            }
+                          }}
+                          className="flex-1 px-2 py-1 text-xs border border-slate-300 rounded bg-white font-medium"
+                          autoFocus
+                        />
+                        <button
+                          type="button"
+                          onClick={() => handleInlineAddStream(setting.className)}
+                          className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded cursor-pointer shrink-0"
+                        >
+                          Ongeza
+                        </button>
+                      </div>
+                    )}
+
                     <div className="flex flex-wrap gap-1.5">
                       {setting.streams.map(st => (
                         <span key={st} className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-bold bg-white border border-slate-200 rounded-lg text-slate-800 shadow-2xs">
@@ -2965,6 +3068,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           />
         </div>
       )}
+
+      {/* Class & Stream Manager Modal */}
+      <ClassStreamManagerModal
+        isOpen={isClassStreamModalOpen}
+        onClose={() => setIsClassStreamModalOpen(false)}
+        streamSettings={streamSettings}
+        onUpdateStreamSettings={newSettings => {
+          if (onUpdateStreamSettings) {
+            onUpdateStreamSettings(newSettings);
+          }
+        }}
+        students={students}
+      />
     </div>
   );
 };
