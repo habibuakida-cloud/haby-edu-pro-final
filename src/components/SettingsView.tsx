@@ -4,7 +4,7 @@ import {
   FileCode, ExternalLink, Users, KeyRound, UserPlus, Trash2, Eye, EyeOff, Shield, Globe, 
   Activity, Power, PowerOff, AlertCircle, Info, Search, Filter, History, FileSpreadsheet, 
   UserCheck, FileText, Layers, ArrowUpDown, CheckCircle, ChevronDown, Sparkles, Calendar,
-  LogIn, Copy, CheckCheck, BookOpen, Key, Edit, Github
+  LogIn, Copy, CheckCheck, BookOpen, Key, Edit, Github, Zap, Rocket
 } from 'lucide-react';
 import { 
   SchoolInfo, PeriodSetting, TimetableAssignment, UserAccount, Student, Teacher,
@@ -87,6 +87,70 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [pushStatus, setPushStatus] = useState<'idle' | 'pushing' | 'success' | 'error'>('idle');
   const [pushError, setPushError] = useState<string | null>(null);
 
+  // Netlify Auto Clear Cache & Deploy State
+  const [netlifyToken, setNetlifyToken] = useState<string>(() => localStorage.getItem('haby_netlify_token') || '');
+  const [netlifySiteId, setNetlifySiteId] = useState<string>(() => localStorage.getItem('haby_netlify_site_id') || 'habyedupro');
+  const [netlifyStatus, setNetlifyStatus] = useState<'idle' | 'deploying' | 'success' | 'error'>('idle');
+  const [netlifyMsg, setNetlifyMsg] = useState<string | null>(null);
+  const [netlifyDeployUrl, setNetlifyDeployUrl] = useState<string | null>(null);
+  const [showNetlifyToken, setShowNetlifyToken] = useState(false);
+  const [autoDeployNetlifyOnPush, setAutoDeployNetlifyOnPush] = useState<boolean>(() => localStorage.getItem('haby_auto_deploy_netlify') === 'true');
+
+  const handleNetlifyClearCacheDeploy = async () => {
+    const token = netlifyToken.trim();
+    const siteId = netlifySiteId.trim() || 'habyedupro';
+    if (!token) {
+      alert('Tafadhali ingiza Netlify Personal Access Token (nfp_...).');
+      return;
+    }
+
+    setNetlifyStatus('deploying');
+    setNetlifyMsg(null);
+    setNetlifyDeployUrl(null);
+
+    // Save siteId & token to localStorage
+    localStorage.setItem('haby_netlify_token', token);
+    localStorage.setItem('haby_netlify_site_id', siteId);
+
+    try {
+      console.log(`[Netlify] Triggering deploy with clear_cache for site: ${siteId}`);
+      
+      // Attempt proxy first to avoid any client CORS restrictions
+      let res = await fetch('/api/netlify/deploy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token, siteId, clearCache: true })
+      });
+
+      // Fallback direct Netlify API if server endpoint not reachable
+      if (!res.ok && res.status === 404) {
+        res = await fetch(`https://api.netlify.com/api/v1/sites/${siteId}/builds`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ clear_cache: true })
+        });
+      }
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || data.message || `Netlify error ${res.status}`);
+      }
+
+      console.log('✅ Deploy started with clear cache:', data.id);
+      setNetlifyStatus('success');
+      const deployUrl = data.url || `https://app.netlify.com/sites/${siteId}/deploys/${data.id || ''}`;
+      setNetlifyDeployUrl(deployUrl);
+      setNetlifyMsg(`Deploy imeanza kikamilifu na cache imefutwa! Build ID: ${data.id || data.deploy_id || 'Started'}`);
+    } catch (err: any) {
+      console.error('Netlify deploy error:', err);
+      setNetlifyStatus('error');
+      setNetlifyMsg(err.message || 'Hitilafu wakati wa ku-deploy Netlify.');
+    }
+  };
+
   // Backup State
   const [backupLoading, setBackupLoading] = useState(false);
 
@@ -148,6 +212,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (data.success) {
         setPushStatus('success');
         setTimeout(() => setPushStatus('idle'), 5000);
+
+        // Auto trigger Netlify clear cache deploy if configured
+        if (autoDeployNetlifyOnPush && netlifyToken.trim()) {
+          console.log('[Auto Deploy] Auto-triggering Netlify deploy after GitHub push...');
+          handleNetlifyClearCacheDeploy();
+        }
       } else {
         setPushStatus('error');
         setPushError(data.error);
@@ -2649,6 +2719,165 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 )}
               </div>
             </div>
+          </div>
+
+          {/* NETLIFY AUTO CLEAR CACHE & DEPLOY CARD */}
+          <div className="p-6 bg-gradient-to-br from-slate-900 via-[#0f2948] to-slate-950 rounded-2xl border border-blue-500/30 text-white shadow-xl space-y-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-white/10 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="p-2 bg-amber-400/20 text-amber-300 rounded-xl border border-amber-400/30">
+                    <Zap className="w-5 h-5 text-amber-400" />
+                  </span>
+                  <div>
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      Auto Clear Cache &amp; Deploy (Netlify)
+                    </h3>
+                    <p className="text-xs text-blue-200 mt-0.5">
+                      Futa cache ya awali na anza build mpya papo hapo kwenye mfumo wako wa Netlify.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <span className="px-2.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-full text-[10px] font-bold">
+                  API v1 Builds
+                </span>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Netlify Token */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-300">
+                    1. Netlify Personal Access Token (nfp_...) *
+                  </label>
+                  <a
+                    href="https://app.netlify.com/user/applications#personal-access-tokens"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[10px] text-blue-300 hover:text-amber-300 underline font-semibold flex items-center gap-1"
+                  >
+                    <span>Pata Token</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+                <div className="relative">
+                  <input
+                    type={showNetlifyToken ? 'text' : 'password'}
+                    placeholder="nfp_xxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                    value={netlifyToken}
+                    onChange={(e) => {
+                      setNetlifyToken(e.target.value);
+                      localStorage.setItem('haby_netlify_token', e.target.value);
+                    }}
+                    className="w-full px-3 py-2.5 pr-10 bg-slate-800/90 border border-slate-700 rounded-xl text-xs font-mono text-white focus:ring-2 focus:ring-amber-400 focus:border-amber-400 outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNetlifyToken(!showNetlifyToken)}
+                    className="absolute right-3 top-2.5 text-slate-400 hover:text-white cursor-pointer"
+                  >
+                    {showNetlifyToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Netlify Site ID / Name */}
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-black uppercase tracking-wider text-slate-300">
+                    2. Netlify Site ID au Subdomain *
+                  </label>
+                  <span className="text-[10px] text-slate-400">Site settings &gt; Site ID</span>
+                </div>
+                <input
+                  type="text"
+                  placeholder="habyedupro"
+                  value={netlifySiteId}
+                  onChange={(e) => {
+                    setNetlifySiteId(e.target.value);
+                    localStorage.setItem('haby_netlify_site_id', e.target.value);
+                  }}
+                  className="w-full px-3 py-2.5 bg-slate-800/90 border border-slate-700 rounded-xl text-xs font-bold text-white focus:ring-2 focus:ring-amber-400 focus:border-amber-400 outline-none"
+                />
+              </div>
+            </div>
+
+            {/* Auto Deploy Checkbox on Push */}
+            <div className="flex items-center gap-2 pt-1">
+              <input
+                type="checkbox"
+                id="autoDeployNetlify"
+                checked={autoDeployNetlifyOnPush}
+                onChange={(e) => {
+                  setAutoDeployNetlifyOnPush(e.target.checked);
+                  localStorage.setItem('haby_auto_deploy_netlify', String(e.target.checked));
+                }}
+                className="w-4 h-4 rounded text-amber-500 focus:ring-amber-400 bg-slate-800 border-slate-700 cursor-pointer"
+              />
+              <label htmlFor="autoDeployNetlify" className="text-xs text-slate-300 cursor-pointer select-none">
+                Anzisha deploy na kufuta cache kwenye Netlify kiotomatiki kila ninapobonyeza <b>"Push Full Project to Cloud"</b> hapo juu
+              </label>
+            </div>
+
+            {/* Action Button & Status */}
+            <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+              <button
+                type="button"
+                disabled={netlifyStatus === 'deploying' || !netlifyToken.trim()}
+                onClick={handleNetlifyClearCacheDeploy}
+                className={`py-3 px-6 rounded-xl font-black text-xs flex items-center justify-center gap-2.5 shadow-lg transition-all cursor-pointer ${
+                  netlifyStatus === 'deploying' || !netlifyToken.trim()
+                    ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-60'
+                    : 'bg-amber-400 hover:bg-amber-300 text-slate-950 active:scale-95'
+                }`}
+              >
+                {netlifyStatus === 'deploying' ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin text-slate-950" />
+                    <span>Inafuta Cache &amp; Ku-deploy...</span>
+                  </>
+                ) : (
+                  <>
+                    <Rocket className="w-4 h-4 text-slate-950" />
+                    <span>Clear Cache &amp; Deploy Sasa</span>
+                  </>
+                )}
+              </button>
+
+              {netlifyDeployUrl && (
+                <a
+                  href={netlifyDeployUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="py-3 px-4 rounded-xl font-bold text-xs bg-white/10 hover:bg-white/20 text-blue-200 border border-white/20 flex items-center justify-center gap-1.5 transition-colors"
+                >
+                  <span>Angalia Maendeleo ya Deploy Netlify</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+            </div>
+
+            {/* Messages */}
+            {netlifyMsg && (
+              <div className={`p-4 rounded-xl text-xs font-bold flex items-start gap-2.5 ${
+                netlifyStatus === 'success'
+                  ? 'bg-emerald-500/20 border border-emerald-400/40 text-emerald-200'
+                  : 'bg-rose-500/20 border border-rose-400/40 text-rose-200'
+              }`}>
+                {netlifyStatus === 'success' ? (
+                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                )}
+                <div className="flex-1 leading-relaxed">
+                  <p>{netlifyMsg}</p>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl flex gap-3">

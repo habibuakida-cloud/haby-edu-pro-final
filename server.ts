@@ -434,6 +434,54 @@ app.post('/api/github/push', async (req, res) => {
   }
 });
 
+// NETLIFY AUTO CLEAR CACHE & DEPLOY
+app.post('/api/netlify/deploy', async (req, res) => {
+  const token = req.body.token || process.env.NETLIFY_TOKEN;
+  const siteId = req.body.siteId || process.env.NETLIFY_SITE_ID || 'habyedupro';
+  const clearCache = req.body.clearCache !== false;
+
+  if (!token) {
+    return res.status(400).json({ error: 'Netlify Personal Access Token is required.' });
+  }
+
+  try {
+    console.log(`[Netlify] Triggering deploy for site: ${siteId} (clear_cache: ${clearCache})...`);
+    const netlifyRes = await fetch(`https://api.netlify.com/api/v1/sites/${siteId}/builds`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ clear_cache: clearCache })
+    });
+
+    if (!netlifyRes.ok) {
+      const errBody = await netlifyRes.text();
+      let parsedMessage = errBody;
+      try {
+        const json = JSON.parse(errBody);
+        parsedMessage = json.message || errBody;
+      } catch (e) {}
+      console.error(`[Netlify API Error] Status ${netlifyRes.status}:`, parsedMessage);
+      return res.status(netlifyRes.status).json({ error: `Netlify API error: ${parsedMessage}` });
+    }
+
+    const data = await netlifyRes.json();
+    console.log('✅ Netlify deploy triggered successfully, Build ID:', data.id);
+    return res.json({
+      success: true,
+      id: data.id,
+      deploy_id: data.deploy_id || data.id,
+      site_id: siteId,
+      url: `https://app.netlify.com/sites/${siteId}/deploys/${data.id || ''}`,
+      data
+    });
+  } catch (error: any) {
+    console.error('Netlify deploy exception:', error);
+    return res.status(500).json({ error: error.message || 'Failed to trigger Netlify deploy' });
+  }
+});
+
 // ZIP DOWNLOAD
 app.get('/api/project/zip', (req, res) => {
   try {
