@@ -20,7 +20,8 @@ import {
   LogOut,
   Sparkles,
   Dot,
-  FilterX
+  FilterX,
+  Building2
 } from 'lucide-react';
 import { SchoolInfo, UserAccount } from '../types';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
@@ -320,6 +321,32 @@ export const Navigation: React.FC<NavigationProps> = ({
 
         {/* Sidebar Navigation Scroll Area */}
         <div className="flex-1 overflow-y-auto no-scrollbar p-3 space-y-3">
+          {/* SUPER ADMIN MULTI-SCHOOL HUB QUICK LINK */}
+          {(currentUser?.isSuperAdmin || currentUser?.role === 'SUPER_ADMIN') && (
+            <div>
+              <button
+                type="button"
+                onClick={() => handleSelectSubModule('multischool')}
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-xs transition cursor-pointer ${
+                  activeView === 'multischool'
+                    ? 'bg-purple-600 text-white shadow-md shadow-purple-600/30 font-extrabold'
+                    : 'text-purple-300 bg-purple-950/40 border border-purple-800/40 hover:bg-purple-900/50 hover:text-white'
+                }`}
+                title="Super Admin Multi-School Hub"
+              >
+                <Building2 className="w-4 h-4 text-purple-400 shrink-0" />
+                {!isSidebarCollapsed && (
+                  <div className="flex items-center justify-between flex-1 truncate">
+                    <span className="truncate">Super Admin Hub</span>
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-200 border border-purple-400/30 uppercase font-black">
+                      Multi-School
+                    </span>
+                  </div>
+                )}
+              </button>
+            </div>
+          )}
+
           {/* Top Standalone Quick Link: Home Dashboard */}
           {(!searchQuery.trim() || 'home / overview dashboard'.includes(searchQuery.toLowerCase().trim())) && (
             <div>
@@ -521,6 +548,21 @@ export const Navigation: React.FC<NavigationProps> = ({
 
             {/* Mobile Scroll Area */}
             <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              {(currentUser?.isSuperAdmin || currentUser?.role === 'SUPER_ADMIN') && (
+                <button
+                  type="button"
+                  onClick={() => handleSelectSubModule('multischool')}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl font-bold text-xs ${
+                    activeView === 'multischool' 
+                      ? 'bg-purple-600 text-white font-extrabold shadow-md' 
+                      : 'text-purple-300 bg-purple-950/40 border border-purple-800/40 hover:bg-purple-900/50'
+                  }`}
+                >
+                  <Building2 className="w-4 h-4 text-purple-400" />
+                  <span className="flex-1 text-left">Super Admin Hub (Multi-School)</span>
+                </button>
+              )}
+
               <button
                 type="button"
                 onClick={() => handleSelectSubModule('dashboard')}

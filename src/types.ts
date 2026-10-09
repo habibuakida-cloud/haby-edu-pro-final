@@ -233,7 +233,17 @@ export interface FormStreamTheme {
   text: string;
 }
 
-export type UserRole = 'HEADMASTER' | 'ACADEMIC' | 'TEACHER';
+export type UserRole = 'HEADMASTER' | 'ACADEMIC' | 'TEACHER' | 'SUPER_ADMIN';
+
+export interface SchoolAdminRecord {
+  id: string;
+  school_id: string | null;
+  full_name: string;
+  email: string;
+  password?: string;
+  role: 'super_admin' | 'school_admin';
+  created_at?: string;
+}
 
 export interface UserAccount {
   id: string;

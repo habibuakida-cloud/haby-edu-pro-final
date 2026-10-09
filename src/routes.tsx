@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 
 export type ActiveView = 
+  | 'multischool'
   | 'dashboard'
   | 'students'
   | 'teachers'

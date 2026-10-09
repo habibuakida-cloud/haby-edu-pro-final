@@ -434,7 +434,7 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
       setJournalRecords(newRecords);
       if (onUpdateJournal) onUpdateJournal(newRecords);
     }
-  }, [weekJournalEntries, storageKey]);
+  }, [weekJournalEntries]);
 
   // Filtered entries according to Day selection
   const displayedEntries = useMemo(() => {

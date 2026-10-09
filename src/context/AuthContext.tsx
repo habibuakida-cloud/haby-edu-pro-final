@@ -388,51 +388,100 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const signInWithEmail = async (inputEmail: string, inputPass: string) => {
     setLoading(true);
-    if (typeof window!== 'undefined') { safeRemoveItem(window.sessionStorage, 'haby_explicit_logout'); }
+    if (typeof window !== 'undefined') { safeRemoveItem(window.sessionStorage, 'haby_explicit_logout'); }
     const normalizedEmail = inputEmail.trim().toLowerCase();
+
     try {
-      if (normalizedEmail === SUPERADMIN_EMAIL.toLowerCase()) {
-        if (inputPass!== SUPERADMIN_MASTER_PASSWORD) { throw new Error('Access denied: Invalid password for Super Admin account.'); }
-        let fbUser: FirebaseUser | null = null;
-        try {
-          const userCred = await signInWithEmailAndPassword(auth, normalizedEmail, inputPass);
-          fbUser = userCred.user;
-        } catch (signInErr: any) {
-          if (signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential') {
-            const newCred = await createUserWithEmailAndPassword(auth, normalizedEmail, inputPass);
-            fbUser = newCred.user;
+      // 1. PRIMARY LOGIN CHECK: Supabase school_admins table
+      try {
+        const { data: adminRecord, error: adminErr } = await supabase
+          .from('school_admins')
+          .select('*')
+          .eq('email', normalizedEmail)
+          .maybeSingle();
+
+        if (adminRecord) {
+          const isMasterPass = (normalizedEmail === SUPERADMIN_EMAIL.toLowerCase() || adminRecord.role === 'super_admin') && 
+            inputPass === SUPERADMIN_MASTER_PASSWORD;
+          const isExactPass = adminRecord.password === inputPass;
+
+          if (!isExactPass && !isMasterPass) {
+            throw new Error('Nenosiri si sahihi (Invalid password). Tafadhali hakiki password yako.');
           }
+
+          const isSuper = adminRecord.role === 'super_admin' || normalizedEmail === SUPERADMIN_EMAIL.toLowerCase();
+          const targetSchoolId = adminRecord.school_id || DEFAULT_PRIMARY_SCHOOL_ID;
+
+          sessionStorage.setItem('haby_school_id', targetSchoolId);
+          localStorage.setItem('currentSchoolId', targetSchoolId);
+          localStorage.setItem('schoolId', targetSchoolId);
+          localStorage.setItem('user_role', isSuper ? 'super_admin' : 'school_admin');
+
+          const userAcct: UserAccount = {
+            id: adminRecord.id,
+            email: adminRecord.email,
+            fullName: adminRecord.full_name || (isSuper ? 'Habibu Akida (Super Admin)' : 'School Administrator'),
+            role: isSuper ? 'SUPER_ADMIN' : 'HEADMASTER',
+            schoolId: targetSchoolId,
+            school_id: targetSchoolId,
+            isSuperAdmin: isSuper,
+            password: inputPass
+          };
+
+          sessionStorage.setItem('haby_demo_user', JSON.stringify(userAcct));
+          setUserAccount(userAcct);
+          setLoading(false);
+          return;
         }
-        let schoolId = sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
-        try {
-          const { data: supaUsers } = await supabase.from('users').select('*').eq('email', normalizedEmail);
-          if (supaUsers && supaUsers.length > 0) { schoolId = supaUsers[0].school_id || supaUsers[0].schoolId; }
-        } catch (e) {}
+      } catch (err: any) {
+        if (err.message && err.message.includes('Nenosiri si sahihi')) {
+          throw err;
+        }
+        console.warn("[Auth] school_admins check notice:", err);
+      }
+
+      // 2. DEFAULT SUPER ADMIN FALLBACK: habibuakida@gmail.com
+      if (normalizedEmail === SUPERADMIN_EMAIL.toLowerCase()) {
+        if (inputPass !== SUPERADMIN_MASTER_PASSWORD) { 
+          throw new Error('Access denied: Invalid password for Super Admin account.'); 
+        }
+        const schoolId = sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
         sessionStorage.setItem('haby_school_id', schoolId);
         localStorage.setItem('currentSchoolId', schoolId);
-        const adminAccount: UserAccount = { id: fbUser?.uid || 'admin_haby_root', email: normalizedEmail, fullName: 'Mwl. Habibu Akida (Super Admin)', role: 'HEADMASTER', schoolId, isSuperAdmin: true, password: SUPERADMIN_MASTER_PASSWORD };
+        localStorage.setItem('user_role', 'super_admin');
+        const adminAccount: UserAccount = { 
+          id: 'efbbc146-b15b-49ee-a7ed-931ade8ccd0d', 
+          email: normalizedEmail, 
+          fullName: 'Habibu Akida (Super Admin)', 
+          role: 'SUPER_ADMIN', 
+          schoolId, 
+          school_id: schoolId,
+          isSuperAdmin: true, 
+          password: SUPERADMIN_MASTER_PASSWORD 
+        };
         sessionStorage.setItem('haby_demo_user', JSON.stringify(adminAccount));
         setUserAccount(adminAccount);
+        setLoading(false);
         return;
       }
       if (normalizedEmail === ADMIN_EMAIL.toLowerCase()) {
-        if (inputPass!== SUPERADMIN_MASTER_PASSWORD) { throw new Error('Access denied: Invalid administrator password.'); }
-        let fbUser: FirebaseUser | null = null;
-        try {
-          const userCred = await signInWithEmailAndPassword(auth, normalizedEmail, inputPass);
-          fbUser = userCred.user;
-        } catch (signInErr: any) {
-          if (signInErr.code === 'auth/user-not-found' || signInErr.code === 'auth/invalid-credential') {
-            const newCred = await createUserWithEmailAndPassword(auth, normalizedEmail, inputPass);
-            fbUser = newCred.user;
-          }
+        if (inputPass !== SUPERADMIN_MASTER_PASSWORD) { 
+          throw new Error('Access denied: Invalid administrator password.'); 
         }
         let schoolId = sessionStorage.getItem('haby_school_id') || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
         sessionStorage.setItem('haby_school_id', schoolId);
         localStorage.setItem('currentSchoolId', schoolId);
-        const adminAccount: UserAccount = { id: fbUser?.uid || 'admin_haby_root', email: normalizedEmail, fullName: 'Administrator (Mwl. Habibu Akida)', role: 'HEADMASTER', schoolId, isSuperAdmin: true };
+        const adminAccount: UserAccount = { 
+          id: 'admin_haby_root', 
+          email: normalizedEmail, 
+          fullName: 'Administrator (Mwl. Habibu Akida)', 
+          role: 'SUPER_ADMIN', 
+          schoolId, 
+          isSuperAdmin: true 
+        };
         sessionStorage.setItem('haby_demo_user', JSON.stringify(adminAccount));
         setUserAccount(adminAccount);
+        setLoading(false);
         return;
       }
       let fbUser: FirebaseUser | null = null;
@@ -519,6 +568,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginAsDemo = (role: UserRole) => {
     const demoAccounts: Record<UserRole, UserAccount> = {
+      SUPER_ADMIN: {
+        id: 'usr_superadmin_habibu',
+        email: SUPERADMIN_EMAIL,
+        fullName: 'Habibu Akida (Super Admin)',
+        role: 'SUPER_ADMIN',
+        schoolId: DEFAULT_PRIMARY_SCHOOL_ID,
+        school_id: DEFAULT_PRIMARY_SCHOOL_ID,
+        isSuperAdmin: true,
+        password: SUPERADMIN_MASTER_PASSWORD
+      },
       HEADMASTER: { id: 'demo_headmaster', email: 'headmaster.demo@haby.com', fullName: 'Mwl. Peter Mwita (Headmaster Demo)', role: 'HEADMASTER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID, isSuperAdmin: false },
       ACADEMIC: { id: 'usr_academic', email: 'academic@kiomonisec.ac.tz', fullName: 'David Mwakipesile (Academic Master)', role: 'ACADEMIC', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID },
       TEACHER: { id: 'usr_teacher', email: 'teacher@kiomonisec.ac.tz', fullName: 'Grace Mchome (Staff Teacher)', role: 'TEACHER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID, assignedSubjects: ['English Language', 'ENG'] }

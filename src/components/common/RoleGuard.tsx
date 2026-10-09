@@ -28,7 +28,7 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
 
   // 2. HEADMASTER / ACADEMIC role: allowed /school-admin and /teacher routes, but not super admin network
   if ((role === 'HEADMASTER' || role === 'ACADEMIC') && !isSuperAdmin) {
-    const restrictedSuperAdminViews = ['network', 'github', 'backup'];
+    const restrictedSuperAdminViews = ['network', 'github', 'backup', 'multischool'];
     if (restrictedSuperAdminViews.includes(currentView)) {
       onRedirect('dashboard');
       return null;

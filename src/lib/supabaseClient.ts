@@ -185,25 +185,27 @@ export async function measureSupabaseLatency(): Promise<{ latencyMs: number; ok:
 }
 
 // Student Serializers (maps between React App model and Supabase table schema)
-export const toSupabaseStudent = (s: any, schoolId: string) => {
+export const toSupabaseStudent = (s: any, schoolId?: string, classId?: string) => {
+  const genderClean = (s.gender && String(s.gender).toLowerCase() === 'female') ? 'Female' : 'Male';
   const row: Record<string, any> = {
-    name: s.name,
-    class: s.className || s.class || 'Form 1',
-    stream: s.stream || 'STREAM A',
-    gender: s.gender || 'Male',
-    school_id: schoolId,
+    full_name: s.name || s.fullName || s.full_name || 'Mwanafunzi',
+    gender: genderClean,
+    class_name: s.className || s.class || 'Form 1',
+    stream_name: s.stream || s.streamName || 'STREAM A',
     parent_phone: s.parentPhone || s.phone || '',
-    phone: s.phone || s.parentPhone || '',
-    reg_no: s.regNo || '',
-    level: s.level || 'CSEE',
-    dob: s.dob || '2010-01-01',
-    passport_photo: s.passportPhoto || s.photo || '',
-    subjects: Array.isArray(s.subjects) ? s.subjects : [],
-    marks: s.marks || {},
-    total: Number(s.total) || 0,
-    average: String(s.average || '0.0'),
-    division: s.division || '-'
+    parent_full_name: s.parentName || s.parent_name || 'Mzazi',
+    passport_photo_url: s.passportPhoto || s.photo || null,
+    level_name: s.level || 'CSEE (Ordinary Level Form 1-4)'
   };
+  if (s.regNo || s.reg_token) {
+    row.reg_token = s.regNo || s.reg_token;
+  }
+  if (classId || s.classId || s.class_id) {
+    row.class_id = classId || s.classId || s.class_id;
+  }
+  if (s.dob) {
+    row.dob = s.dob;
+  }
   if (s.id && typeof s.id === 'string' && s.id.includes('-')) {
     row.id = s.id;
   }
@@ -213,15 +215,18 @@ export const toSupabaseStudent = (s: any, schoolId: string) => {
 export const fromSupabaseStudent = (row: any, idx = 0) => {
   return {
     id: row.id ?? (idx + 1),
-    regNo: row.reg_no || row.regNo || undefined,
-    name: row.name,
+    regNo: row.reg_token || row.reg_no || undefined,
+    name: row.full_name || row.name || 'Mwanafunzi',
     gender: (row.gender as any) || 'Male',
     dob: row.dob || '2010-01-01',
-    className: row.class || row.className || 'Form 1',
-    level: (row.level as any) || 'CSEE',
-    stream: row.stream || 'STREAM A',
-    parentPhone: row.parent_phone || row.parentPhone || row.phone,
-    phone: row.phone || row.parent_phone || row.parentPhone,
+    className: row.class_name || row.class || 'Form 1',
+    classId: row.class_id || undefined,
+    level: (row.level_name?.includes('ACSEE') ? 'ACSEE' : (row.level || 'CSEE')) as any,
+    stream: row.stream_name || row.stream || 'STREAM A',
+    parentPhone: row.parent_phone || row.phone || '',
+    phone: row.parent_phone || row.phone || '',
+    parentName: row.parent_full_name || '',
+    passportPhoto: row.passport_photo_url || row.passport_photo || '',
     subjects: Array.isArray(row.subjects) ? row.subjects : [],
     marks: row.marks || {},
     total: row.total || 0,
@@ -231,21 +236,19 @@ export const fromSupabaseStudent = (row: any, idx = 0) => {
 };
 
 // Teacher Serializers
-export const toSupabaseTeacher = (t: any, schoolId: string) => {
+export const toSupabaseTeacher = (t: any, schoolId?: string) => {
+  const genderClean = (t.gender && String(t.gender).toLowerCase() === 'female') ? 'Female' : 'Male';
   const row: Record<string, any> = {
-    name: t.name,
-    subject: (t.subjects && t.subjects[0]) || t.subject || 'Basic Mathematics',
-    school_id: schoolId,
-    gender: t.gender || 'Male',
-    school_role: t.schoolRole || t.role || 'Subject Teacher',
-    initial: t.initial || (t.name ? t.name.split(' ').map((n: string) => n[0]).join('').slice(0, 3).toUpperCase() : 'MWL'),
+    full_name: t.name || t.fullName || t.full_name || 'Mwalimu',
+    gender: genderClean,
+    staff_role_name: t.schoolRole || t.role || 'Subject Teacher (Standard)',
+    weekly_period_quota: Number(t.maxPeriodsPerWeek) || 20,
     phone: t.phone || '',
     email: t.email || '',
-    subjects: Array.isArray(t.subjects) ? t.subjects : [t.subject || 'Basic Mathematics'],
-    teaching_streams: Array.isArray(t.teachingStreams) ? t.teachingStreams : [],
-    color: t.color || '#1d4ed8',
-    max_periods_per_week: Number(t.maxPeriodsPerWeek) || 20,
-    exclude_invigilation: Boolean(t.excludeInvigilation || t.exclude_invigilation)
+    initial_preview: t.initial || (t.name ? t.name.split(' ').map((n: string) => n[0]).join('').slice(0, 3).toUpperCase() : 'MWL'),
+    color_identity: t.color || '#1E88E5',
+    invigilation_availability: (t.excludeInvigilation || t.exclude_invigilation) ? 'Unavailable' : 'Available for Invigilation',
+    passport_photo_url: t.photo || t.passportPhoto || null
   };
   if (t.id && typeof t.id === 'string' && t.id.includes('-')) {
     row.id = t.id;
@@ -256,32 +259,30 @@ export const toSupabaseTeacher = (t: any, schoolId: string) => {
 export const fromSupabaseTeacher = (row: any, idx = 0) => {
   return {
     id: row.id ?? (idx + 101),
-    name: row.name,
+    name: row.full_name || row.name || 'Mwalimu',
     gender: (row.gender as any) || 'Male',
-    schoolRole: row.school_role || row.schoolRole || row.role || 'Subject Teacher',
-    initial: row.initial || (row.name ? row.name.split(' ').map((n: string) => n[0]).join('').slice(0, 3).toUpperCase() : 'MWL'),
+    schoolRole: row.staff_role_name || row.school_role || 'Subject Teacher',
+    initial: row.initial_preview || row.initial || (row.full_name ? row.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 3).toUpperCase() : 'MWL'),
     phone: row.phone || undefined,
     email: row.email || undefined,
     subjects: Array.isArray(row.subjects) ? row.subjects : [row.subject || 'Basic Mathematics'],
     teachingStreams: Array.isArray(row.teaching_streams) ? row.teaching_streams : [],
-    color: row.color || '#1d4ed8',
-    excludeInvigilation: Boolean(row.exclude_invigilation || row.excludeInvigilation),
-    maxPeriodsPerWeek: row.max_periods_per_week || row.maxPeriodsPerWeek || 20
+    color: row.color_identity || row.color || '#1d4ed8',
+    excludeInvigilation: Boolean(row.invigilation_availability === 'Unavailable' || row.exclude_invigilation || row.excludeInvigilation),
+    maxPeriodsPerWeek: row.weekly_period_quota || row.max_periods_per_week || 20
   };
 };
 
 // Exam Serializers
-export const toSupabaseExam = (e: any, schoolId: string) => {
+export const toSupabaseExam = (e: any, schoolId?: string) => {
   const row: Record<string, any> = {
-    name: e.name,
-    term: e.term || e.type || 'Term 1',
-    year: String(e.year || new Date().getFullYear()),
-    class: e.className || e.class || 'All',
-    school_id: schoolId,
-    level: e.level || 'CSEE',
-    date: e.date || new Date().toISOString().slice(0, 10),
-    status: e.status || 'Active'
+    name: e.name || 'Examination',
+    exam_type: e.type || e.term || 'Terminal',
+    status: (e.status || 'Active').toLowerCase() === 'active' ? 'active' : 'upcoming'
   };
+  if (e.date) {
+    row.start_date = e.date.slice(0, 10);
+  }
   if (e.id && typeof e.id === 'string' && e.id.includes('-')) {
     row.id = e.id;
   }
@@ -292,11 +293,11 @@ export const fromSupabaseExam = (row: any, idx = 0) => {
   return {
     id: row.id ?? (idx + 1),
     name: row.name,
-    type: row.term || row.type || 'Terminal',
-    level: (row.level as any) || 'CSEE',
-    className: row.class || row.className || 'All',
-    date: row.date || row.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
-    status: (row.status as any) || 'Active'
+    type: row.exam_type || row.term || 'Terminal',
+    level: (row.level || 'CSEE') as any,
+    className: row.className || 'All',
+    date: row.start_date || row.created_at?.slice(0, 10) || new Date().toISOString().slice(0, 10),
+    status: (row.status?.toLowerCase() === 'active' ? 'Active' : 'Upcoming') as any
   };
 };
 
@@ -416,12 +417,19 @@ export const fromSupabaseGatePass = (row: any) => {
   };
 };
 
-// Helper CRUD Functions with automatic school_id multi-tenancy and offline queue
+// Set of core school tables that do not have a school_id column in this PostgreSQL schema
+export const TABLES_WITHOUT_SCHOOL_ID = new Set([
+  'schools', 'students', 'teachers', 'classes', 'subjects', 'periods', 'timetable', 'attendance', 'exams', 'exam_results', 'profiles', 'settings'
+]);
+
+// Helper CRUD Functions with automatic multi-tenancy and offline queue
 export async function getAll(table: string, schoolId?: string, isSuperAdmin: boolean = false) {
-  const effectiveSchoolId = isSuperAdmin ? undefined : (schoolId || getCurrentSchoolId());
   let query = supabase.from(table).select('*');
-  if (effectiveSchoolId) {
-    query = query.eq('school_id', effectiveSchoolId);
+  if (!TABLES_WITHOUT_SCHOOL_ID.has(table)) {
+    const effectiveSchoolId = isSuperAdmin ? undefined : (schoolId || getCurrentSchoolId());
+    if (effectiveSchoolId) {
+      query = query.eq('school_id', effectiveSchoolId);
+    }
   }
   return await query;
 }
@@ -432,14 +440,14 @@ export async function insertRecord(table: string, data: any) {
     return { data: null, error: null, offline: true };
   }
   const schoolId = getCurrentSchoolId();
-  const payload = (schoolId && !Array.isArray(data) && !data.school_id)
+  const shouldAttachSchoolId = !TABLES_WITHOUT_SCHOOL_ID.has(table);
+  const payload = (schoolId && shouldAttachSchoolId && !Array.isArray(data) && !data.school_id)
     ? { ...data, school_id: schoolId }
     : data;
   
   const result = await supabase.from(table).insert(payload).select();
   if (result.error) {
     console.error(`Error inserting into ${table}:`, result.error);
-    // Optionally add to queue if it's a transient error, but for now just return
   }
   return result;
 }
@@ -473,11 +481,15 @@ export async function upsertRecord(table: string, data: any, onConflict: string 
   }
 
   const schoolId = getCurrentSchoolId();
-  const payload = (schoolId && !Array.isArray(data) && !data.school_id)
+  const shouldAttachSchoolId = !TABLES_WITHOUT_SCHOOL_ID.has(table);
+  const payload = (schoolId && shouldAttachSchoolId && !Array.isArray(data) && !data.school_id)
     ? { ...data, school_id: schoolId }
     : data;
 
   const result = await supabase.from(table).upsert(payload, { onConflict }).select();
+  if (result.error) {
+    console.warn(`Notice upserting to ${table}:`, result.error.message);
+  }
   return result;
 }
 

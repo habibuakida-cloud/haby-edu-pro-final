@@ -65,7 +65,8 @@ import {
 } from './lib/supabaseClient';
 import { getSchoolData, saveSchoolData, subscribeSchoolData } from './lib/firestoreService';
 import { saveTimetableAssignments } from './lib/timetableService';
-import { Loader2, Shield, Menu, RotateCw, Check } from 'lucide-react';
+import { SuperAdminDashboard } from './components/SuperAdmin/SuperAdminDashboard';
+import { Loader2, Shield, Menu, RotateCw, Check, Building2, ShieldCheck } from 'lucide-react';
 import { doc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from './lib/firebase';
 
@@ -97,6 +98,9 @@ export default function App() {
   useEffect(() => {
     if (userAccount?.role === 'TEACHER' && activeView !== 'teacherportal') {
       setActiveView('teacherportal');
+    } else if ((userAccount?.isSuperAdmin || userAccount?.role === 'SUPER_ADMIN') && !sessionStorage.getItem('haby_superadmin_viewed')) {
+      sessionStorage.setItem('haby_superadmin_viewed', 'true');
+      setActiveView('multischool');
     }
   }, [userAccount, activeView]);
 
@@ -179,8 +183,19 @@ export default function App() {
         updated_at: new Date().toISOString()
       };
       
-      // Save directly to Firestore as single source of truth for settings
+      // 1. Save to Firestore
       await saveSchoolData(schId, payload);
+
+      // 2. Save to Supabase school_data table (Dual Cloud Persistence)
+      try {
+        await supabase.from('school_data').upsert({
+          id: schId,
+          school_id: schId,
+          ...payload
+        }, { onConflict: 'school_id' });
+      } catch (supaErr) {
+        console.warn("Supabase school_data sync notice:", supaErr);
+      }
     } catch (err) {
       console.warn("Error saving school snapshot:", err);
     }
@@ -237,17 +252,43 @@ export default function App() {
       }
     }).catch(e => console.warn("Initial IDB cache load error:", e));
 
-    // 0. Primary Database Load: Prioritize Firestore Snapshot
+    // 0. Primary Database Load: Seamless Hybrid Sync (Supabase Relational + Firestore Realtime)
     const loadFromDatabase = async (isInitialBoot = false) => {
-      console.log("Loading single source of truth from Firestore for school:", schoolId);
+      console.log("Loading unified single source of truth for school:", schoolId);
 
       try {
-        // Fetch Snapshot from Firestore as Single Source of Truth
-        const firestoreData = await getSchoolData(schoolId).catch(() => null);
+        // Fetch in parallel from Firestore and Supabase
+        const [firestoreData, studRes, teachRes, examRes, classRes, perRes, subjRes] = await Promise.all([
+          getSchoolData(schoolId).catch(() => null),
+          supabase.from('students').select('*').catch(() => ({ data: null })),
+          supabase.from('teachers').select('*').catch(() => ({ data: null })),
+          supabase.from('exams').select('*').catch(() => ({ data: null })),
+          supabase.from('classes').select('*').catch(() => ({ data: null })),
+          supabase.from('periods').select('*').order('start_time', { ascending: true }).catch(() => ({ data: null })),
+          supabase.from('subjects').select('*').catch(() => ({ data: null })),
+        ]);
 
-        // Fetch users from Firestore users collection & authorizedStaff for this school
+        // Process Supabase core tables
+        const supaStudents = (studRes?.data || []).map((s: any, idx: number) => fromSupabaseStudent(s, idx));
+        const supaTeachers = (teachRes?.data || []).map((t: any, idx: number) => fromSupabaseTeacher(t, idx));
+        const supaExams = (examRes?.data || []).map((e: any, idx: number) => fromSupabaseExam(e, idx));
+        const supaClasses = classRes?.data || [];
+        const supaPeriods = (perRes?.data || []).map((p: any, idx: number) => ({
+          id: p.id || `period-${idx + 1}`,
+          name: p.name || `Period ${idx + 1}`,
+          start: p.start_time || '07:30',
+          end: p.end_time || '08:10',
+          isBreak: Boolean(p.is_break),
+          isAssembly: false,
+          isSports: false,
+          isReligion: false
+        }));
+
+        // Fetch users from Firestore users collection & authorizedStaff & Supabase profiles
         try {
           const userMap = new Map<string, any>();
+
+          // a) Firestore users query 1 (schoolId)
           try {
             const uQuery1 = query(collection(db, 'users'), where('schoolId', '==', schoolId));
             const uSnap1 = await getDocs(uQuery1);
@@ -256,6 +297,7 @@ export default function App() {
             console.warn("Could not query users by schoolId:", e1);
           }
 
+          // b) Firestore users query 2 (school_id)
           try {
             const uQuery2 = query(collection(db, 'users'), where('school_id', '==', schoolId));
             const uSnap2 = await getDocs(uQuery2);
@@ -264,6 +306,7 @@ export default function App() {
             console.warn("Could not query users by school_id:", e2);
           }
 
+          // c) Firestore authorizedStaff
           try {
             const staffSnap = await getDocs(collection(db, `schools/${schoolId}/authorizedStaff`));
             staffSnap.docs.forEach(d => {
@@ -292,20 +335,47 @@ export default function App() {
             setUsers(Array.from(userMap.values()) as UserAccount[]);
           }
         } catch (uErr) {
-          console.warn("Could not load users from Firestore:", uErr);
+          console.warn("Could not load users from database:", uErr);
         }
 
         const rawSchoolData = (firestoreData || {}) as Record<string, any>;
         const remoteData = { ...rawSchoolData } as Partial<AppData>;
         
         setData(prev => {
-          // Merge Snapshot settings
+          // Resolve students: prioritize Supabase relational rows if present, else snapshot
+          const resolvedStudents = supaStudents.length > 0 ? supaStudents : (remoteData.students || prev.students);
+          const resolvedTeachers = supaTeachers.length > 0 ? supaTeachers : (remoteData.teachers || prev.teachers);
+          const resolvedExams = supaExams.length > 0 ? supaExams : (remoteData.exams || prev.exams);
+
+          // Build or merge streamSettings from Supabase classes if available
+          let resolvedStreamSettings = remoteData.streamSettings || prev.streamSettings || [];
+          if (supaClasses.length > 0) {
+            const existingClassNames = new Set(resolvedStreamSettings.map((s: any) => s.className));
+            const newStreamEntries = supaClasses
+              .filter((c: any) => !existingClassNames.has(c.name))
+              .map((c: any) => ({
+                className: c.name,
+                level: c.level || 'CSEE',
+                streams: c.stream ? [c.stream] : ['STREAM A', 'STREAM B']
+              }));
+            if (newStreamEntries.length > 0) {
+              resolvedStreamSettings = [...resolvedStreamSettings, ...newStreamEntries];
+            }
+          }
+
+          // Use Supabase periods if present and periodSettings is empty
+          const resolvedPeriods = (supaPeriods.length > 0 && (!remoteData.periodSettings || remoteData.periodSettings.length === 0))
+            ? supaPeriods
+            : (remoteData.periodSettings || prev.periodSettings || []);
+
           const updatedState: AppData = {
             ...prev,
             ...remoteData,
-            students: remoteData.students || prev.students,
-            teachers: remoteData.teachers || prev.teachers,
-            exams: remoteData.exams || prev.exams,
+            students: resolvedStudents,
+            teachers: resolvedTeachers,
+            exams: resolvedExams,
+            streamSettings: resolvedStreamSettings,
+            periodSettings: resolvedPeriods,
             parents: remoteData.parents || prev.parents,
             examinationRecords: remoteData.examinationRecords || prev.examinationRecords,
           };
@@ -328,26 +398,26 @@ export default function App() {
     // 1. Supabase Real-Time Subscriptions (The Real Single Source of Truth)
     const studentsSub = supabase
       .channel('public:students')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'students', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'students' }, () => loadFromDatabase())
       .subscribe();
 
     const teachersSub = supabase
       .channel('public:teachers')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'teachers' }, () => loadFromDatabase())
+      .subscribe();
+
+    const classesSub = supabase
+      .channel('public:classes')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'classes' }, () => loadFromDatabase())
       .subscribe();
 
     const examsSub = supabase
       .channel('public:exams')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
-      .subscribe();
-
-    const parentsSub = supabase
-      .channel('public:parents')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'parents', filter: `school_id=eq.${schoolId}` }, () => loadFromDatabase())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'exams' }, () => loadFromDatabase())
       .subscribe();
 
     // Check school status from schools table
-    Promise.resolve(supabase.from('schools').select('*').eq('id', schoolId).single())
+    Promise.resolve(supabase.from('schools').select('*').limit(1).maybeSingle())
       .then(({ data: sData }) => {
         if (sData) {
           setSchoolStatus(sData.status || 'ACTIVE');
@@ -358,8 +428,8 @@ export default function App() {
     return () => {
       supabase.removeChannel(studentsSub);
       supabase.removeChannel(teachersSub);
+      supabase.removeChannel(classesSub);
       supabase.removeChannel(examsSub);
-      supabase.removeChannel(parentsSub);
     };
   }, [userAccount]);
 
@@ -497,6 +567,35 @@ export default function App() {
         if (updates.exams && Array.isArray(updates.exams)) {
           const chunk = updates.exams.map(e => toSupabaseExam(e, schoolId));
           await upsertRecord('exams', chunk, 'id');
+        }
+
+        if (updates.streamSettings && Array.isArray(updates.streamSettings)) {
+          for (const s of updates.streamSettings) {
+            if (s.className) {
+              try {
+                await supabase.from('classes').upsert({
+                  name: s.className,
+                  level: s.level || 'CSEE',
+                  capacity: 45
+                }, { onConflict: 'name' });
+              } catch (e) {}
+            }
+          }
+        }
+
+        if (updates.periodSettings && Array.isArray(updates.periodSettings)) {
+          for (const p of updates.periodSettings) {
+            if (p.name && p.start && p.end) {
+              try {
+                await supabase.from('periods').upsert({
+                  name: p.name,
+                  start_time: p.start,
+                  end_time: p.end,
+                  is_break: Boolean(p.isBreak)
+                }, { onConflict: 'name' });
+              } catch (e) {}
+            }
+          }
         }
 
         if (updates.examinationRecords && Array.isArray(updates.examinationRecords)) {
@@ -708,8 +807,14 @@ export default function App() {
       school_id: schoolId
     };
 
+    let matchedClassId: string | undefined = undefined;
     try {
-      const dbRow = toSupabaseStudent(studentWithId, schoolId);
+      const { data: cls } = await supabase.from('classes').select('id').eq('name', studentWithId.className).maybeSingle();
+      if (cls?.id) matchedClassId = cls.id;
+    } catch (e) {}
+
+    try {
+      const dbRow = toSupabaseStudent(studentWithId, schoolId, matchedClassId);
       await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
     } catch (e) {
       console.warn("Error upserting student in Supabase:", e);
@@ -727,6 +832,17 @@ export default function App() {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleBulkAddStudents):", schoolId);
 
+    // Fetch classes map to associate class_id foreign key
+    const classIdMap: Record<string, string> = {};
+    try {
+      const { data: classesData } = await supabase.from('classes').select('id, name');
+      if (classesData) {
+        classesData.forEach((c: any) => {
+          if (c.name) classIdMap[c.name.trim()] = c.id;
+        });
+      }
+    } catch (e) {}
+
     const processedStudents = newStudents.map(s => {
       const isUuid = typeof s.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.id);
       const validId = isUuid ? s.id : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -741,7 +857,10 @@ export default function App() {
     });
 
     try {
-      const rowsToPush = processedStudents.map(s => toSupabaseStudent(s, schoolId));
+      const rowsToPush = processedStudents.map(s => {
+        const cId = s.className ? classIdMap[s.className.trim()] : undefined;
+        return toSupabaseStudent(s, schoolId, cId);
+      });
       const chunkSize = 100;
       for (let i = 0; i < rowsToPush.length; i += chunkSize) {
         const chunk = rowsToPush.slice(i, i + chunkSize);
@@ -766,24 +885,6 @@ export default function App() {
     setUsers(newUsers);
     if (!userAccount?.schoolId) return;
     try {
-      const existingUserIds = new Set(newUsers.map(u => u.id));
-      for (const oldU of users) {
-        if (!existingUserIds.has(oldU.id)) {
-          try {
-            await supabase.from('users').delete().eq('id', oldU.id);
-          } catch (e) {
-            console.warn("Could not delete user doc in Supabase:", e);
-          }
-        }
-      }
-      for (const u of newUsers) {
-        await supabase.from('users').insert({
-          ...u,
-          school_id: userAccount.schoolId,
-          schoolId: userAccount.schoolId,
-          updated_at: new Date().toISOString()
-        });
-      }
       const activityLogs = logActivity(
         'USER_ROLE_UPDATE',
         'security',
@@ -792,7 +893,7 @@ export default function App() {
       );
       updateRemoteData({ activityLogs });
     } catch (e) {
-      console.error("Error updating users in Supabase:", e);
+      console.error("Error updating users:", e);
     }
   };
 
@@ -859,8 +960,7 @@ export default function App() {
     const newStudents = data.students.filter(s => !idSet.has(String(s.id)));
 
     try {
-      await deleteRecord('students', ids as any); // deleteRecord might need to handle array, but for now we'll use supabase directly or fix helper
-      await supabase.from('students').delete().in('id', ids).eq('school_id', schoolId);
+      await supabase.from('students').delete().in('id', ids);
     } catch (e) {
       console.warn("Error bulk deleting students in Supabase:", e);
     }
@@ -881,10 +981,8 @@ export default function App() {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleAddTeacher):", schoolId);
     try {
-      await supabase.from('teachers').upsert({
-        ...teacher,
-        school_id: schoolId
-      }, { onConflict: 'id' });
+      const dbRow = toSupabaseTeacher(teacher, schoolId);
+      await supabase.from('teachers').upsert(dbRow, { onConflict: 'id' });
     } catch (e) {
       console.warn("Error inserting teacher doc in Supabase:", e);
     }
@@ -906,13 +1004,8 @@ export default function App() {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleBulkAddTeachers):", schoolId);
     try {
-      await supabase.from('teachers').upsert(
-        newTeachers.map(t => ({
-          ...t,
-          school_id: schoolId
-        })),
-        { onConflict: 'id' }
-      );
+      const rows = newTeachers.map(t => toSupabaseTeacher(t, schoolId));
+      await supabase.from('teachers').upsert(rows, { onConflict: 'id' });
     } catch (e) {
       console.warn("Error inserting bulk teachers in Supabase:", e);
     }
@@ -934,10 +1027,8 @@ export default function App() {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleUpdateTeacher):", schoolId);
     try {
-      await supabase.from('teachers').upsert({
-        ...teacher,
-        school_id: schoolId
-      }, { onConflict: 'id' });
+      const dbRow = toSupabaseTeacher(teacher, schoolId);
+      await supabase.from('teachers').upsert(dbRow, { onConflict: 'id' });
     } catch (e) {
       console.warn("Error updating teacher doc in Supabase:", e);
     }
@@ -1315,6 +1406,57 @@ export default function App() {
         {/* View Switcher */}
         <RoleGuard currentUser={userAccount} currentView={activeView} onRedirect={view => setActiveView(view as any)}>
           <main>
+          {/* Super Admin Active School Banner */}
+          {(userAccount?.isSuperAdmin || userAccount?.role === 'SUPER_ADMIN') && activeView !== 'multischool' && (
+            <div className="mb-5 bg-gradient-to-r from-purple-900 via-indigo-950 to-slate-900 border border-purple-500/40 text-white rounded-2xl p-3.5 px-5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xl">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-purple-500/20 border border-purple-400/30 flex items-center justify-center text-purple-300 shrink-0">
+                  <ShieldCheck className="w-5 h-5 text-purple-400" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-black uppercase text-purple-300 tracking-widest block">Super Admin Master Mode</span>
+                  <span className="text-xs sm:text-sm font-bold text-white">
+                    Unasimamia Shule ya: <strong className="text-amber-300 font-extrabold uppercase underline decoration-amber-400">{data.schoolInfo.name || 'HABY EDU SCHOOL'}</strong>
+                  </span>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveView('multischool')}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-500 text-white text-xs font-black rounded-xl transition shadow-md flex items-center gap-2 cursor-pointer shrink-0"
+              >
+                <Building2 className="w-4 h-4 text-purple-200" />
+                <span>← Rudi Super Admin Dashboard (Multi-School Hub)</span>
+              </button>
+            </div>
+          )}
+
+          {activeView === 'multischool' && (
+            <SuperAdminDashboard
+              currentUser={userAccount}
+              currentSchoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              onSelectSchool={(selectedSchoolId, selectedSchoolName) => {
+                sessionStorage.setItem('haby_school_id', selectedSchoolId);
+                localStorage.setItem('currentSchoolId', selectedSchoolId);
+                setData(prev => ({
+                  ...prev,
+                  schoolInfo: {
+                    ...prev.schoolInfo,
+                    name: selectedSchoolName
+                  }
+                }));
+                if (userAccount) {
+                  setUserAccount({
+                    ...userAccount,
+                    schoolId: selectedSchoolId,
+                    school_id: selectedSchoolId
+                  });
+                }
+                setActiveView('dashboard');
+              }}
+              onNavigateToView={view => setActiveView(view)}
+            />
+          )}
+
           {activeView === 'dashboard' && (
             <DashboardView
               students={data.students}
