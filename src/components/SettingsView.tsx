@@ -733,42 +733,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       console.log("[Registration] Starting atomic registration for:", { normalizedEmail, targetSchoolId });
 
-      // 1. Create user in Firebase Authentication using secondary Firebase App instance so Superadmin doesn't log out
-      const secondaryApp = initializeApp(firebaseConfig, "SecondaryAuthApp_" + Date.now());
-      const secondaryAuth = getAuth(secondaryApp);
-      let uid: string;
-      try {
-        console.log("[Registration] Step 1: Creating Auth user in Firebase Auth...");
-        const userCred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, adminPassword.trim());
-        uid = userCred.user.uid;
-        console.log("[Registration] Step 1 Success: Created Auth user with UID:", uid);
-      } catch (authErr: any) {
-        console.warn("[Registration] Auth createUser error:", authErr);
-        if (authErr.code === 'auth/email-already-in-use') {
-          try {
-            console.log("[Registration] Email in use, verifying password with secondary auth...");
-            const existingCred = await signInWithEmailAndPassword(secondaryAuth, normalizedEmail, adminPassword.trim());
-            uid = existingCred.user.uid;
-            console.log("[Registration] Re-authenticated existing user, UID:", uid);
-          } catch (signInErr: any) {
-            const q = query(collection(db, 'users'), where('email', '==', normalizedEmail));
-            const qSnap = await getDocs(q);
-            if (!qSnap.empty) {
-              uid = qSnap.docs[0].id;
-              console.log("[Registration] Found existing UID from Firestore users doc:", uid);
-            } else {
-              throw new Error(`Email "${normalizedEmail}" is already registered in Firebase Authentication. Please use a different email or provide the existing password.`);
-            }
-          }
-        } else {
-          throw authErr;
-        }
-      } finally {
-        await signOut(secondaryAuth).catch(() => {});
-        await deleteApp(secondaryApp).catch(() => {});
-      }
+      // 1. Create user in Supabase Authentication
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: normalizedEmail,
+        password: adminPassword.trim(),
+      });
+      if (authError) throw authError;
+      const uid = authData.user?.id;
+      if (!uid) throw new Error("Could not create user in Supabase.");
+      
+      console.log("[Registration] Step 1 Success: Created Auth user with UID:", uid);
 
-      console.log("[Registration] Step 2: Creating Firestore user documents with UID:", uid);
+      console.log("[Registration] Step 2: Creating Supabase user documents with UID:", uid);
 
       const userDocData = {
         id: uid,
@@ -786,31 +762,36 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         password: adminPassword.trim()
       };
 
-      // a) Write to `users/{uid}` (document ID MUST match Auth UID)
-      await setDoc(doc(db, 'users', uid), userDocData);
-      console.log("[Registration] Step 2a Success: Created document in 'users' collection with ID:", uid);
-
-      // b) Write to `schoolAdmins/{uid}`
-      await setDoc(doc(db, 'schoolAdmins', uid), userDocData);
-      console.log("[Registration] Step 2b Success: Created document in 'schoolAdmins' collection with ID:", uid);
-
-      // c) Write to `schools/{targetSchoolId}/authorizedStaff/{uid}`
-      await setDoc(doc(db, `schools/${targetSchoolId}/authorizedStaff`, uid), {
-        uid,
+      // a) Write to `users` table
+      await supabase.from('users').upsert({
         id: uid,
-        staffIdentity: adminFullName.trim(),
-        fullName: adminFullName.trim(),
-        authEmail: normalizedEmail,
+        email: normalizedEmail,
+        full_name: adminFullName.trim(),
+        role: 'HEADMASTER',
+        school_id: targetSchoolId,
+        created_at: new Date().toISOString()
+      });
+      console.log("[Registration] Step 2a Success: Inserted into 'users' table with ID:", uid);
+
+      // b) Write to `school_admins` table
+      await supabase.from('school_admins').upsert({
+        id: uid,
+        school_id: targetSchoolId,
+        email: normalizedEmail,
+        created_at: new Date().toISOString()
+      });
+      console.log("[Registration] Step 2b Success: Inserted into 'school_admins' table with ID:", uid);
+
+      // c) Write to `authorized_staff` table (Supabase equivalent)
+      await supabase.from('authorized_staff').upsert({
+        id: uid,
+        school_id: targetSchoolId,
+        name: adminFullName.trim(),
         email: normalizedEmail,
         role: 'HEADMASTER',
-        schoolId: targetSchoolId,
-        assignedPassword: adminPassword.trim(),
-        assignedSubjects: [],
-        isAuthorized: true,
-        isActive: true,
-        createdAt: serverTimestamp()
+        created_at: new Date().toISOString()
       });
-      console.log("[Registration] Step 2c Success: Created document in authorizedStaff for school:", targetSchoolId);
+      console.log("[Registration] Step 2c Success: Inserted into authorized_staff table for school:", targetSchoolId);
 
       // Mirror to Supabase for robustness
       try {

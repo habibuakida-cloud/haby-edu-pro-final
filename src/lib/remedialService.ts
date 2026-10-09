@@ -95,26 +95,10 @@ export const saveRemedialTimetable = async (schoolId: string, entry: RemedialTim
     created_at: entry.created_at || new Date().toISOString()
   };
 
-  // 1. Sync to Supabase (Priority - Single Source of Truth)
-  try {
-    const { error: supError } = await supabase.from('remedial_timetable').upsert(fullEntry, { onConflict: 'id' });
-    if (supError) console.warn("Supabase remedial save error:", supError);
-  } catch (e) {
-    console.error("Supabase remedial exception:", e);
-  }
+  const { error: supError } = await supabase.from('remedial_timetable').upsert(fullEntry, { onConflict: 'id' });
+  if (supError) console.error("Supabase remedial save error:", supError);
 
-  // 2. Sync to Firestore (Backup)
-  try {
-    const cleanDoc = sanitizeForFirestore({
-      ...fullEntry,
-      updatedAt: Timestamp.now()
-    });
-    await setDoc(doc(db, 'remedial_timetable', entryId), cleanDoc, { merge: true });
-  } catch (e) {
-    console.warn("Firestore remedial save error:", e);
-  }
-
-  return { data: fullEntry, error: null };
+  return { data: fullEntry, error: supError };
 };
 
 export const saveRemedialTimetableBatch = async (schoolId: string, entries: RemedialTimetableEntry[]) => {
@@ -130,157 +114,66 @@ export const saveRemedialTimetableBatch = async (schoolId: string, entries: Reme
     };
   });
 
-  // 1. Supabase upsert
-  try {
-    const { error } = await supabase.from('remedial_timetable').upsert(preparedEntries, { onConflict: 'id' });
-    if (error) console.warn('Supabase batch remedial save error:', error);
-  } catch (e) {
-    console.warn('Supabase batch exception:', e);
-  }
+  const { error } = await supabase.from('remedial_timetable').upsert(preparedEntries, { onConflict: 'id' });
+  if (error) console.error('Supabase batch remedial save error:', error);
 
-  // 2. Firestore backup
-  try {
-    for (const item of preparedEntries) {
-      const cleanDoc = sanitizeForFirestore({
-        ...item,
-        updatedAt: Timestamp.now()
-      });
-      await setDoc(doc(db, 'remedial_timetable', item.id!), cleanDoc, { merge: true });
-    }
-  } catch (e) {
-    console.warn('Firestore batch error:', e);
-  }
-
-  return { data: preparedEntries, error: null };
+  return { data: preparedEntries, error };
 };
 
 export const clearRemedialTimetable = async (schoolId: string, className?: string, streamName?: string) => {
-  // 1. Supabase delete
-  try {
-    let q = supabase.from('remedial_timetable').delete().eq('school_id', schoolId);
-    if (className && className !== 'ALL') {
-      q = q.eq('class_name', className);
-    }
-    if (streamName && streamName !== 'ALL' && streamName !== 'All Streams') {
-      q = q.eq('stream', streamName);
-    }
-    await q;
-  } catch (e) {
-    console.warn('Supabase clear error:', e);
+  let q = supabase.from('remedial_timetable').delete().eq('school_id', schoolId);
+  if (className && className !== 'ALL') {
+    q = q.eq('class_name', className);
   }
-
-  // 2. Firestore delete matching
-  try {
-    const qFs = query(collection(db, 'remedial_timetable'), where('school_id', '==', schoolId));
-    const snap = await getDocs(qFs);
-    for (const d of snap.docs) {
-      const data = d.data();
-      const matchClass = !className || className === 'ALL' || data.class_name?.toLowerCase() === className.toLowerCase();
-      const matchStream = !streamName || streamName === 'ALL' || streamName === 'All Streams' || data.stream?.toLowerCase() === streamName.toLowerCase();
-      if (matchClass && matchStream) {
-        await deleteDoc(d.ref);
-      }
-    }
-  } catch (e) {
-    console.warn('Firestore clear error:', e);
+  if (streamName && streamName !== 'ALL' && streamName !== 'All Streams') {
+    q = q.eq('stream', streamName);
   }
-
-  return { success: true };
+  const { error } = await q;
+  if (error) console.error('Supabase clear error:', error);
+  return { success: !error };
 };
 
 export const getRemedialTimetable = async (schoolId: string, className?: string) => {
-  // 1. Prioritize Supabase (The real SAAS database)
-  try {
-    const { data, error } = await supabase.from('remedial_timetable').select('*').eq('school_id', schoolId);
-    if (!error && data && data.length > 0) {
-      if (className && className !== 'All') {
-        return { data: data.filter((d: any) => d.class_name.toLowerCase() === className.toLowerCase()), error: null };
-      }
-      return { data, error: null };
-    }
-  } catch (e) {
-    console.warn("Supabase remedial fetch error:", e);
+  const { data, error } = await supabase.from('remedial_timetable').select('*').eq('school_id', schoolId);
+  if (error) {
+    console.error("Supabase remedial fetch error:", error);
+    return { data: [], error };
   }
-
-  // 2. Fallback to Firestore
-  try {
-    const q = query(collection(db, 'remedial_timetable'), where('school_id', '==', schoolId));
-    const snap = await getDocs(q);
-    if (!snap.empty) {
-      const fsData = snap.docs.map(d => ({ id: d.id, ...d.data() } as RemedialTimetableEntry));
-      if (className && className !== 'All') {
-        return { data: fsData.filter(d => d.class_name.toLowerCase() === className.toLowerCase()), error: null };
-      }
-      return { data: fsData, error: null };
-    }
-  } catch (e) {}
-
-  return { data: [], error: null };
+  
+  if (className && className !== 'All') {
+    return { data: data.filter((d: any) => d.class_name.toLowerCase() === className.toLowerCase()), error: null };
+  }
+  return { data, error: null };
 };
 
 export const deleteRemedialTimetableEntry = async (schoolId: string, id: string) => {
-  // 1. Delete from Supabase
-  try {
-    const { error } = await supabase.from('remedial_timetable').delete().eq('id', id);
-    if (error) console.warn("Supabase remedial delete error:", error);
-  } catch (e) {}
-
-  // 2. Delete from Firestore
-  try {
-    await deleteDoc(doc(db, 'remedial_timetable', id));
-  } catch (e) {}
-
-  return { success: true };
+  const { error } = await supabase.from('remedial_timetable').delete().eq('id', id);
+  if (error) console.error("Supabase remedial delete error:", error);
+  return { success: !error };
 };
 
 export const markRemedialAttendance = async (schoolId: string, record: any) => {
   const id = `${schoolId}_${record.date}_${record.day_of_week}_${record.period_time}_${record.class_name}`;
   
-  try {
-    const cleanDoc = sanitizeForFirestore({
-      ...record,
-      id,
-      school_id: schoolId,
-      updatedAt: Timestamp.now()
-    });
-    await setDoc(doc(db, 'remedial_attendance', id), cleanDoc, { merge: true });
-  } catch (e) {}
-
-  try {
-    await supabase.from('remedial_attendance').upsert({
-      id,
-      ...record,
-      school_id: schoolId,
-      marked_at: new Date().toISOString()
-    });
-  } catch (e) {}
-
-  return { success: true };
+  const { error } = await supabase.from('remedial_attendance').upsert({
+    id,
+    ...record,
+    school_id: schoolId,
+    marked_at: new Date().toISOString()
+  });
+  
+  if (error) console.error("Supabase remedial attendance save error:", error);
+  return { success: !error };
 };
 
 export const getRemedialAttendance = async (schoolId: string, date: string) => {
-  try {
-    const { data, error } = await supabase.from('remedial_attendance').select('*').eq('school_id', schoolId).eq('date', date);
-    if (!error && data && data.length > 0) return { data, error };
-  } catch (e) {}
-
-  // Fallback to Firestore
-  try {
-    const q = query(collection(db, 'remedial_attendance'), where('school_id', '==', schoolId), where('date', '==', date));
-    const snap = await getDocs(q);
-    return { data: snap.docs.map(d => ({ id: d.id, ...d.data() })), error: null };
-  } catch (e) {
-    return { data: [], error: null };
-  }
+  const { data, error } = await supabase.from('remedial_attendance').select('*').eq('school_id', schoolId).eq('date', date);
+  return { data: data || [], error };
 };
 
 export const getRemedialPaymentSettings = async (schoolId: string) => {
-  try {
-    const { data, error } = await supabase.from('remedial_payment_settings').select('*').eq('school_id', schoolId);
-    if (!error && data) return { data, error };
-  } catch (e) {}
-  
-  return { data: [], error: null };
+  const { data, error } = await supabase.from('remedial_payment_settings').select('*').eq('school_id', schoolId);
+  return { data: data || [], error };
 };
 
 export const saveRemedialPaymentSetting = async (schoolId: string, setting: any) => {
@@ -291,37 +184,16 @@ export const saveRemedialPaymentSetting = async (schoolId: string, setting: any)
 };
 
 export const getRemedialAnalysis = async (schoolId: string, startDate: string, endDate: string, className?: string) => {
-  try {
-    let qSup = supabase.from('remedial_attendance')
-      .select('*')
-      .eq('school_id', schoolId)
-      .eq('status', 'taught')
-      .gte('date', startDate)
-      .lte('date', endDate);
-    
-    if (className && className !== 'All') {
-      qSup = qSup.eq('class_name', className);
-    }
-    const { data, error } = await qSup;
-    if (!error && data) return { data, error };
-  } catch (e) {}
-
-  // Fallback to Firestore
-  try {
-    const q = query(
-      collection(db, 'remedial_attendance'), 
-      where('school_id', '==', schoolId), 
-      where('status', '==', 'taught'),
-      where('date', '>=', startDate),
-      where('date', '<=', endDate)
-    );
-    const snap = await getDocs(q);
-    let results = snap.docs.map(d => d.data());
-    if (className && className !== 'All') {
-      results = results.filter((r: any) => r.class_name === className);
-    }
-    return { data: results, error: null };
-  } catch (e) {
-    return { data: [], error: null };
+  let qSup = supabase.from('remedial_attendance')
+    .select('*')
+    .eq('school_id', schoolId)
+    .eq('status', 'taught')
+    .gte('date', startDate)
+    .lte('date', endDate);
+  
+  if (className && className !== 'All') {
+    qSup = qSup.eq('class_name', className);
   }
+  const { data, error } = await qSup;
+  return { data: data || [], error };
 };

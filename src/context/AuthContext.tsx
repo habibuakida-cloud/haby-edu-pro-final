@@ -45,8 +45,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const savedDemo = typeof window !== 'undefined' ? safeGetItem(window.sessionStorage, 'haby_demo_user') : null;
       if (savedDemo) { return JSON.parse(savedDemo); }
-    } catch { return DEFAULT_SUPERADMIN_ACCOUNT; }
-    return DEFAULT_SUPERADMIN_ACCOUNT;
+    } catch { return null; }
+    return null;
   });
   const [loading, setLoading] = useState(false);
 

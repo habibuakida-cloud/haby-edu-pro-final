@@ -258,15 +258,17 @@ export default function App() {
         // Fetch in parallel from Firestore and Supabase
         const [firestoreData, studRes, teachRes, examRes, classRes, perRes, subjRes] = await Promise.all([
           getSchoolData(schoolId).catch(() => null),
-          supabase.from('students').select('*').catch(() => ({ data: null })),
-          supabase.from('teachers').select('*').catch(() => ({ data: null })),
-          supabase.from('exams').select('*').catch(() => ({ data: null })),
-          supabase.from('classes').select('*').catch(() => ({ data: null })),
-          supabase.from('periods').select('*').order('start_time', { ascending: true }).catch(() => ({ data: null })),
-          supabase.from('subjects').select('*').catch(() => ({ data: null })),
+          supabase.from('students').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
+          supabase.from('teachers').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
+          supabase.from('exams').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
+          supabase.from('classes').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
+          supabase.from('periods').select('*').eq('school_id', schoolId).order('start_time', { ascending: true }).then(res => res).catch(() => ({ data: null })),
+          supabase.from('subjects').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
         ]);
 
         // Process Supabase core tables
+        console.log("Supabase fetch results:", { studRes, teachRes, examRes, classRes, perRes, subjRes });
+        
         const supaStudents = (studRes?.data || []).map((s: any, idx: number) => fromSupabaseStudent(s, idx));
         const supaTeachers = (teachRes?.data || []).map((t: any, idx: number) => fromSupabaseTeacher(t, idx));
         const supaExams = (examRes?.data || []).map((e: any, idx: number) => fromSupabaseExam(e, idx));
@@ -391,6 +393,7 @@ export default function App() {
     };
 
     // Initial load
+    console.log("App init loadFromDatabase...");
     loadFromDatabase(true);
 
     // 1. Supabase Real-Time Subscriptions (The Real Single Source of Truth)
