@@ -205,6 +205,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     if (activeTab === 'announcements') loadAdminAnnouncements();
   }, [activeTab]);
   const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
+  const [smsLogs, setSmsLogs] = useState<any[]>([]);
 
   // Dispatch Status & Progress
   const [isSendingResults, setIsSendingResults] = useState<boolean>(false);
@@ -287,29 +288,28 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   const handleRetryFailedPayments = async () => {
     try {
       setIsRetryingFailed(true);
-      const paymentRef = collection(db, 'payment_verification_requests');
-      const q = query(paymentRef, where('schoolId', '==', schoolId));
-      const querySnapshot = await getDocs(q);
+      const { data: requests, error } = await supabase.from('payment_verification_requests').select('*').eq('school_id', schoolId);
       
       let retriedCount = 0;
-      for (const documentSnap of querySnapshot.docs) {
-        const data = documentSnap.data();
-        if (data.status === 'FAILED' || !data.status) {
-          await updateDoc(doc(db, 'payment_verification_requests', documentSnap.id), {
-            status: 'SUCCESS',
-            updatedAt: new Date().toISOString()
-          });
+      if (requests && !error) {
+        for (const req of requests) {
+          if (req.status === 'FAILED' || !req.status) {
+            await supabase.from('payment_verification_requests').update({
+              status: 'SUCCESS',
+              updated_at: new Date().toISOString()
+            }).eq('id', req.id);
 
-          await supabase.from('sms_payment_history').insert({
-            school_id: schoolId,
-            package_name: data.packageName || 'SMS Bundle',
-            amount: data.amount || 25000,
-            sms_added: data.smsAdded || 500,
-            status: 'SUCCESS',
-            created_at: new Date().toISOString()
-          });
+            await supabase.from('sms_payment_history').insert({
+              school_id: schoolId,
+              package_name: req.package_name || 'SMS Bundle',
+              amount: req.amount || 25000,
+              sms_added: req.sms_added || 500,
+              status: 'SUCCESS',
+              created_at: new Date().toISOString()
+            });
 
-          retriedCount++;
+            retriedCount++;
+          }
         }
       }
 

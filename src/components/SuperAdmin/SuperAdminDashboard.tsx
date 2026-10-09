@@ -198,15 +198,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
       // 3. Fetch summary metrics for each school (students, teachers, active exam records)
       try {
-        const fsSnap = await getDocs(collection(db, 'schools')).catch(err => {
-          console.warn("[SuperAdmin] Firestore schools collection fetch notice:", err);
-          return null;
-        });
-
+        const { data: supaSchools, error: supaSchoolsErr } = await supabase.from('schools').select('*');
         const fsDataMap = new Map<string, any>();
-        if (fsSnap && !fsSnap.empty) {
-          fsSnap.docs.forEach(docSnap => {
-            fsDataMap.set(docSnap.id, docSnap.data());
+        if (supaSchools && !supaSchoolsErr) {
+          supaSchools.forEach((sch: any) => {
+            fsDataMap.set(sch.id, sch);
           });
         }
 

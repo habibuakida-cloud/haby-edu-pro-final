@@ -36,7 +36,7 @@ export interface StudentReportCardData {
 export type EducationLevel = 'PRE_PRIMARY' | 'PRIMARY' | 'CSEE' | 'ACSEE';
 
 export interface Student {
-  id: number | string;
+  id: number;
   regNo: string;
   name: string;
   gender?: 'Male' | 'Female' | '';
@@ -86,7 +86,7 @@ export type SchoolStaffRole =
   | string;
 
 export interface Teacher {
-  id: number | string;
+  id: number;
   name: string;
   initial: string;
   gender?: 'Male' | 'Female' | '';
@@ -102,7 +102,7 @@ export interface Teacher {
 }
 
 export interface Exam {
-  id: number;
+  id: number | string;
   name: string;
   type?: string;
   level: EducationLevel;

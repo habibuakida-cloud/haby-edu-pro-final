@@ -33,7 +33,7 @@ interface ExamDocumentsModalProps {
   exams: Exam[];
   students: Student[];
   schoolInfo: SchoolInfo;
-  initialExamId?: number;
+  initialExamId?: number | string;
   initialClass?: string;
   initialStream?: string;
 }
@@ -51,7 +51,7 @@ export const ExamDocumentsModal: React.FC<ExamDocumentsModalProps> = ({
   if (!isOpen) return null;
 
   // Selected Examination
-  const [selectedExamId, setSelectedExamId] = useState<number>(() => {
+  const [selectedExamId, setSelectedExamId] = useState<number | string>(() => {
     if (initialExamId && exams.some(e => e.id === initialExamId)) return initialExamId;
     return exams[0]?.id || 1;
   });

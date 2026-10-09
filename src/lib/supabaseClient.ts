@@ -214,7 +214,8 @@ export const toSupabaseStudent = (s: any, schoolId?: string, classId?: string) =
 
 export const fromSupabaseStudent = (row: any, idx = 0) => {
   return {
-    id: row.id ?? (idx + 1),
+    id: Number(row.id) || (idx + 1),
+    uuid: row.id,
     regNo: row.reg_token || row.reg_no || undefined,
     name: row.full_name || row.name || 'Mwanafunzi',
     gender: (row.gender as any) || 'Male',
@@ -258,7 +259,8 @@ export const toSupabaseTeacher = (t: any, schoolId?: string) => {
 
 export const fromSupabaseTeacher = (row: any, idx = 0) => {
   return {
-    id: row.id ?? (idx + 101),
+    id: Number(row.id) || (idx + 101),
+    uuid: row.id,
     name: row.full_name || row.name || 'Mwalimu',
     gender: (row.gender as any) || 'Male',
     schoolRole: row.staff_role_name || row.school_role || 'Subject Teacher',
@@ -291,7 +293,7 @@ export const toSupabaseExam = (e: any, schoolId?: string) => {
 
 export const fromSupabaseExam = (row: any, idx = 0) => {
   return {
-    id: row.id ?? (idx + 1),
+    id: Number(row.id) || (idx + 1),
     name: row.name,
     type: row.exam_type || row.term || 'Terminal',
     level: (row.level || 'CSEE') as any,

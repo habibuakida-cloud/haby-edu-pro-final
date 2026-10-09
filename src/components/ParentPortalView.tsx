@@ -366,7 +366,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
 
     const msg = newMessageText.trim();
     const payload = {
-      school_id: parent.school_id || DEFAULT_PRIMARY_SCHOOL_ID,
+      school_id: (parent as any).school_id || DEFAULT_PRIMARY_SCHOOL_ID,
       parent_id: parent.id,
       parent_phone: parent.phone,
       parent_name: parent.full_name,

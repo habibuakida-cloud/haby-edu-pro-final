@@ -232,7 +232,19 @@ CREATE TABLE IF NOT EXISTS public.parent_messages (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 12. REMEDIAL PAYMENT MODULE TABLES
+-- 12. REMEDIAL PAYMENT MODULE TABLES & SUBSCRIPTIONS
+CREATE TABLE IF NOT EXISTS public.school_subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  "schoolId" TEXT,
+  trial_started_at TIMESTAMPTZ,
+  subscription_expiry TIMESTAMPTZ,
+  subscription_type TEXT DEFAULT 'TRIAL',
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS public.remedial_timetable (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
@@ -314,6 +326,94 @@ CREATE TABLE IF NOT EXISTS public.gate_pass_logs (
   fee_status TEXT
 );
 
+-- 16. ADDITIONAL ESSENTIAL TABLES (classes, periods, subjects, teaching_logs, authorized_staff, contribution_types, student_ledger, period_attendance)
+CREATE TABLE IF NOT EXISTS public.classes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  level TEXT DEFAULT 'CSEE',
+  stream TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.periods (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  is_break BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.subjects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  code TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.teaching_logs (
+  id TEXT PRIMARY KEY,
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  teacher_id TEXT,
+  teacher_name TEXT,
+  class_name TEXT,
+  subject TEXT,
+  date DATE,
+  topic TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.authorized_staff (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  role TEXT DEFAULT 'TEACHER',
+  assigned_subjects JSONB DEFAULT '[]'::jsonb,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.contribution_types (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  amount NUMERIC DEFAULT 0,
+  term TEXT,
+  academic_year TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.student_ledger (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  student_id UUID,
+  student_name TEXT,
+  contribution_id UUID,
+  amount_paid NUMERIC DEFAULT 0,
+  balance NUMERIC DEFAULT 0,
+  status TEXT DEFAULT 'PENDING',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.period_attendance (
+  id TEXT PRIMARY KEY,
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  date DATE NOT NULL,
+  class_name TEXT NOT NULL,
+  stream TEXT,
+  period_number INTEGER,
+  subject TEXT,
+  teacher_name TEXT,
+  status TEXT DEFAULT 'present',
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+
 -- 16. ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE public.schools ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
@@ -324,6 +424,7 @@ ALTER TABLE public.exam_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.usal_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sitting_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.school_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.school_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.parents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.parent_students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
@@ -334,6 +435,14 @@ ALTER TABLE public.remedial_payment_settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.discipline_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activity_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.gate_pass_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.classes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.periods ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subjects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.teaching_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.authorized_staff ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.contribution_types ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.student_ledger ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.period_attendance ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public all access on schools" ON public.schools FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on users" ON public.users FOR ALL USING (true) WITH CHECK (true);
@@ -344,6 +453,7 @@ CREATE POLICY "Allow public all access on exam_records" ON public.exam_records F
 CREATE POLICY "Allow public all access on usal_records" ON public.usal_records FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on sitting_plans" ON public.sitting_plans FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on school_data" ON public.school_data FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on school_subscriptions" ON public.school_subscriptions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on parents" ON public.parents FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on parent_students" ON public.parent_students FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on announcements" ON public.announcements FOR ALL USING (true) WITH CHECK (true);
@@ -354,6 +464,14 @@ CREATE POLICY "Allow public all access on remedial_payment_settings" ON public.r
 CREATE POLICY "Allow public all access on discipline_records" ON public.discipline_records FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on activity_logs" ON public.activity_logs FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on gate_pass_logs" ON public.gate_pass_logs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on classes" ON public.classes FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on periods" ON public.periods FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on subjects" ON public.subjects FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on teaching_logs" ON public.teaching_logs FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on authorized_staff" ON public.authorized_staff FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on contribution_types" ON public.contribution_types FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on student_ledger" ON public.student_ledger FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on period_attendance" ON public.period_attendance FOR ALL USING (true) WITH CHECK (true);
 
 -- 17. HIGH SPEED PERFORMANCE INDEXES
 CREATE INDEX IF NOT EXISTS idx_students_school ON public.students(school_id);

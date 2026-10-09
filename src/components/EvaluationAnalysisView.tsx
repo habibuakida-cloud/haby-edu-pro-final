@@ -116,7 +116,7 @@ export const EvaluationAnalysisView: React.FC<EvaluationAnalysisViewProps> = ({
       });
 
       // If no timetable data yet, fallback demo rows matching paper format
-      const finalRows = rows.length > 0 ? rows : [
+      const finalRows: any[] = rows.length > 0 ? rows : [
         { sno: 1, subject: 'Mathematics', teacher: 'Mr. MAHIBU', stream: 'A, B', expected: 10, taught: 10, percentage: 100, reasonText: '-' },
         { sno: 2, subject: 'English Language', teacher: 'Madam ASHA', stream: 'A, B', expected: 8, taught: 7, percentage: 87.5, reasonText: 'Teacher Absent (1)' },
         { sno: 3, subject: 'Biology', teacher: 'Dr. HABIBU', stream: 'A, B', expected: 8, taught: 6, percentage: 75.0, reasonText: 'Sick Leave (2)' },
@@ -124,8 +124,8 @@ export const EvaluationAnalysisView: React.FC<EvaluationAnalysisViewProps> = ({
         { sno: 5, subject: 'History', teacher: 'Madam ZUHURA', stream: 'A, B', expected: 6, taught: 5, percentage: 83.3, reasonText: 'Meeting (1)' }
       ];
 
-      const sumExp = finalRows.reduce((a, b) => a + b.expected, 0);
-      const sumTaught = finalRows.reduce((a, b) => a + b.taught, 0);
+      const sumExp = finalRows.reduce((a: number, b: any) => a + Number(b.expected || 0), 0);
+      const sumTaught = finalRows.reduce((a: number, b: any) => a + Number(b.taught || 0), 0);
       const avgPct = sumExp > 0 ? Number(((sumTaught / sumExp) * 100).toFixed(1)) : 100;
 
       setReportData(finalRows);

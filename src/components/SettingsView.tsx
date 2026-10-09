@@ -497,46 +497,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       console.log("[SettingsView] Querying users for schoolId:", sId);
       const userMap = new Map<string, any>();
 
-      // 1. Query Firestore users where schoolId == sId
+      // 1. Query Supabase users and authorized_staff where school_id == sId
       try {
-        const q1 = query(collection(db, 'users'), where('schoolId', '==', sId));
-        const s1 = await getDocs(q1);
-        s1.docs.forEach(d => userMap.set(d.id, { id: d.id, ...d.data() }));
+        const { data: supaUsers, error: supaErr } = await supabase.from('users').select('*').eq('school_id', sId);
+        if (supaUsers && !supaErr) {
+          supaUsers.forEach((u: any) => userMap.set(u.id, u));
+        }
       } catch (e1) {
-        console.warn("Could not query users by schoolId:", e1);
+        console.warn("Could not query users:", e1);
       }
 
-      // 2. Query Firestore users where school_id == sId
       try {
-        const q2 = query(collection(db, 'users'), where('school_id', '==', sId));
-        const s2 = await getDocs(q2);
-        s2.docs.forEach(d => userMap.set(d.id, { id: d.id, ...d.data() }));
+        const { data: supaStaff, error: staffErr } = await supabase.from('authorized_staff').select('*').eq('school_id', sId);
+        if (supaStaff && !staffErr) {
+          supaStaff.forEach((sd: any) => {
+            if (!userMap.has(sd.id)) {
+              userMap.set(sd.id, {
+                id: sd.id,
+                uid: sd.id,
+                displayName: sd.staff_identity || sd.full_name,
+                fullName: sd.staff_identity || sd.full_name,
+                email: sd.auth_email || sd.email,
+                role: sd.role || 'HEADMASTER',
+                schoolId: sId,
+                password: sd.assigned_password,
+                isActive: sd.is_active !== false,
+                createdAt: sd.created_at
+              });
+            }
+          });
+        }
       } catch (e2) {
-        console.warn("Could not query users by school_id:", e2);
-      }
-
-      // 3. Query Firestore schools/{sId}/authorizedStaff
-      try {
-        const s3 = await getDocs(collection(db, `schools/${sId}/authorizedStaff`));
-        s3.docs.forEach(d => {
-          const sd = d.data();
-          if (!userMap.has(d.id)) {
-            userMap.set(d.id, {
-              id: d.id,
-              uid: d.id,
-              displayName: sd.staffIdentity || sd.fullName,
-              fullName: sd.staffIdentity || sd.fullName,
-              email: sd.authEmail || sd.email,
-              role: sd.role || 'HEADMASTER',
-              schoolId: sId,
-              password: sd.assignedPassword,
-              isActive: sd.isActive !== false,
-              createdAt: sd.createdAt
-            });
-          }
-        });
-      } catch (e3) {
-        console.warn("Could not query authorizedStaff:", e3);
+        console.warn("Could not query authorized_staff:", e2);
       }
 
       const list = Array.from(userMap.values());
@@ -756,7 +748,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         schoolRole: 'School Administrator',
         schoolId: targetSchoolId,
         school_id: targetSchoolId,
-        createdAt: serverTimestamp(),
+        createdAt: new Date().toISOString(),
         isActive: true,
         createdBy: currentUser?.id || 'superadmin',
         password: adminPassword.trim()

@@ -60,7 +60,9 @@ import {
   processSyncQueue,
   checkSupabaseHealth,
   insertRecord,
+  updateRecord,
   upsertRecord,
+  deleteRecord,
   getCurrentSchoolId
 } from './lib/supabaseClient';
 import { getSchoolData, saveSchoolData, subscribeSchoolData } from './lib/supabaseService';
@@ -338,58 +340,49 @@ export default function App() {
           isReligion: false
         }));
 
-        // Fetch users from Firestore users collection & authorizedStaff & Supabase profiles
+        // Fetch users from Supabase users and authorized_staff tables
         try {
           const userMap = new Map<string, any>();
 
-          // a) Firestore users query 1 (schoolId)
           try {
-            const uQuery1 = query(collection(db, 'users'), where('schoolId', '==', schoolId));
-            const uSnap1 = await getDocs(uQuery1);
-            uSnap1.docs.forEach(d => userMap.set(d.id, { id: d.id, ...d.data() }));
+            const { data: supaUsers, error: uErr } = await supabase.from('users').select('*').eq('school_id', schoolId);
+            if (supaUsers && !uErr) {
+              supaUsers.forEach((u: any) => userMap.set(u.id, u));
+            }
           } catch (e1) {
-            console.warn("Could not query users by schoolId:", e1);
+            console.warn("Could not query users:", e1);
           }
 
-          // b) Firestore users query 2 (school_id)
           try {
-            const uQuery2 = query(collection(db, 'users'), where('school_id', '==', schoolId));
-            const uSnap2 = await getDocs(uQuery2);
-            uSnap2.docs.forEach(d => userMap.set(d.id, { id: d.id, ...d.data() }));
+            const { data: supaStaff, error: sErr } = await supabase.from('authorized_staff').select('*').eq('school_id', schoolId);
+            if (supaStaff && !sErr) {
+              supaStaff.forEach((sd: any) => {
+                if (!userMap.has(sd.id)) {
+                  userMap.set(sd.id, {
+                    id: sd.id,
+                    uid: sd.id,
+                    email: sd.auth_email || sd.email,
+                    fullName: sd.staff_identity || sd.full_name,
+                    displayName: sd.staff_identity || sd.full_name,
+                    role: sd.role || 'HEADMASTER',
+                    schoolId,
+                    school_id: schoolId,
+                    password: sd.assigned_password,
+                    assignedSubjects: sd.assigned_subjects || [],
+                    isActive: true
+                  });
+                }
+              });
+            }
           } catch (e2) {
-            console.warn("Could not query users by school_id:", e2);
-          }
-
-          // c) Firestore authorizedStaff
-          try {
-            const staffSnap = await getDocs(collection(db, `schools/${schoolId}/authorizedStaff`));
-            staffSnap.docs.forEach(d => {
-              const sd = d.data();
-              if (!userMap.has(d.id)) {
-                userMap.set(d.id, {
-                  id: d.id,
-                  uid: d.id,
-                  email: sd.authEmail || sd.email,
-                  fullName: sd.staffIdentity || sd.fullName,
-                  displayName: sd.staffIdentity || sd.fullName,
-                  role: sd.role || 'HEADMASTER',
-                  schoolId,
-                  school_id: schoolId,
-                  password: sd.assignedPassword,
-                  assignedSubjects: sd.assignedSubjects || [],
-                  isActive: true
-                });
-              }
-            });
-          } catch (e3) {
-            console.warn("Could not query authorizedStaff:", e3);
+            console.warn("Could not query authorized_staff:", e2);
           }
 
           if (userMap.size > 0) {
             setUsers(Array.from(userMap.values()) as UserAccount[]);
           }
         } catch (uErr) {
-          console.warn("Could not load users from database:", uErr);
+          console.warn("Could not load users from Supabase:", uErr);
         }
 
         const rawSchoolData = (firestoreData || {}) as Record<string, any>;
@@ -1419,8 +1412,9 @@ export default function App() {
           subscription={subscription} 
           onVerify={async (ref) => {
             try {
-              await setDoc(doc(db, 'payment_verification_requests', subscription.schoolId), {
-                schoolId: subscription.schoolId,
+              await supabase.from('payment_verification_requests').upsert({
+                id: subscription.schoolId,
+                school_id: subscription.schoolId,
                 reference: ref,
                 timestamp: new Date().toISOString(),
                 status: 'PENDING'

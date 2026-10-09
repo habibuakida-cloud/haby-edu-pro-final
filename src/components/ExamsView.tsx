@@ -55,7 +55,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedExamDetails, setSelectedExamDetails] = useState<Exam | null>(null);
   const [isDocModalOpen, setIsDocModalOpen] = useState(false);
-  const [docModalExamId, setDocModalExamId] = useState<number | undefined>(undefined);
+  const [docModalExamId, setDocModalExamId] = useState<number | string | undefined>(undefined);
   const [isPaperConfigModalOpen, setIsPaperConfigModalOpen] = useState(false);
 
   // Form states
@@ -777,7 +777,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({
                             <button
                               onClick={() => {
                                 if (confirm(`Delete exam "${e.name}"?`)) {
-                                  onDeleteExam(e.id);
+                                  onDeleteExam(Number(e.id));
                                 }
                               }}
                               className="text-red-500 hover:text-red-700 hover:underline cursor-pointer"
