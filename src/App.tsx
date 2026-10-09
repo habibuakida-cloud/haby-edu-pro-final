@@ -1436,6 +1436,7 @@ export default function App() {
             <SuperAdminDashboard
               currentUser={userAccount}
               currentSchoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              currentSchoolData={data}
               onSelectSchool={(selectedSchoolId, selectedSchoolName) => {
                 sessionStorage.setItem('haby_school_id', selectedSchoolId);
                 localStorage.setItem('currentSchoolId', selectedSchoolId);

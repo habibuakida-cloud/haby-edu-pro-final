@@ -24,9 +24,22 @@ import {
   Layers,
   Database,
   Table as TableIcon,
-  LayoutGrid
+  LayoutGrid,
+  GraduationCap,
+  UserCheck,
+  FileSpreadsheet,
+  Award,
+  BookOpen
 } from 'lucide-react';
-import { supabase } from '../../lib/supabaseClient';
+import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../../lib/supabaseClient';
+import { db } from '../../lib/firebase';
+import { collection, getDocs } from 'firebase/firestore';
+import { 
+  INITIAL_STUDENTS, 
+  INITIAL_TEACHERS, 
+  INITIAL_EXAMS, 
+  INITIAL_EXAMINATION_RECORDS 
+} from '../../constants/defaults';
 import { School, SchoolAdminRecord, UserAccount } from '../../types';
 
 export interface SupabaseSchoolRecord {
@@ -37,9 +50,26 @@ export interface SupabaseSchoolRecord {
   created_at?: string | null;
 }
 
+export interface SchoolSummaryMetrics {
+  totalStudents: number;
+  totalTeachers: number;
+  activeExaminationRecords: number;
+  activeExamsCount: number;
+  totalExamsCount: number;
+  examRecordsCount: number;
+  adminsCount: number;
+}
+
 interface SuperAdminDashboardProps {
   currentUser?: UserAccount | null;
   currentSchoolId: string;
+  currentSchoolData?: {
+    students?: any[];
+    teachers?: any[];
+    exams?: any[];
+    examinationRecords?: any[];
+    [key: string]: any;
+  };
   onSelectSchool: (schoolId: string, schoolName: string) => void;
   onNavigateToView?: (view: any) => void;
 }
@@ -47,14 +77,17 @@ interface SuperAdminDashboardProps {
 export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   currentUser,
   currentSchoolId,
+  currentSchoolData,
   onSelectSchool,
   onNavigateToView
 }) => {
   const [schools, setSchools] = useState<SupabaseSchoolRecord[]>([]);
   const [schoolAdmins, setSchoolAdmins] = useState<SchoolAdminRecord[]>([]);
+  const [schoolMetrics, setSchoolMetrics] = useState<Record<string, SchoolSummaryMetrics>>({});
   const [loading, setLoading] = useState(true);
+  const [loadingMetrics, setLoadingMetrics] = useState(false);
   const [activeTab, setActiveTab] = useState<'schools' | 'admins'>('schools');
-  const [schoolsViewMode, setSchoolsViewMode] = useState<'table' | 'grid'>('table');
+  const [schoolsViewMode, setSchoolsViewMode] = useState<'grid' | 'table'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Modals
@@ -99,6 +132,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
   const fetchEcosystemData = async () => {
     setLoading(true);
+    setLoadingMetrics(true);
     try {
       // 1. Fetch schools using exact requested query: supabase.from('schools').select('*')
       let fetchedSchools: SupabaseSchoolRecord[] = [];
@@ -162,12 +196,96 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       }
 
       setSchoolAdmins(fetchedAdmins);
+
+      // 3. Fetch summary metrics for each school (students, teachers, active exam records)
+      try {
+        const fsSnap = await getDocs(collection(db, 'schools')).catch(err => {
+          console.warn("[SuperAdmin] Firestore schools collection fetch notice:", err);
+          return null;
+        });
+
+        const fsDataMap = new Map<string, any>();
+        if (fsSnap && !fsSnap.empty) {
+          fsSnap.docs.forEach(docSnap => {
+            fsDataMap.set(docSnap.id, docSnap.data());
+          });
+        }
+
+        const metricsMap: Record<string, SchoolSummaryMetrics> = {};
+
+        for (const s of fetchedSchools) {
+          const fsDoc = fsDataMap.get(s.id);
+          let students = Array.isArray(fsDoc?.students) ? fsDoc.students : [];
+          let teachers = Array.isArray(fsDoc?.teachers) ? fsDoc.teachers : [];
+          let exams = Array.isArray(fsDoc?.exams) ? fsDoc.exams : [];
+          let examRecords = Array.isArray(fsDoc?.examinationRecords) ? fsDoc.examinationRecords : [];
+
+          // If currently active school and in-memory live data provided via props
+          if (s.id === currentSchoolId && currentSchoolData) {
+            if (Array.isArray(currentSchoolData.students) && currentSchoolData.students.length > 0) {
+              students = currentSchoolData.students;
+            }
+            if (Array.isArray(currentSchoolData.teachers) && currentSchoolData.teachers.length > 0) {
+              teachers = currentSchoolData.teachers;
+            }
+            if (Array.isArray(currentSchoolData.exams) && currentSchoolData.exams.length > 0) {
+              exams = currentSchoolData.exams;
+            }
+            if (Array.isArray(currentSchoolData.examinationRecords) && currentSchoolData.examinationRecords.length > 0) {
+              examRecords = currentSchoolData.examinationRecords;
+            }
+          }
+
+          // If DEFAULT_PRIMARY_SCHOOL_ID or primary demo and counts are empty, fallback to seed defaults
+          if ((s.id === DEFAULT_PRIMARY_SCHOOL_ID || s.name?.toUpperCase().includes('HABY EDU')) && students.length === 0) {
+            students = INITIAL_STUDENTS;
+            teachers = INITIAL_TEACHERS;
+            exams = INITIAL_EXAMS;
+            examRecords = INITIAL_EXAMINATION_RECORDS;
+          }
+
+          // Local storage cache lookup if still 0
+          if (students.length === 0 && typeof window !== 'undefined') {
+            try {
+              const cached = localStorage.getItem(`haby_school_data_${s.id}`) || localStorage.getItem(`school_data_${s.id}`);
+              if (cached) {
+                const parsed = JSON.parse(cached);
+                if (Array.isArray(parsed.students) && parsed.students.length > 0) students = parsed.students;
+                if (Array.isArray(parsed.teachers) && parsed.teachers.length > 0) teachers = parsed.teachers;
+                if (Array.isArray(parsed.exams) && parsed.exams.length > 0) exams = parsed.exams;
+                if (Array.isArray(parsed.examinationRecords) && parsed.examinationRecords.length > 0) examRecords = parsed.examinationRecords;
+              }
+            } catch {
+              // ignore cache parse error
+            }
+          }
+
+          const activeExams = exams.filter((e: any) => (e.status || 'Active').toLowerCase() === 'active');
+          const activeRecordsCount = examRecords.length > 0 ? examRecords.length : activeExams.length;
+          const assignedAdmins = fetchedAdmins.filter(a => a.school_id === s.id);
+
+          metricsMap[s.id] = {
+            totalStudents: students.length,
+            totalTeachers: teachers.length,
+            activeExaminationRecords: activeRecordsCount,
+            activeExamsCount: activeExams.length,
+            totalExamsCount: exams.length,
+            examRecordsCount: examRecords.length,
+            adminsCount: assignedAdmins.length
+          };
+        }
+
+        setSchoolMetrics(metricsMap);
+      } catch (metricsErr) {
+        console.warn("[SuperAdmin] Exception calculating school metrics:", metricsErr);
+      }
     } catch (err: any) {
       console.warn("[SuperAdmin] Error in fetchEcosystemData:", err);
       // Ensure we still have the Root Super Admin even if a global error occurred
       setSchoolAdmins(prev => prev.length > 0 ? prev : [ROOT_SUPER_ADMIN]);
     } finally {
       setLoading(false);
+      setLoadingMetrics(false);
     }
   };
 
@@ -653,7 +771,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                                     </span>
                                   )}
                                 </div>
-                                <span className="text-[11px] text-slate-400 block">Shule iliyosajiliwa Supabase</span>
+                                <div className="flex items-center gap-2 text-[10px] text-slate-500 font-bold mt-0.5">
+                                  <span className="flex items-center gap-0.5"><GraduationCap className="w-3 h-3"/> {schoolMetrics[s.id]?.totalStudents || 0}</span>
+                                  <span className="flex items-center gap-0.5"><UserCheck className="w-3 h-3"/> {schoolMetrics[s.id]?.totalTeachers || 0}</span>
+                                  <span className="flex items-center gap-0.5"><FileSpreadsheet className="w-3 h-3"/> {schoolMetrics[s.id]?.activeExaminationRecords || 0}</span>
+                                </div>
                               </div>
                             </div>
                           </td>
@@ -801,8 +923,13 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                           <h4 className="text-base font-black text-slate-900 leading-snug">
                             {s.name}
                           </h4>
+                          <div className="flex items-center gap-3 text-[11px] text-slate-500 font-bold mt-1">
+                            <span className="flex items-center gap-1"><GraduationCap className="w-3.5 h-3.5 text-blue-500"/> {schoolMetrics[s.id]?.totalStudents || 0} Students</span>
+                            <span className="flex items-center gap-1"><UserCheck className="w-3.5 h-3.5 text-emerald-500"/> {schoolMetrics[s.id]?.totalTeachers || 0} Staff</span>
+                            <span className="flex items-center gap-1"><FileSpreadsheet className="w-3.5 h-3.5 text-amber-500"/> {schoolMetrics[s.id]?.activeExaminationRecords || 0} Records</span>
+                          </div>
                           {isCurrentlyActive && (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 text-[10px] font-extrabold uppercase">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 mt-2 rounded-md bg-blue-100 text-blue-800 text-[10px] font-extrabold uppercase">
                               <Sparkles className="w-3 h-3 text-blue-600" /> Active School
                             </span>
                           )}
