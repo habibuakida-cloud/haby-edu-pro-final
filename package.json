@@ -28,8 +28,6 @@
     "drizzle-kit": "^0.31.11",
     "drizzle-orm": "^0.45.3",
     "express": "^4.21.2",
-    "firebase": "^12.19.0",
-    "firebase-admin": "13.0.1",
     "html5-qrcode": "^2.3.8",
     "idb": "^8.0.3",
     "jspdf": "^4.2.1",

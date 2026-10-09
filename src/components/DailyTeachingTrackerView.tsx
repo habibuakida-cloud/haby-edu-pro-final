@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/supabaseClient';
-import { markPeriodAttendance, getPeriodAttendance } from '../lib/firestoreService';
+import { markPeriodAttendance, getPeriodAttendance } from '../lib/supabaseService';
 import { Calendar, CheckCircle, AlertTriangle, Clock, BookOpen, User, Check, X, Shield, RefreshCw } from 'lucide-react';
 import { DEFAULT_CLASSES } from '../constants/defaults';
 

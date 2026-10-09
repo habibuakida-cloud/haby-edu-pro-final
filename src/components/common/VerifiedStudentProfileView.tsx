@@ -25,9 +25,7 @@ import {
 import { HabyEduProLogo } from './HabyEduProLogo';
 import { QRCodeSVG } from 'qrcode.react';
 import { supabase } from '../../lib/supabaseClient';
-import { getSchoolData } from '../../lib/firestoreService';
-import { db } from '../../lib/firebase';
-import { collection, getDocs } from 'firebase/firestore';
+import { getAll } from '../../lib/supabaseClient';
 
 interface VerifiedStudentProfileViewProps {
   regNo: string;
@@ -311,9 +309,9 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
       // 3. Query Firestore schools documents (unauthenticated public read enabled)
       if (!matched) {
         try {
-          const snap = await getDocs(collection(db, 'schools'));
-          for (const d of snap.docs) {
-            const dData = d.data();
+          const { data: schools, error } = await getAll('schools');
+          if (schools) {
+            for (const dData of schools) {
             if (Array.isArray(dData.students)) {
               const foundInFs = dData.students.find((s: Student) => {
                 const sNorm = normalizeRegNo(s.regNo || '');
@@ -329,6 +327,7 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
                 break;
               }
             }
+          }
           }
         } catch (e) {
           console.warn("Firestore public search:", e);

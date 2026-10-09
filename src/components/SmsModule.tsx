@@ -27,8 +27,6 @@ import {
   Inbox
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
-import { db, auth } from '../lib/firebase';
-import { collection, getDocs, query, where, updateDoc, doc } from 'firebase/firestore';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { downloadFile } from '../utils/export';
 import { SchoolInfo } from '../types';

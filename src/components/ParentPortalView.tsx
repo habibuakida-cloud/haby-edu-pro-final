@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/supabaseClient';
-import { getSchoolData } from '../lib/firestoreService';
+import { getSchoolData } from '../lib/supabaseService';
 import { 
   Shield, 
   Phone, 

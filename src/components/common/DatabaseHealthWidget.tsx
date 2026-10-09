@@ -17,7 +17,7 @@ import {
   Check,
   Cpu
 } from 'lucide-react';
-import { measureFirestoreLatency } from '../../lib/firestoreService';
+import { measureFirestoreLatency } from '../../lib/supabaseService';
 import { measureSupabaseLatency, supabaseUrl } from '../../lib/supabaseClient';
 import { measureIDBLatency, clearAllCachedData } from '../../lib/idbService';
 
@@ -63,13 +63,11 @@ export const DatabaseHealthWidget: React.FC<DatabaseHealthWidgetProps> = ({
     const nowStr = new Date().toLocaleTimeString();
 
     try {
-      const [fsRes, supaRes, idbRes] = await Promise.all([
-        measureFirestoreLatency(schoolId),
+      const [supaRes, idbRes] = await Promise.all([
         measureSupabaseLatency(),
         measureIDBLatency()
       ]);
 
-      setFirestoreLatency({ ...fsRes, lastChecked: nowStr });
       setSupabaseLatency({ ...supaRes, lastChecked: nowStr });
       setIdbLatency({ ...idbRes, lastChecked: nowStr });
       setLastCheckTime(nowStr);
@@ -78,7 +76,7 @@ export const DatabaseHealthWidget: React.FC<DatabaseHealthWidgetProps> = ({
     } finally {
       setIsMeasuring(false);
     }
-  }, [schoolId]);
+  }, []);
 
   // Initial check on mount
   useEffect(() => {

@@ -32,8 +32,6 @@ import {
   BookOpen
 } from 'lucide-react';
 import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../../lib/supabaseClient';
-import { db } from '../../lib/firebase';
-import { collection, getDocs } from 'firebase/firestore';
 import { 
   INITIAL_STUDENTS, 
   INITIAL_TEACHERS, 
@@ -89,6 +87,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [activeTab, setActiveTab] = useState<'schools' | 'admins'>('schools');
   const [schoolsViewMode, setSchoolsViewMode] = useState<'grid' | 'table'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
+  const [supabaseStatus, setSupabaseStatus] = useState<'checking' | 'connected' | 'error'>('checking');
 
   // Modals
   const [isAddSchoolOpen, setIsAddSchoolOpen] = useState(false);
@@ -291,6 +290,16 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
   useEffect(() => {
     fetchEcosystemData();
+    const checkConnection = async () => {
+      setSupabaseStatus('checking');
+      try {
+        const { error } = await supabase.from('schools').select('id').limit(1);
+        setSupabaseStatus(error ? 'error' : 'connected');
+      } catch (e) {
+        setSupabaseStatus('error');
+      }
+    };
+    checkConnection();
   }, []);
 
   // Handle Add School
@@ -516,7 +525,9 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             </p>
             <div className="flex flex-wrap items-center gap-3 pt-2 text-xs text-slate-300">
               <span className="flex items-center gap-1.5 bg-black/30 px-3 py-1 rounded-lg border border-white/10">
-                <Database className="w-3.5 h-3.5 text-emerald-400" /> Supabase: <span className="text-emerald-400 font-mono font-bold">tqazqaqdzqpbftdcekzb</span>
+                <Database className={`w-3.5 h-3.5 ${supabaseStatus === 'connected' ? 'text-emerald-400' : supabaseStatus === 'error' ? 'text-rose-400' : 'text-amber-400'}`} /> 
+                Supabase: <span className="text-emerald-400 font-mono font-bold">tqazqaqdzqpbftdcekzb</span>
+                {supabaseStatus === 'connected' && <span className="text-[10px] text-emerald-400 font-bold ml-1">(OK)</span>}
               </span>
               <span className="flex items-center gap-1.5 bg-black/30 px-3 py-1 rounded-lg border border-white/10">
                 <Shield className="w-3.5 h-3.5 text-blue-400" /> Mtumiaji: <span className="text-white font-bold">{currentUser?.email || 'habibuakida@gmail.com'}</span>

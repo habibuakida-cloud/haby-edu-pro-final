@@ -1,5 +1,4 @@
-import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '../lib/firebase';
+import { supabase } from '../lib/supabaseClient';
 import { addMonths, addYears, isAfter } from 'date-fns';
 
 export interface SubscriptionData {
@@ -11,12 +10,8 @@ export interface SubscriptionData {
 }
 
 export const getSchoolSubscription = async (schoolId: string): Promise<SubscriptionData | null> => {
-  const docRef = doc(db, 'school_subscriptions', schoolId);
-  const docSnap = await getDoc(docRef);
-  
-  if (docSnap.exists()) {
-    return docSnap.data() as SubscriptionData;
-  }
+  const { data, error } = await supabase.from('school_subscriptions').select('*').eq('schoolId', schoolId).maybeSingle();
+  if (data) return data as SubscriptionData;
   return null;
 };
 
@@ -31,7 +26,7 @@ export const initializeTrial = async (schoolId: string): Promise<SubscriptionDat
     isActive: true
   };
   
-  await setDoc(doc(db, 'school_subscriptions', schoolId), trialData);
+  await supabase.from('school_subscriptions').upsert(trialData);
   return trialData;
 };
 

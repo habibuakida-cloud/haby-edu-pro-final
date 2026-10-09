@@ -19,12 +19,7 @@ import { normalizeStreamName, getNextLogicalStream } from '../utils/classStreamU
 import { supabase } from '../lib/supabaseClient';
 import { useAuth } from '../context/AuthContext';
 import { SUBJECT_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
-import { saveSchoolData } from '../lib/firestoreService';
-import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
-import { doc, setDoc, Timestamp, serverTimestamp, collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from '../lib/firebase';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { saveSchoolData } from '../lib/supabaseService';
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -607,24 +602,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       if (createSchoolUser) {
         await createSchoolUser(normalizedEmail, newPassword.trim(), newFullName.trim(), newRole);
       } else {
-        const secondaryApp = initializeApp(firebaseConfig, "SecondaryApp-"+Date.now());
-        const secondaryAuth = getAuth(secondaryApp);
-        const cred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, newPassword.trim());
-        const uid = cred.user.uid;
-        await setDoc(doc(db, "users", uid), {
-          uid,
+        // Supabase Auth and User insertion
+        const { data: authData, error: authError } = await supabase.auth.signUp({
           email: normalizedEmail,
-          displayName: newFullName.trim(),
-          fullName: newFullName.trim(),
-          role: String(newRole).toUpperCase(),
-          schoolId: targetSchoolId,
-          school_id: targetSchoolId,
-          isActive: true,
-          createdAt: serverTimestamp(),
-          createdBy: currentUser?.id || 'admin'
+          password: newPassword.trim(),
         });
-        await signOut(secondaryAuth);
-        await deleteApp(secondaryApp);
+        if (authError) throw authError;
+
+        const uid = authData.user?.id;
+        if (uid) {
+          await supabase.from("users").upsert({
+            id: uid,
+            email: normalizedEmail,
+            full_name: newFullName.trim(),
+            role: String(newRole).toUpperCase(),
+            school_id: targetSchoolId,
+            is_active: true,
+            created_at: new Date().toISOString(),
+          });
+        }
       }
 
       const newUserDoc = {

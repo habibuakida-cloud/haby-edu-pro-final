@@ -1,7 +1,4 @@
 import { supabase } from './supabaseClient';
-import { db } from './firebase';
-import { doc, setDoc, getDoc, collection, query, where, getDocs, deleteDoc, Timestamp } from 'firebase/firestore';
-import { sanitizeForFirestore } from './firestoreService';
 
 export interface RemedialTimetableEntry {
   id?: string;

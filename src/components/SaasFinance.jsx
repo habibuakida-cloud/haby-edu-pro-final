@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { supabase } from '../lib/supabaseClient';
 
-import { saveSchoolData, getSchoolData } from '../lib/firestoreService';
+import { saveSchoolData, getSchoolData } from '../lib/supabaseService';
 
 const AVAILABLE_CLASS_LEVELS = [
   'Form 1',

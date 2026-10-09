@@ -63,12 +63,10 @@ import {
   upsertRecord,
   getCurrentSchoolId
 } from './lib/supabaseClient';
-import { getSchoolData, saveSchoolData, subscribeSchoolData } from './lib/firestoreService';
+import { getSchoolData, saveSchoolData, subscribeSchoolData } from './lib/supabaseService';
 import { saveTimetableAssignments } from './lib/timetableService';
 import { SuperAdminDashboard } from './components/SuperAdmin/SuperAdminDashboard';
 import { Loader2, Shield, Menu, RotateCw, Check, Building2, ShieldCheck } from 'lucide-react';
-import { doc, setDoc, collection, getDocs, query, where } from 'firebase/firestore';
-import { db } from './lib/firebase';
 
 const mergeById = (arr1: any[], arr2: any[]) => {
   const map = new Map();
