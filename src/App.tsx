@@ -255,15 +255,69 @@ export default function App() {
       console.log("Loading unified single source of truth for school:", schoolId);
 
       try {
-        // Fetch in parallel from Firestore and Supabase
+        // Fetch in parallel from Firestore and Supabase with safe async try/catch blocks
         const [firestoreData, studRes, teachRes, examRes, classRes, perRes, subjRes] = await Promise.all([
           getSchoolData(schoolId).catch(() => null),
-          supabase.from('students').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
-          supabase.from('teachers').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
-          supabase.from('exams').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
-          supabase.from('classes').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
-          supabase.from('periods').select('*').eq('school_id', schoolId).order('start_time', { ascending: true }).then(res => res).catch(() => ({ data: null })),
-          supabase.from('subjects').select('*').eq('school_id', schoolId).then(res => res).catch(() => ({ data: null })),
+          (async () => {
+            try {
+              const res = await supabase.from('students').select('*').eq('school_id', schoolId);
+              if (res.error) console.warn("Students fetch error:", res.error.message);
+              return res;
+            } catch (err: any) {
+              console.warn("Students table exception:", err?.message || err);
+              return { data: null, error: err };
+            }
+          })(),
+          (async () => {
+            try {
+              const res = await supabase.from('teachers').select('*').eq('school_id', schoolId);
+              if (res.error) console.warn("Teachers fetch error:", res.error.message);
+              return res;
+            } catch (err: any) {
+              console.warn("Teachers table exception:", err?.message || err);
+              return { data: null, error: err };
+            }
+          })(),
+          (async () => {
+            try {
+              const res = await supabase.from('exams').select('*').eq('school_id', schoolId);
+              if (res.error) console.warn("Exams fetch error:", res.error.message);
+              return res;
+            } catch (err: any) {
+              console.warn("Exams table exception:", err?.message || err);
+              return { data: null, error: err };
+            }
+          })(),
+          (async () => {
+            try {
+              const res = await supabase.from('classes').select('*').eq('school_id', schoolId);
+              if (res.error) console.warn("Classes fetch error:", res.error.message);
+              return res;
+            } catch (err: any) {
+              console.warn("Classes table exception:", err?.message || err);
+              return { data: null, error: err };
+            }
+          })(),
+          (async () => {
+            try {
+              const res = await supabase.from('periods').select('*').eq('school_id', schoolId).order('start_time', { ascending: true });
+              if (res.error) console.warn("Periods fetch error:", res.error.message);
+              return res;
+            } catch (err: any) {
+              console.warn("Periods table exception:", err?.message || err);
+              return { data: null, error: err };
+            }
+          })(),
+          (async () => {
+            try {
+              const res = await supabase.from('subjects').select('*').eq('school_id', schoolId);
+              if (res.error) console.warn("Subjects fetch error:", res.error.message);
+              return res;
+            } catch (err: any) {
+              console.warn("Subjects table exception:", err?.message || err);
+              return { data: null, error: err };
+            }
+          })(),
         ]);
 
         // Process Supabase core tables

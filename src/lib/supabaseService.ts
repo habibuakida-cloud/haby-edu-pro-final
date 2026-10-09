@@ -2,20 +2,35 @@ import { supabase } from './supabaseClient';
 
 export const saveSchoolData = async (schoolId: string, data: any) => {
   if (!schoolId) return;
-  // Use upsert into 'school_data' table
-  await supabase.from('school_data').upsert({
-    id: schoolId,
-    school_id: schoolId,
-    ...data,
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'school_id' });
+  try {
+    const { error } = await supabase.from('school_data').upsert({
+      id: schoolId,
+      school_id: schoolId,
+      ...data,
+      updated_at: new Date().toISOString()
+    }, { onConflict: 'school_id' });
+    if (error) {
+      console.warn("school_data upsert warning (table may not exist or 404):", error.message);
+    }
+  } catch (err: any) {
+    console.warn("school_data upsert exception:", err?.message || err);
+  }
 };
 
 export const getSchoolData = async (schoolId: string) => {
   if (!schoolId) return null;
-  const { data, error } = await supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1);
-  if (error || !data || data.length === 0) return null;
-  return data[0];
+  try {
+    const { data, error } = await supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1);
+    if (error) {
+      console.warn("school_data fetch warning (table may not exist or 404):", error.message);
+      return null;
+    }
+    if (!data || data.length === 0) return null;
+    return data[0];
+  } catch (err: any) {
+    console.warn("school_data fetch exception:", err?.message || err);
+    return null;
+  }
 };
 
 export const measureFirestoreLatency = async (schoolId: string): Promise<{ latencyMs: number; ok: boolean; error?: string }> => {

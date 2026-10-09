@@ -10,9 +10,17 @@ export interface SubscriptionData {
 }
 
 export const getSchoolSubscription = async (schoolId: string): Promise<SubscriptionData | null> => {
-  const { data, error } = await supabase.from('school_subscriptions').select('*').eq('schoolId', schoolId).maybeSingle();
-  if (data) return data as SubscriptionData;
-  return null;
+  try {
+    const { data, error } = await supabase.from('school_subscriptions').select('*').eq('schoolId', schoolId).maybeSingle();
+    if (error) {
+      console.warn("school_subscriptions table fetch warning (table may not exist or 404):", error.message);
+      return null;
+    }
+    return data as SubscriptionData;
+  } catch (err: any) {
+    console.warn("school_subscriptions fetch exception:", err?.message || err);
+    return null;
+  }
 };
 
 export const initializeTrial = async (schoolId: string): Promise<SubscriptionData> => {
@@ -26,7 +34,14 @@ export const initializeTrial = async (schoolId: string): Promise<SubscriptionDat
     isActive: true
   };
   
-  await supabase.from('school_subscriptions').upsert(trialData);
+  try {
+    const { error } = await supabase.from('school_subscriptions').upsert(trialData);
+    if (error) {
+      console.warn("school_subscriptions upsert warning:", error.message);
+    }
+  } catch (err: any) {
+    console.warn("school_subscriptions upsert exception:", err?.message || err);
+  }
   return trialData;
 };
 
