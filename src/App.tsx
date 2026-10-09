@@ -34,6 +34,7 @@ import { RemedialDailyTracker } from './components/Remedial/RemedialDailyTracker
 import { RemedialPaymentAnalyzer } from './components/Remedial/RemedialPaymentAnalyzer';
 import { OnboardingTour } from './components/common/OnboardingTour';
 import { VerifiedStudentProfileView } from './components/common/VerifiedStudentProfileView';
+import { RoleGuard } from './components/common/RoleGuard';
 import { useAuth } from './context/AuthContext';
 import { ConfirmDeleteProvider } from './context/ConfirmDeleteContext';
 import SittingPlan from './components/SittingPlan.jsx';
@@ -1279,7 +1280,8 @@ export default function App() {
         isSidebarCollapsed ? 'lg:ml-20' : 'lg:ml-72'
       } p-3 sm:p-4 md:p-6 relative overflow-y-auto`}>
         {/* View Switcher */}
-        <main>
+        <RoleGuard currentUser={userAccount} currentView={activeView} onRedirect={view => setActiveView(view as any)}>
+          <main>
           {activeView === 'dashboard' && (
             <DashboardView
               students={data.students}
@@ -1904,6 +1906,7 @@ export default function App() {
             />
           )}
         </main>
+        </RoleGuard>
       </div>
     </div>
   </ConfirmDeleteProvider>

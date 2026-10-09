@@ -67,6 +67,18 @@ export const teachers = pgTable('teachers', {
   excludeInvigilation: boolean('exclude_invigilation').default(false),
   createdAt: timestamp('created_at').defaultNow(),
 });
+// 4B. CLASSES - ADD HII SASA
+export const classes = pgTable('classes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).notNull(),
+  name: text('name').notNull(), // Form 1, Form 2, etc
+  stream: text('stream').default('A'),
+  level: text('level').default('CSEE'),
+  classTeacherId: uuid('class_teacher_id').references(() => teachers.id, { onDelete: 'set null' }),
+  capacity: integer('capacity').default(45),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
 
 // 5. EXAMS
 export const exams = pgTable('exams', {
@@ -135,6 +147,7 @@ export const schoolsRelations = relations(schools, ({ many }) => ({
   students: many(students),
   teachers: many(teachers),
   exams: many(exams),
+  classes:many(classes)
 }));
 
 export const usersRelations = relations(users, ({ one }) => ({
