@@ -13,9 +13,9 @@ const rawKey =
   (typeof process !== 'undefined' && process.env?.VITE_SUPABASE_ANON_KEY) || 
   '';
 
-// Connected to user's Healthy Supabase project (rdrmptcdxtdjblaqsxjy.supabase.co)
-export const DEFAULT_SUPABASE_URL = 'https://rdrmptcdxtdjblaqsxjy.supabase.co';
-export const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_u8kbZfJHlduaZENoXyPahA_jmCtViwb';
+// Connected to user's Supabase project (tqazqaqdzqpbftdcekzb.supabase.co)
+export const DEFAULT_SUPABASE_URL = 'https://tqazqaqdzqpbftdcekzb.supabase.co';
+export const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_tjXiP5Cl7SuaPHrLeBPnLA_x-evZQPc';
 export const DEFAULT_PRIMARY_SCHOOL_ID = '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
 
 export const supabaseUrl = (rawUrl && rawUrl.startsWith('http') && !rawUrl.includes('placeholder')) 

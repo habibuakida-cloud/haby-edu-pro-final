@@ -245,18 +245,51 @@ export default function App() {
         // Fetch Snapshot from Firestore as Single Source of Truth
         const firestoreData = await getSchoolData(schoolId).catch(() => null);
 
-        // Fetch users from Firestore users collection for this school
+        // Fetch users from Firestore users collection & authorizedStaff for this school
         try {
-          const uQuery1 = query(collection(db, 'users'), where('schoolId', '==', schoolId));
-          const uSnap1 = await getDocs(uQuery1);
-          let schoolUsers = uSnap1.docs.map(d => ({ id: d.id, ...d.data() } as UserAccount));
-          if (schoolUsers.length === 0) {
+          const userMap = new Map<string, any>();
+          try {
+            const uQuery1 = query(collection(db, 'users'), where('schoolId', '==', schoolId));
+            const uSnap1 = await getDocs(uQuery1);
+            uSnap1.docs.forEach(d => userMap.set(d.id, { id: d.id, ...d.data() }));
+          } catch (e1) {
+            console.warn("Could not query users by schoolId:", e1);
+          }
+
+          try {
             const uQuery2 = query(collection(db, 'users'), where('school_id', '==', schoolId));
             const uSnap2 = await getDocs(uQuery2);
-            schoolUsers = uSnap2.docs.map(d => ({ id: d.id, ...d.data() } as UserAccount));
+            uSnap2.docs.forEach(d => userMap.set(d.id, { id: d.id, ...d.data() }));
+          } catch (e2) {
+            console.warn("Could not query users by school_id:", e2);
           }
-          if (schoolUsers.length > 0) {
-            setUsers(schoolUsers);
+
+          try {
+            const staffSnap = await getDocs(collection(db, `schools/${schoolId}/authorizedStaff`));
+            staffSnap.docs.forEach(d => {
+              const sd = d.data();
+              if (!userMap.has(d.id)) {
+                userMap.set(d.id, {
+                  id: d.id,
+                  uid: d.id,
+                  email: sd.authEmail || sd.email,
+                  fullName: sd.staffIdentity || sd.fullName,
+                  displayName: sd.staffIdentity || sd.fullName,
+                  role: sd.role || 'HEADMASTER',
+                  schoolId,
+                  school_id: schoolId,
+                  password: sd.assignedPassword,
+                  assignedSubjects: sd.assignedSubjects || [],
+                  isActive: true
+                });
+              }
+            });
+          } catch (e3) {
+            console.warn("Could not query authorizedStaff:", e3);
+          }
+
+          if (userMap.size > 0) {
+            setUsers(Array.from(userMap.values()) as UserAccount[]);
           }
         } catch (uErr) {
           console.warn("Could not load users from Firestore:", uErr);

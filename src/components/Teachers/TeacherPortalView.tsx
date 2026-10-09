@@ -67,9 +67,15 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
   onNavigateToView
 }) => {
   // 1. Identify Logged-in / Selected Teacher Context
+  const isTeacherOnly = currentUser?.role === 'TEACHER' && !currentUser?.isSuperAdmin;
+
   const [selectedTeacherId, setSelectedTeacherId] = useState<number>(() => {
     if (currentUser?.fullName) {
-      const match = teachers.find(t => t.name.toLowerCase().includes(currentUser.fullName.toLowerCase()) || currentUser.email === t.email);
+      const match = teachers.find(t => 
+        (currentUser.email && t.email && t.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+        t.name.toLowerCase().includes(currentUser.fullName.toLowerCase()) || 
+        currentUser.fullName.toLowerCase().includes(t.name.toLowerCase())
+      );
       if (match) return match.id;
     }
     return teachers[0]?.id || 101;
@@ -269,17 +275,24 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
             <div className="text-[10px] font-black uppercase text-amber-300 tracking-wider">
               Mwalimu Aliyeingia (Active Teacher)
             </div>
-            <select
-              value={selectedTeacherId}
-              onChange={e => setSelectedTeacherId(Number(e.target.value))}
-              className="w-full px-3 py-2 text-xs font-black bg-slate-900 text-white border border-white/20 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-hidden cursor-pointer"
-            >
-              {teachers.map(t => (
-                <option key={t.id} value={t.id}>
-                  {t.name} {t.schoolRole ? `(${t.schoolRole})` : ''}
-                </option>
-              ))}
-            </select>
+            {isTeacherOnly ? (
+              <div className="w-full px-3 py-2 text-xs font-black bg-slate-900 text-amber-300 border border-white/20 rounded-xl flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span className="truncate">{currentUser?.fullName || currentTeacher?.name}</span>
+              </div>
+            ) : (
+              <select
+                value={selectedTeacherId}
+                onChange={e => setSelectedTeacherId(Number(e.target.value))}
+                className="w-full px-3 py-2 text-xs font-black bg-slate-900 text-white border border-white/20 rounded-xl focus:ring-2 focus:ring-amber-400 focus:outline-hidden cursor-pointer"
+              >
+                {teachers.map(t => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} {t.schoolRole ? `(${t.schoolRole})` : ''}
+                  </option>
+                ))}
+              </select>
+            )}
             
             {currentTeacher && (
               <div className="pt-2 border-t border-white/10 space-y-1 text-[11px] text-blue-100 font-medium">

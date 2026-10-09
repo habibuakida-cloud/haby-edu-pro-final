@@ -94,22 +94,8 @@ export const AuthScreen: React.FC = () => {
     try {
       await signInWithEmail(email.trim(), password);
     } catch (err: any) {
-      console.error("Auth error:", err);
-      const norm = email.trim().toLowerCase();
-      if (norm === 'habibuakida@gmail.com' || norm === 'admin@haby.com') {
-        setError(err.message || 'Invalid credentials for Super Admin account. Access denied.');
-        return;
-      }
-      // Fallback demo login if network/auth fails for demo roles
-      if (norm.includes('admin') || norm.includes('head')) {
-        loginAsDemo('HEADMASTER');
-      } else if (norm.includes('academic')) {
-        loginAsDemo('ACADEMIC');
-      } else if (norm.includes('teacher')) {
-        loginAsDemo('TEACHER');
-      } else {
-        setError(err.message || 'Invalid login credentials. Please verify your email and password.');
-      }
+      console.error("[AuthScreen] Login error:", err);
+      setError(err.message || 'Invalid login credentials. Please verify your email and password.');
     } finally {
       setLoading(false);
     }

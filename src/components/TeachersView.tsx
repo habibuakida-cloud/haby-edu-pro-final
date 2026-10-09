@@ -126,6 +126,32 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   const [isMultipleTeacherModalOpen, setIsMultipleTeacherModalOpen] = useState(false);
   const [selectedTeacherIds, setSelectedTeacherIds] = useState<number[]>([]);
 
+  // If logged in as TEACHER: show ONLY the current teacher (hide list of other teachers)
+  const isTeacherUser = currentUser?.role === 'TEACHER' && !currentUser?.isSuperAdmin;
+  const currentTeacherName = (currentUser?.fullName || '').toLowerCase().trim();
+  const currentTeacherEmail = (currentUser?.email || '').toLowerCase().trim();
+
+  const effectiveTeachers = useMemo(() => {
+    if (!isTeacherUser) return teachers;
+    const match = teachers.filter(t => {
+      const tName = (t.name || '').toLowerCase().trim();
+      const tEmail = (t.email || '').toLowerCase().trim();
+      return (
+        (tEmail && tEmail === currentTeacherEmail) ||
+        (tName && (tName.includes(currentTeacherName) || currentTeacherName.includes(tName)))
+      );
+    });
+    if (match.length > 0) return match;
+    return [{
+      id: 9999,
+      name: currentUser?.fullName || 'Mwalimu wa Somo',
+      email: currentUser?.email || '',
+      subjects: currentUser?.assignedSubjects || [],
+      schoolRole: 'Subject Teacher',
+      gender: 'Male'
+    } as Teacher];
+  }, [teachers, isTeacherUser, currentTeacherName, currentTeacherEmail, currentUser]);
+
   // Workload Analytics State
   const [workloadThreshold, setWorkloadThreshold] = useState<number>(20);
   const [workloadFilter, setWorkloadFilter] = useState<'ALL' | 'OVERWORKED' | 'TOP10'>('ALL');
@@ -134,7 +160,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
 
   // Workload Analytics Data calculation for Recharts
   const teacherWorkloadData = useMemo(() => {
-    return teachers.map(t => {
+    return effectiveTeachers.map(t => {
       const tSlots = timetableAssignments.filter(a => {
         const matchId = a.teacherId === t.id;
         const aT = (('teacher' in a ? (a as any).teacher : '') || '').toLowerCase();
@@ -157,7 +183,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
         gender: t.gender || 'Male'
       };
     });
-  }, [teachers, timetableAssignments, workloadThreshold]);
+  }, [effectiveTeachers, timetableAssignments, workloadThreshold]);
 
   const processedChartData = useMemo(() => {
     let list = [...teacherWorkloadData];
@@ -596,7 +622,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   };
 
   // Filter teachers by search and role
-  const filteredTeachers = teachers.filter(t => {
+  const filteredTeachers = effectiveTeachers.filter(t => {
     const q = searchFilter.toLowerCase();
     const matchesSearch = !q || 
       t.name.toLowerCase().includes(q) || 
@@ -1771,7 +1797,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
               <div>
                 <h3 className="text-base font-bold text-[#1f4d8b] flex items-center gap-2">
                   <UserCheck className="w-4 h-4 text-emerald-600" />
-                  Registered School Faculty &amp; Staff ({filteredTeachers.length} of {teachers.length})
+                  Registered School Faculty &amp; Staff ({filteredTeachers.length} of {effectiveTeachers.length})
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   Complete registry of teaching faculty, subject allocations, and weekly timetables.

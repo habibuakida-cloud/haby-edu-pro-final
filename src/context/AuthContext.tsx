@@ -65,70 +65,142 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(false);
 
   const fetchOrCreateUserAccount = async (fbUser: FirebaseUser) => {
-    const normEmail = fbUser.email?.toLowerCase() || '';
+    const normEmail = fbUser.email?.toLowerCase().trim() || '';
     const isAdmin = normEmail === ADMIN_EMAIL || normEmail === 'habibuakida@gmail.com';
     const isSuperAdmin = isAdmin || normEmail === 'habibuakida@gmail.com';
+
+    console.log("[Auth] Step 2: Fetching user profile from Firestore for UID:", fbUser.uid, "email:", normEmail);
+
     try {
-      console.log("Fetching user profile from Firestore for UID:", fbUser.uid, "email:", normEmail);
       let existingUser: any = null;
       let resolvedSchoolId: string | null = null;
+
+      // 1. Primary lookup: Firestore users collection using Auth UID
       try {
         const userDocRef = doc(db, "users", fbUser.uid);
         const userDoc = await getDoc(userDocRef);
-        if (!userDoc.exists() || userDoc.data().isActive === false) {
-          if (!isSuperAdmin) { throw new Error("User profile not found or inactive"); }
-        }
         if (userDoc.exists()) {
           const data = userDoc.data();
-          if (!data.schoolId &&!isSuperAdmin) { throw new Error("User schoolId missing"); }
+          console.log("[Auth] Found user document in Firestore 'users' by UID:", fbUser.uid, data);
+          if (data.isActive === false) {
+            throw new Error("Akaunti yako imezimwa (Account is inactive). Wasiliana na uongozi wa shule.");
+          }
           existingUser = data;
           resolvedSchoolId = data.schoolId || data.school_id;
-        } else {
+        }
+      } catch (docErr: any) {
+        if (docErr.message && docErr.message.includes("Akaunti yako imezimwa")) {
+          throw docErr;
+        }
+        console.warn("[Auth] Direct UID lookup in 'users' errored/failed:", docErr);
+      }
+
+      // 2. Secondary lookup: Firestore schoolAdmins collection using Auth UID
+      if (!existingUser) {
+        try {
+          const adminDocRef = doc(db, "schoolAdmins", fbUser.uid);
+          const adminDoc = await getDoc(adminDocRef);
+          if (adminDoc.exists()) {
+            const data = adminDoc.data();
+            console.log("[Auth] Found user in 'schoolAdmins' collection by UID:", fbUser.uid, data);
+            existingUser = data;
+            resolvedSchoolId = data.schoolId || data.school_id;
+            // Backfill into users collection for fast direct UID lookup next time
+            await setDoc(doc(db, "users", fbUser.uid), {
+              ...data,
+              uid: fbUser.uid,
+              id: fbUser.uid
+            }, { merge: true }).catch(() => {});
+          }
+        } catch (admErr) {
+          console.warn("[Auth] Direct UID lookup in 'schoolAdmins' errored:", admErr);
+        }
+      }
+
+      // 3. Fallback: Search Firestore users collection by email query
+      if (!existingUser && normEmail) {
+        try {
+          console.log("[Auth] Searching 'users' collection by email query:", normEmail);
           const q = query(collection(db, 'users'), where('email', '==', normEmail));
           const qSnap = await getDocs(q);
           if (!qSnap.empty) {
-            existingUser = qSnap.docs[0].data();
-            resolvedSchoolId = existingUser.schoolId || existingUser.school_id;
+            const data = qSnap.docs[0].data();
+            console.log("[Auth] Found user document in 'users' by email:", data);
+            existingUser = data;
+            resolvedSchoolId = data.schoolId || data.school_id;
+            // Link UID document so future lookups by UID succeed instantly!
+            await setDoc(doc(db, "users", fbUser.uid), {
+              ...data,
+              uid: fbUser.uid,
+              id: fbUser.uid
+            }, { merge: true }).catch(() => {});
           }
+        } catch (emailErr) {
+          console.warn("[Auth] Email query lookup in 'users' errored:", emailErr);
         }
-      } catch (firestoreErr: any) {
-        console.warn("Firestore user fetch warning:", firestoreErr);
-        if (!isSuperAdmin && firestoreErr.message && firestoreErr.message.includes("missing")) { throw firestoreErr; }
       }
+
+      // 4. Fallback: Search Supabase users table
       if (!existingUser) {
         try {
-          const { data: byId } = await supabase.from('users').select('*').eq('id', fbUser.uid).single();
-          if (byId) { existingUser = byId; resolvedSchoolId = byId.school_id || byId.schoolId; }
-          else if (normEmail) {
-            const { data: byEmail } = await supabase.from('users').select('*').eq('email', normEmail).single();
-            if (byEmail) { existingUser = byEmail; resolvedSchoolId = byEmail.school_id || byEmail.schoolId; }
+          const { data: byId } = await supabase.from('users').select('*').eq('id', fbUser.uid).maybeSingle();
+          if (byId) {
+            existingUser = byId;
+            resolvedSchoolId = byId.school_id || byId.schoolId;
+          } else if (normEmail) {
+            const { data: byEmail } = await supabase.from('users').select('*').eq('email', normEmail).maybeSingle();
+            if (byEmail) {
+              existingUser = byEmail;
+              resolvedSchoolId = byEmail.school_id || byEmail.schoolId;
+            }
           }
-        } catch (err) { console.warn("Supabase user profile fetch warning:", err); }
+        } catch (supaErr) {
+          console.warn("[Auth] Supabase profile fetch fallback warning:", supaErr);
+        }
       }
+
+      // Profile found!
       if (existingUser) {
         const data = existingUser;
         const storedSessionSchool = sessionStorage.getItem('haby_school_id');
         const finalSchoolId = resolvedSchoolId || data.school_id || data.schoolId || storedSessionSchool || DEFAULT_PRIMARY_SCHOOL_ID;
+
         sessionStorage.setItem('haby_school_id', finalSchoolId);
         localStorage.setItem('currentSchoolId', finalSchoolId);
         localStorage.setItem('schoolId', finalSchoolId);
+
+        const accountRole = (data.role || (isSuperAdmin ? 'HEADMASTER' : 'ACADEMIC')).toUpperCase() as UserRole;
+
         const account: UserAccount = {
           id: fbUser.uid,
           email: fbUser.email || normEmail,
-          fullName: data.fullName || data.displayName || fbUser.displayName || (isAdmin? 'Administrator (Mwl. Habibu Akida)' : 'Authorized User'),
-          role: data.role || (isSuperAdmin? 'HEADMASTER' : 'ACADEMIC'),
+          fullName: data.fullName || data.displayName || fbUser.displayName || (isAdmin ? 'Administrator (Mwl. Habibu Akida)' : 'Authorized User'),
+          role: accountRole,
           schoolId: finalSchoolId,
+          school_id: finalSchoolId,
           assignedSubjects: data.assignedSubjects || [],
-          isSuperAdmin: data.isSuperAdmin?? isSuperAdmin
+          isSuperAdmin: data.isSuperAdmin ?? isSuperAdmin
         };
+
         sessionStorage.setItem('haby_demo_user', JSON.stringify(account));
         setUserAccount(account);
+        console.log("[Auth] Profile established successfully:", account);
         setLoading(false);
         return;
       }
+
+      // Super Admin fallback
       if (isSuperAdmin) {
         const schoolId = sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
-        const adminAccount: UserAccount = { id: fbUser.uid, email: normEmail, fullName: 'Administrator (Mwl. Habibu Akida)', role: 'HEADMASTER', schoolId, isSuperAdmin: true };
+        const adminAccount: UserAccount = {
+          id: fbUser.uid,
+          email: normEmail,
+          fullName: 'Administrator (Mwl. Habibu Akida)',
+          role: 'HEADMASTER',
+          schoolId,
+          school_id: schoolId,
+          isSuperAdmin: true
+        };
         sessionStorage.setItem('haby_school_id', schoolId);
         localStorage.setItem('currentSchoolId', schoolId);
         sessionStorage.setItem('haby_demo_user', JSON.stringify(adminAccount));
@@ -136,12 +208,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setLoading(false);
         return;
       }
+
+      // Required error if document is missing in Firestore
+      console.error("[Auth Error] User profile not found in Firestore for UID:", fbUser.uid, "email:", normEmail);
       throw new Error("User profile not found in Firestore");
     } catch (error: any) {
-      console.error("Error fetching user profile:", error);
+      console.error("[Auth Error] Error fetching user profile:", error);
       setLoading(false);
       throw error;
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
@@ -150,71 +227,142 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }).catch((err) => {
       if (err.code === 'auth/email-already-in-use') { console.log('Admin user already registered'); }
     });
+
     const fallbackTimer = setTimeout(() => { setLoading(false); }, 2000);
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
       clearTimeout(fallbackTimer);
-      setUser(firebaseUser);
       if (firebaseUser) {
-        if (typeof window!== 'undefined') {
+        setUser(firebaseUser);
+        if (typeof window !== 'undefined') {
           safeRemoveItem(window.sessionStorage, 'haby_demo_user');
           safeRemoveItem(window.sessionStorage, 'haby_explicit_logout');
         }
-        await fetchOrCreateUserAccount(firebaseUser);
+        try {
+          await fetchOrCreateUserAccount(firebaseUser);
+        } catch (fetchErr: any) {
+          console.error("[Auth] onAuthStateChanged profile load failed:", fetchErr);
+          // Crucial: Sign out so the user isn't stuck with a broken/empty session
+          await signOut(auth).catch(() => {});
+          setUser(null);
+          setUserAccount(null);
+        }
       } else {
-        const savedDemo = typeof window!== 'undefined'? safeGetItem(window.sessionStorage, 'haby_demo_user') : null;
-        if (!savedDemo) { setUserAccount(null); }
+        setUser(null);
+        const savedDemo = typeof window !== 'undefined' ? safeGetItem(window.sessionStorage, 'haby_demo_user') : null;
+        if (!savedDemo) {
+          setUserAccount(null);
+        }
       }
       setLoading(false);
     });
-    return () => { clearTimeout(fallbackTimer); unsubscribe(); };
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
   }, []);
 
-  // ==== FUNCTION MPYA YA KUSAJILI USER - HII NDIO FIX ====
+  // ==== FUNCTION YA KUSAJILI USER - ATOMIC AUTH + FIRESTORE ====
   const createSchoolUser = async (email: string, password: string, displayName: string, role: UserRole): Promise<boolean> => {
     const adminSchoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     if (!adminSchoolId) throw new Error("Admin hana schoolId - tafadhali login tena");
 
-    console.log("Creating user for schoolId:", adminSchoolId);
-    const secondaryApp = initializeApp(firebaseConfig, `secondary-${Date.now()}`);
+    const normalizedEmail = email.toLowerCase().trim();
+    console.log("[createSchoolUser] Registering user in Firebase Auth & Firestore:", { email: normalizedEmail, role, adminSchoolId });
+
+    const secondaryApp = initializeApp(firebaseConfig, `secondary-user-${Date.now()}`);
     const secondaryAuth = getAuth(secondaryApp);
 
     try {
-      const cred = await createUserWithEmailAndPassword(secondaryAuth, email.toLowerCase().trim(), password);
-      const newUid = cred.user.uid;
+      let newUid: string;
+      try {
+        const cred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, password);
+        newUid = cred.user.uid;
+        console.log("[createSchoolUser] Created Firebase Auth user with UID:", newUid);
+      } catch (authErr: any) {
+        if (authErr.code === 'auth/email-already-in-use') {
+          try {
+            const existingCred = await signInWithEmailAndPassword(secondaryAuth, normalizedEmail, password);
+            newUid = existingCred.user.uid;
+            console.log("[createSchoolUser] Email in use, retrieved existing UID:", newUid);
+          } catch (signInErr: any) {
+            const q = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+            const qSnap = await getDocs(q);
+            if (!qSnap.empty) {
+              newUid = qSnap.docs[0].id;
+            } else {
+              throw new Error(`Email "${normalizedEmail}" is already registered in Firebase Authentication. Please use a different email or provide the existing password.`);
+            }
+          }
+        } else {
+          throw authErr;
+        }
+      }
 
-      // 1. Kwa LOGIN - users/{uid} - LAZIMA
-      await setDoc(doc(db, "users", newUid), {
+      const userDocData = {
         uid: newUid,
-        email: email.toLowerCase().trim(),
-        displayName: displayName,
-        fullName: displayName,
-        role: role,
+        id: newUid,
+        email: normalizedEmail,
+        displayName: displayName.trim(),
+        fullName: displayName.trim(),
+        role: String(role).toUpperCase(),
         schoolId: adminSchoolId,
         school_id: adminSchoolId,
         isActive: true,
         isSuperAdmin: false,
+        password: password.trim(),
         createdAt: serverTimestamp(),
-        createdBy: auth.currentUser?.uid || userAccount?.id
-      });
+        createdBy: auth.currentUser?.uid || userAccount?.id || 'admin'
+      };
 
-      // 2. Kwa TABLE KUONEKANA - schools/{schoolId}/authorizedStaff/{uid}
+      // 1. users collection: ID MUST be newUid
+      await setDoc(doc(db, "users", newUid), userDocData);
+      console.log("[createSchoolUser] Created Firestore users document:", newUid);
+
+      // 2. schoolAdmins collection if role is HEADMASTER or ADMIN
+      if (role === 'HEADMASTER') {
+        await setDoc(doc(db, "schoolAdmins", newUid), userDocData);
+      }
+
+      // 3. schools/{schoolId}/authorizedStaff/{newUid}
       await setDoc(doc(db, `schools/${adminSchoolId}/authorizedStaff`, newUid), {
         uid: newUid,
-        staffIdentity: displayName,
-        authEmail: email.toLowerCase().trim(),
-        email: email.toLowerCase().trim(),
-        role: role,
-        assignedPassword: password,
+        id: newUid,
+        staffIdentity: displayName.trim(),
+        fullName: displayName.trim(),
+        authEmail: normalizedEmail,
+        email: normalizedEmail,
+        role: String(role).toUpperCase(),
+        assignedPassword: password.trim(),
         assignedSubjects: [],
+        schoolId: adminSchoolId,
         isAuthorized: true,
+        isActive: true,
         createdAt: serverTimestamp()
       });
+
+      // 4. Mirror to Supabase
+      try {
+        await supabase.from('users').upsert({
+          id: newUid,
+          email: normalizedEmail,
+          full_name: displayName.trim(),
+          role: String(role).toUpperCase(),
+          school_id: adminSchoolId,
+          schoolId: adminSchoolId,
+          created_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn("Supabase user insert warning:", e);
+      }
 
       await signOut(secondaryAuth);
       await deleteApp(secondaryApp);
       return true;
     } catch (error: any) {
-      await deleteApp(secondaryApp).catch(()=>{});
+      await deleteApp(secondaryApp).catch(() => {});
+      console.error("[createSchoolUser Error]:", error);
       throw error;
     }
   };
@@ -288,28 +436,74 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
       let fbUser: FirebaseUser | null = null;
+      let fbAuthError: any = null;
       try {
+        console.log("[Login] Step 1: Attempting signInWithEmailAndPassword for:", normalizedEmail);
         const userCred = await signInWithEmailAndPassword(auth, normalizedEmail, inputPass);
         fbUser = userCred.user;
-      } catch (fbErr: any) {}
+        console.log("[Login] Step 1 Success: Firebase Auth signed in, UID:", fbUser.uid);
+      } catch (fbErr: any) {
+        fbAuthError = fbErr;
+        console.warn("[Login] Firebase Auth signIn error:", fbErr.code, fbErr.message);
+      }
+
       if (fbUser) {
         sessionStorage.removeItem('haby_demo_user');
-        await fetchOrCreateUserAccount(fbUser);
-        return;
-      }
-      const { data: usersSnap } = await supabase.from('users').select('*').eq('email', normalizedEmail);
-      if (usersSnap && usersSnap.length > 0) {
-        const uData = usersSnap[0];
-        if (uData.password && uData.password === inputPass) {
-          const resolvedSchool = uData.school_id || uData.schoolId || DEFAULT_PRIMARY_SCHOOL_ID;
-          sessionStorage.setItem('haby_school_id', resolvedSchool);
-          localStorage.setItem('currentSchoolId', resolvedSchool);
-          const memberAccount: UserAccount = { id: uData.id, email: uData.email, fullName: uData.fullName || 'Authorized Staff', role: uData.role || 'TEACHER', schoolId: resolvedSchool, assignedSubjects: uData.assignedSubjects || [], isSuperAdmin:!!uData.isSuperAdmin };
-          sessionStorage.setItem('haby_demo_user', JSON.stringify(memberAccount));
-          setUserAccount(memberAccount);
+        try {
+          console.log("[Login] Step 2: Fetching user profile from Firestore for UID:", fbUser.uid);
+          await fetchOrCreateUserAccount(fbUser);
+          console.log("[Login] Step 2 Success: User profile loaded and authorized!");
           return;
+        } catch (fetchErr: any) {
+          console.error("[Login Error] Profile fetch failed for UID:", fbUser.uid, fetchErr);
+          // Sign out immediately so Firebase Auth session isn't left hanging in limbo
+          await signOut(auth).catch(() => {});
+          setUser(null);
+          setUserAccount(null);
+          throw fetchErr;
         }
       }
+
+      // Check fallback user in Supabase if not found in Firebase Auth
+      try {
+        const { data: usersSnap } = await supabase.from('users').select('*').eq('email', normalizedEmail);
+        if (usersSnap && usersSnap.length > 0) {
+          const uData = usersSnap[0];
+          if (uData.password && uData.password === inputPass) {
+            const resolvedSchool = uData.school_id || uData.schoolId || DEFAULT_PRIMARY_SCHOOL_ID;
+            sessionStorage.setItem('haby_school_id', resolvedSchool);
+            localStorage.setItem('currentSchoolId', resolvedSchool);
+            const memberAccount: UserAccount = {
+              id: uData.id,
+              email: uData.email,
+              fullName: uData.fullName || uData.full_name || 'Authorized Staff',
+              role: (uData.role || 'TEACHER').toUpperCase(),
+              schoolId: resolvedSchool,
+              school_id: resolvedSchool,
+              assignedSubjects: uData.assignedSubjects || [],
+              isSuperAdmin: !!uData.isSuperAdmin
+            };
+            sessionStorage.setItem('haby_demo_user', JSON.stringify(memberAccount));
+            setUserAccount(memberAccount);
+            return;
+          }
+        }
+      } catch (supaErr) {
+        console.warn("[Login] Supabase lookup error:", supaErr);
+      }
+
+      if (fbAuthError) {
+        if (fbAuthError.code === 'auth/invalid-credential' || fbAuthError.code === 'auth/wrong-password') {
+          throw new Error('Invalid email or password.');
+        } else if (fbAuthError.code === 'auth/user-not-found') {
+          throw new Error('No user account found with this email.');
+        } else if (fbAuthError.code === 'auth/too-many-requests') {
+          throw new Error('Too many failed login attempts. Please try again in a few minutes.');
+        } else {
+          throw new Error(fbAuthError.message || 'Authentication failed. Please verify your credentials.');
+        }
+      }
+
       throw new Error('Invalid email or password.');
     } finally { setLoading(false); }
   };

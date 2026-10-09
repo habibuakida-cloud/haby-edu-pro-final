@@ -20,7 +20,7 @@ import { useAuth } from '../context/AuthContext';
 import { SUBJECT_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
 import { saveSchoolData } from '../lib/firestoreService';
 import { initializeApp, deleteApp } from 'firebase/app';
-import { getAuth, createUserWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { doc, setDoc, Timestamp, serverTimestamp, collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -377,6 +377,80 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [adminRegisterMsg, setAdminRegisterMsg] = useState<{ type: 'success' | 'error'; text: string; creds?: { email: string; pass: string; school: string } } | null>(null);
   const [registeringAdmin, setRegisteringAdmin] = useState(false);
 
+  // Selected school users list state
+  const [targetSchoolUsers, setTargetSchoolUsers] = useState<any[]>([]);
+  const [loadingTargetSchoolUsers, setLoadingTargetSchoolUsers] = useState<boolean>(false);
+
+  const fetchUsersForTargetSchool = async (sId: string) => {
+    if (!sId) {
+      setTargetSchoolUsers([]);
+      return;
+    }
+    setLoadingTargetSchoolUsers(true);
+    try {
+      console.log("[SettingsView] Querying users for schoolId:", sId);
+      const userMap = new Map<string, any>();
+
+      // 1. Query Firestore users where schoolId == sId
+      try {
+        const q1 = query(collection(db, 'users'), where('schoolId', '==', sId));
+        const s1 = await getDocs(q1);
+        s1.docs.forEach(d => userMap.set(d.id, { id: d.id, ...d.data() }));
+      } catch (e1) {
+        console.warn("Could not query users by schoolId:", e1);
+      }
+
+      // 2. Query Firestore users where school_id == sId
+      try {
+        const q2 = query(collection(db, 'users'), where('school_id', '==', sId));
+        const s2 = await getDocs(q2);
+        s2.docs.forEach(d => userMap.set(d.id, { id: d.id, ...d.data() }));
+      } catch (e2) {
+        console.warn("Could not query users by school_id:", e2);
+      }
+
+      // 3. Query Firestore schools/{sId}/authorizedStaff
+      try {
+        const s3 = await getDocs(collection(db, `schools/${sId}/authorizedStaff`));
+        s3.docs.forEach(d => {
+          const sd = d.data();
+          if (!userMap.has(d.id)) {
+            userMap.set(d.id, {
+              id: d.id,
+              uid: d.id,
+              displayName: sd.staffIdentity || sd.fullName,
+              fullName: sd.staffIdentity || sd.fullName,
+              email: sd.authEmail || sd.email,
+              role: sd.role || 'HEADMASTER',
+              schoolId: sId,
+              password: sd.assignedPassword,
+              isActive: sd.isActive !== false,
+              createdAt: sd.createdAt
+            });
+          }
+        });
+      } catch (e3) {
+        console.warn("Could not query authorizedStaff:", e3);
+      }
+
+      const list = Array.from(userMap.values());
+      console.log(`[SettingsView] Found ${list.length} users for school ${sId}:`, list);
+      setTargetSchoolUsers(list);
+    } catch (err) {
+      console.error("[SettingsView] Error fetching school users:", err);
+    } finally {
+      setLoadingTargetSchoolUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    if (targetSchoolId) {
+      fetchUsersForTargetSchool(targetSchoolId);
+    } else {
+      setTargetSchoolUsers([]);
+    }
+  }, [targetSchoolId]);
+
   // New user form state
   const [newEmail, setNewEmail] = useState('');
   const [newFullName, setNewFullName] = useState('');
@@ -550,28 +624,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const schoolDisplayName = targetSchool ? targetSchool.name : targetSchoolId;
       const normalizedEmail = adminEmail.trim().toLowerCase();
 
-      console.log("Registering school admin in Firebase Auth & Firestore atomically:", { normalizedEmail, targetSchoolId });
+      console.log("[Registration] Starting atomic registration for:", { normalizedEmail, targetSchoolId });
 
       // 1. Create user in Firebase Authentication using secondary Firebase App instance so Superadmin doesn't log out
       const secondaryApp = initializeApp(firebaseConfig, "SecondaryAuthApp_" + Date.now());
       const secondaryAuth = getAuth(secondaryApp);
       let uid: string;
       try {
+        console.log("[Registration] Step 1: Creating Auth user in Firebase Auth...");
         const userCred = await createUserWithEmailAndPassword(secondaryAuth, normalizedEmail, adminPassword.trim());
         uid = userCred.user.uid;
+        console.log("[Registration] Step 1 Success: Created Auth user with UID:", uid);
       } catch (authErr: any) {
+        console.warn("[Registration] Auth createUser error:", authErr);
         if (authErr.code === 'auth/email-already-in-use') {
-          uid = generateUUID();
-          console.warn("Email already in use in Auth, using generated UID:", uid);
+          try {
+            console.log("[Registration] Email in use, verifying password with secondary auth...");
+            const existingCred = await signInWithEmailAndPassword(secondaryAuth, normalizedEmail, adminPassword.trim());
+            uid = existingCred.user.uid;
+            console.log("[Registration] Re-authenticated existing user, UID:", uid);
+          } catch (signInErr: any) {
+            const q = query(collection(db, 'users'), where('email', '==', normalizedEmail));
+            const qSnap = await getDocs(q);
+            if (!qSnap.empty) {
+              uid = qSnap.docs[0].id;
+              console.log("[Registration] Found existing UID from Firestore users doc:", uid);
+            } else {
+              throw new Error(`Email "${normalizedEmail}" is already registered in Firebase Authentication. Please use a different email or provide the existing password.`);
+            }
+          }
         } else {
           throw authErr;
         }
       } finally {
+        await signOut(secondaryAuth).catch(() => {});
         await deleteApp(secondaryApp).catch(() => {});
       }
 
-      // 2. Create document in Firestore `users` collection with ID = UID
-      const userDocRef = doc(db, 'users', uid);
+      console.log("[Registration] Step 2: Creating Firestore user documents with UID:", uid);
+
       const userDocData = {
         id: uid,
         uid: uid,
@@ -579,26 +670,58 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         displayName: adminFullName.trim(),
         fullName: adminFullName.trim(),
         role: 'HEADMASTER',
+        schoolRole: 'School Administrator',
         schoolId: targetSchoolId,
         school_id: targetSchoolId,
-        createdAt: Timestamp.now(),
+        createdAt: serverTimestamp(),
         isActive: true,
+        createdBy: currentUser?.id || 'superadmin',
         password: adminPassword.trim()
       };
 
-      await setDoc(userDocRef, userDocData);
-      console.log("Successfully created user document in Firestore users collection:", uid);
+      // a) Write to `users/{uid}` (document ID MUST match Auth UID)
+      await setDoc(doc(db, 'users', uid), userDocData);
+      console.log("[Registration] Step 2a Success: Created document in 'users' collection with ID:", uid);
 
-      // Also mirror to Supabase for robustness
-      await supabase.from('users').insert({
+      // b) Write to `schoolAdmins/{uid}`
+      await setDoc(doc(db, 'schoolAdmins', uid), userDocData);
+      console.log("[Registration] Step 2b Success: Created document in 'schoolAdmins' collection with ID:", uid);
+
+      // c) Write to `schools/{targetSchoolId}/authorizedStaff/{uid}`
+      await setDoc(doc(db, `schools/${targetSchoolId}/authorizedStaff`, uid), {
+        uid,
         id: uid,
+        staffIdentity: adminFullName.trim(),
+        fullName: adminFullName.trim(),
+        authEmail: normalizedEmail,
         email: normalizedEmail,
-        full_name: adminFullName.trim(),
         role: 'HEADMASTER',
-        school_id: targetSchoolId,
         schoolId: targetSchoolId,
-        created_at: new Date().toISOString()
-      }).catch(e => console.warn("Supabase user insert warning:", e));
+        assignedPassword: adminPassword.trim(),
+        assignedSubjects: [],
+        isAuthorized: true,
+        isActive: true,
+        createdAt: serverTimestamp()
+      });
+      console.log("[Registration] Step 2c Success: Created document in authorizedStaff for school:", targetSchoolId);
+
+      // Mirror to Supabase for robustness
+      try {
+        await supabase.from('users').upsert({
+          id: uid,
+          email: normalizedEmail,
+          full_name: adminFullName.trim(),
+          role: 'HEADMASTER',
+          school_id: targetSchoolId,
+          schoolId: targetSchoolId,
+          created_at: new Date().toISOString()
+        });
+      } catch (e) {
+        console.warn("Supabase user insert warning:", e);
+      }
+
+      // Re-fetch users for this school so the table below updates immediately!
+      await fetchUsersForTargetSchool(targetSchoolId);
 
       // Update local users list if provided
       if (onUpdateUsers && users) {
@@ -607,7 +730,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       setAdminRegisterMsg({
         type: 'success',
-        text: `School Administrator "${adminFullName.trim()}" registered successfully! UID: ${uid}. They can now log in to manage "${schoolDisplayName}".`,
+        text: `School Administrator "${adminFullName.trim()}" registered and authorized successfully! UID: ${uid}. They can now log in to manage "${schoolDisplayName}".`,
         creds: {
           email: normalizedEmail,
           pass: adminPassword.trim(),
@@ -619,7 +742,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setAdminEmail('');
       setAdminPassword('');
     } catch (err: any) {
-      console.error("Error registering school admin:", err);
+      console.error("[Registration Error] Error registering school admin:", err);
       setAdminRegisterMsg({
         type: 'error',
         text: `Failed to register school admin: ${err.message || 'Firestore write error'}`
@@ -2144,6 +2267,119 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </button>
               </div>
             </form>
+
+            {/* Registered Users/Admins for Selected School Table */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <KeyRound className="w-4 h-4 text-blue-600" />
+                    Registered Administrators & Users for Selected School ({targetSchoolUsers.length})
+                  </h4>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    {targetSchoolId 
+                      ? `School Workspace: ${allSchools.find(s => s.id === targetSchoolId)?.name || targetSchoolId} (ID: ${targetSchoolId})`
+                      : 'Please select a school workspace from the dropdown above to view its registered accounts.'}
+                  </p>
+                </div>
+                {targetSchoolId && (
+                  <button
+                    type="button"
+                    onClick={() => fetchUsersForTargetSchool(targetSchoolId)}
+                    disabled={loadingTargetSchoolUsers}
+                    className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50 self-start sm:self-auto"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${loadingTargetSchoolUsers ? 'animate-spin' : ''}`} />
+                    <span>Refresh Users</span>
+                  </button>
+                )}
+              </div>
+
+              {!targetSchoolId ? (
+                <div className="py-6 text-center text-slate-400 text-xs bg-white rounded-lg border border-dashed border-slate-200">
+                  Select a school workspace from the dropdown above to view its registered administrators and staff.
+                </div>
+              ) : loadingTargetSchoolUsers ? (
+                <div className="py-8 text-center text-slate-500 flex flex-col items-center gap-2 bg-white rounded-lg border border-slate-200">
+                  <RefreshCw className="w-5 h-5 animate-spin text-blue-600" />
+                  <span className="text-xs font-semibold">Fetching registered users from Firestore...</span>
+                </div>
+              ) : targetSchoolUsers.length === 0 ? (
+                <div className="py-6 text-center text-slate-500 text-xs bg-white rounded-lg border border-dashed border-slate-200">
+                  No administrators or users registered for this school yet. Fill out the form above to register and authorize an administrator.
+                </div>
+              ) : (
+                <div className="overflow-x-auto bg-white rounded-lg border border-slate-200 shadow-xs">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-100 text-slate-600 font-black border-b border-slate-200 text-[11px] uppercase tracking-wider">
+                        <th className="py-2.5 px-3">Admin / Staff Name</th>
+                        <th className="py-2.5 px-3">Official Login Email</th>
+                        <th className="py-2.5 px-3">System Role</th>
+                        <th className="py-2.5 px-3">Auth UID (Firestore doc ID)</th>
+                        <th className="py-2.5 px-3">Password</th>
+                        <th className="py-2.5 px-3">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {targetSchoolUsers.map(u => (
+                        <tr key={u.id || u.uid} className="hover:bg-slate-50/70 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-slate-900">
+                            <div className="flex items-center gap-2">
+                              <div className="w-6 h-6 rounded-md bg-blue-100 text-blue-800 font-black flex items-center justify-center text-[10px]">
+                                {(u.fullName || u.displayName || 'U').charAt(0)}
+                              </div>
+                              <span>{u.fullName || u.displayName}</span>
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600 font-mono text-[11px] font-medium">{u.email}</td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase bg-blue-50 text-blue-700 border border-blue-200">
+                              {u.role || 'HEADMASTER'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 font-mono text-[10px] text-slate-500 font-bold truncate max-w-[130px]" title={u.uid || u.id}>
+                            {u.uid || u.id}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            {u.password ? (
+                              <div className="flex items-center gap-1.5 font-mono text-xs text-slate-700">
+                                <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">
+                                  {revealedPasswords[u.id || u.uid] ? u.password : '••••••••'}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => togglePasswordReveal(u.id || u.uid)}
+                                  className="p-1 text-slate-400 hover:text-slate-600 rounded cursor-pointer"
+                                  title={revealedPasswords[u.id || u.uid] ? "Hide Password" : "Show Password"}
+                                >
+                                  {revealedPasswords[u.id || u.uid] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCopy(u.password, u.id || u.uid)}
+                                  className="p-1 text-slate-400 hover:text-blue-600 rounded cursor-pointer"
+                                  title="Copy Password"
+                                >
+                                  {copiedId === (u.id || u.uid) ? <CheckCheck className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[10px] text-slate-400 italic">Auth Managed</span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 border border-emerald-200">
+                              Active
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
 
             {/* School Directory & 1-Click Login */}
             <div className="space-y-3">
