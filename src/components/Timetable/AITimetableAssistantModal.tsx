@@ -359,7 +359,7 @@ export const AITimetableAssistantModal: React.FC<AITimetableAssistantModalProps>
           id: t.id,
           name: t.name,
           subjects: t.subjects,
-          schoolRole: t.role,
+          schoolRole: t.schoolRole || (t as any).role,
           maxPeriodsPerWeek: t.maxPeriodsPerWeek || 24
         })),
         periodSettings,
@@ -585,7 +585,7 @@ export const AITimetableAssistantModal: React.FC<AITimetableAssistantModalProps>
                       >
                         <div className="min-w-0">
                           <span className="font-bold text-xs text-slate-900 block truncate flex items-center gap-1.5">
-                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getSubjectColor(item.subject) }} />
+                            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: getSubjectColor(item.subject).bg }} />
                             <span>{item.subject}</span>
                           </span>
                           <span className="text-[10px] text-slate-500 block mt-0.5">
@@ -1146,7 +1146,7 @@ export const AITimetableAssistantModal: React.FC<AITimetableAssistantModalProps>
                         isExtra ? 'bg-amber-50/50' : 'hover:bg-slate-50'
                       }`}>
                         <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: getSubjectColor(a.subject) }} />
+                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: getSubjectColor(a.subject).bg }} />
                           <span className="font-bold text-slate-900">{a.day} • {a.periodName || a.period.split(' (')[0]}</span>
                           <span className="text-slate-400">|</span>
                           <span className="font-semibold text-slate-700 truncate">{a.className} {a.stream}</span>

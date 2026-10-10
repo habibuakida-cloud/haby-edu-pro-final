@@ -987,7 +987,7 @@ export const ExamsView: React.FC<ExamsViewProps> = ({
                     "Thibitisha Ufutaji",
                     `Je, una uhakika unataka kufuta mtihani "${selectedExamDetails.name}"? Hatua hii haiwezi kutenduliwa.`,
                     () => {
-                      onDeleteExam(selectedExamDetails.id);
+                      onDeleteExam(Number(selectedExamDetails.id));
                       setSelectedExamDetails(null);
                     }
                   );

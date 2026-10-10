@@ -312,7 +312,7 @@ export const EditSlotModal: React.FC<EditSlotModalProps> = ({
                 type="button"
                 onClick={() => {
                   if (confirm('Clear this period assignment?')) {
-                    onDelete(existing.id);
+                    onDelete(Number(existing.id));
                     onClose();
                   }
                 }}

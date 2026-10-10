@@ -1292,6 +1292,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             assignments={assignments}
             onUpdateAssignments={onUpdateAssignments}
             dayThemes={dayThemes}
+            streamSettings={streamSettings}
           />
         </div>
       )}

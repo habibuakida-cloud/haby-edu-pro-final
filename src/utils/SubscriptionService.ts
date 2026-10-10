@@ -45,25 +45,35 @@ export const initializeTrial = async (schoolId: string): Promise<SubscriptionDat
   };
   
   try {
-    const payload = {
+    // Check if subscription already exists
+    let existingId: string | undefined;
+    try {
+      const { data: existing } = await supabase
+        .from('school_subscriptions')
+        .select('id')
+        .eq('school_id', schoolId)
+        .maybeSingle();
+      if (existing?.id) {
+        existingId = existing.id;
+      }
+    } catch {
+      // Ignore
+    }
+
+    const payload: any = {
       school_id: schoolId,
-      "schoolId": schoolId,
-      schoolId: schoolId,
       trial_started_at: now,
-      "trialStartedAt": now,
-      trialStartedAt: now,
       subscription_expiry: expiry,
-      "subscriptionExpiry": expiry,
-      subscriptionExpiry: expiry,
       subscription_type: 'TRIAL',
-      "subscriptionType": 'TRIAL',
-      subscriptionType: 'TRIAL',
-      is_active: true,
-      "isActive": true,
-      isActive: true
+      is_active: true
     };
-    const { error } = await resilientUpsert('school_subscriptions', payload);
-    if (error) {
+    if (existingId) {
+      payload.id = existingId;
+    }
+
+    // Try upserting by primary key or school_id
+    const { error } = await resilientUpsert('school_subscriptions', payload, { onConflict: existingId ? 'id' : 'school_id' });
+    if (error && !error.message?.includes('Could not find the table')) {
       console.warn("school_subscriptions upsert notice:", error.message);
     }
   } catch (err: any) {

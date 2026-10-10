@@ -179,7 +179,10 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           if (!res2.error && Array.isArray(res2.data)) {
             fetchedAdmins = res2.data as any;
           } else {
-            console.warn("[SuperAdmin] school_admins fetch notice:", res2.error?.message || res1.error?.message);
+            const msg = res2.error?.message || res1.error?.message || '';
+            if (!msg.includes('Could not find the table')) {
+              console.warn("[SuperAdmin] school_admins fetch notice:", msg);
+            }
           }
         }
       } catch (adminErr) {

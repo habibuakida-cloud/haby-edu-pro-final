@@ -936,7 +936,7 @@ export function generateTimetableIntegrityReport(
   }
 
   const conflictingAssignmentIds = new Set<number>();
-  conflicts.forEach(c => c.assignmentIds.forEach(id => conflictingAssignmentIds.add(id)));
+  conflicts.forEach(c => c.assignmentIds.forEach(id => conflictingAssignmentIds.add(Number(id))));
   const compliantSlotsCount = Math.max(0, assignments.length - conflictingAssignmentIds.size);
 
   return {

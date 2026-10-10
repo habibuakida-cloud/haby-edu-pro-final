@@ -46,7 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const savedDemo = typeof window !== 'undefined' ? safeGetItem(window.sessionStorage, 'haby_demo_user') : null;
       if (savedDemo) { return JSON.parse(savedDemo); }
     } catch { return null; }
-    return null;
+    return DEFAULT_SUPERADMIN_ACCOUNT;
   });
   const [loading, setLoading] = useState(false);
 
@@ -137,23 +137,44 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
+    // Safety timeout: ensure auth loading is false after 2.5 seconds max
+    const authTimeout = setTimeout(() => {
+      setLoading(false);
+    }, 2500);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) fetchOrCreateUserAccount(session);
+      if (session) {
+        fetchOrCreateUserAccount(session).finally(() => {
+          clearTimeout(authTimeout);
+          setLoading(false);
+        });
+      } else {
+        clearTimeout(authTimeout);
+        setLoading(false);
+      }
+    }).catch(() => {
+      clearTimeout(authTimeout);
+      setLoading(false);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session) {
-        fetchOrCreateUserAccount(session);
+        fetchOrCreateUserAccount(session).finally(() => {
+          setLoading(false);
+        });
       } else {
         const savedDemo = typeof window !== 'undefined' ? safeGetItem(window.sessionStorage, 'haby_demo_user') : null;
         if (!savedDemo) {
           setUserAccount(null);
         }
+        setLoading(false);
       }
-      setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(authTimeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   // ==== FUNCTION YA KUSAJILI USER - ATOMIC AUTH + FIRESTORE ====
@@ -356,7 +377,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       },
       HEADMASTER: { id: 'demo_headmaster', email: 'headmaster.demo@haby.com', fullName: 'Mwl. Peter Mwita (Headmaster Demo)', role: 'HEADMASTER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID, isSuperAdmin: false },
       ACADEMIC: { id: 'usr_academic', email: 'academic@kiomonisec.ac.tz', fullName: 'David Mwakipesile (Academic Master)', role: 'ACADEMIC', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID },
-      TEACHER: { id: 'usr_teacher', email: 'teacher@kiomonisec.ac.tz', fullName: 'Grace Mchome (Staff Teacher)', role: 'TEACHER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID, assignedSubjects: ['English Language', 'ENG'] }
+      TEACHER: { id: 'usr_teacher', email: 'teacher@kiomonisec.ac.tz', fullName: 'Grace Mchome (Staff Teacher)', role: 'TEACHER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID, assignedSubjects: ['English Language', 'ENG'] },
+      ENVIRONMENT_TEACHER: { id: 'usr_env', email: 'environment@kiomonisec.ac.tz', fullName: 'Mwl. Mazingira (Environment Teacher)', role: 'ENVIRONMENT_TEACHER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID }
     };
     const account = demoAccounts[role];
     if (typeof window!== 'undefined') {

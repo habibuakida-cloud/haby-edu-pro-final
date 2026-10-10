@@ -23,13 +23,14 @@ export const getSchoolData = async (schoolId: string) => {
   try {
     const { data, error } = await supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1);
     if (error) {
-      console.warn("school_data fetch warning (table may not exist or 404):", error.message);
+      if (!error.message?.includes('Could not find the table')) {
+        console.warn("school_data notice:", error.message);
+      }
       return null;
     }
     if (!data || data.length === 0) return null;
     return data[0];
   } catch (err: any) {
-    console.warn("school_data fetch exception:", err?.message || err);
     return null;
   }
 };

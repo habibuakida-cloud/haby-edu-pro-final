@@ -25,7 +25,8 @@ import {
   UserPlus,
   PenTool,
   Send,
-  UserCheck
+  UserCheck,
+  Leaf
 } from 'lucide-react';
 
 export type ActiveView = 
@@ -49,6 +50,7 @@ export type ActiveView =
   | 'invigilation'
   | 'attendance'
   | 'discipline'
+  | 'environment'
   | 'studentid'
   | 'finance'
   | 'sms'
@@ -56,6 +58,7 @@ export type ActiveView =
   | 'remedialdaily'
   | 'remedialtimetable'
   | 'remedialanalyzer'
+  | 'reampapers'
   | 'settings';
 
 export interface SubModuleRoute {
@@ -119,7 +122,8 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
       { id: 'nectaanalyzer', label: 'NECTA Analyzer', description: 'National exam statistics, divisions & GPA analysis' },
       { id: 'sittingplan', label: 'Sitting Plan', description: 'Automated exam hall seating arrangement & desk labels' },
       { id: 'evaluationanalysis', label: 'Evaluation Analysis', description: 'Subject teacher evaluation & class performance audit' },
-      { id: 'dailytracker', label: 'Daily Ticker', description: 'Real-time academic activity ticker & lesson log' }
+      { id: 'dailytracker', label: 'Daily Ticker', description: 'Real-time academic activity ticker & lesson log' },
+      { id: 'reampapers', label: 'Ream Paper Records', description: 'Usimamizi wa ream papers zilizoletwa na wanafunzi', badge: 'REAMS' }
     ]
   },
 
@@ -147,6 +151,23 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
       { id: 'attendance', label: 'Student Attendance', description: 'Daily rollcall with 3-day absence auto-flagging', badge: 'Auto-Flag' },
       { id: 'discipline', label: 'Discipline Management', description: 'Student conduct, warnings, suspensions & offenses' },
       { id: 'studentid', label: 'Student ID Generator', description: 'Generate & print student ID cards with QR codes' }
+    ]
+  },
+
+  // 6. ENVIRONMENT MANAGEMENT (IDARA YA MAZINGIRA)
+  {
+    id: 'environment_management',
+    title: 'ENVIRONMENT & ESTATE',
+    icon: <Leaf className="w-4 h-4" />,
+    iconColor: 'text-emerald-400',
+    badgeBg: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+    subModules: [
+      { 
+        id: 'environment', 
+        label: 'Vifaa vya Mazingira (Environment)', 
+        description: 'Usimamizi wa vifaa vya mazingira, ukaguzi wa hali, kukopesha na ripoti', 
+        badge: 'NEW' 
+      }
     ]
   },
 

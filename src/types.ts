@@ -36,9 +36,10 @@ export interface StudentReportCardData {
 export type EducationLevel = 'PRE_PRIMARY' | 'PRIMARY' | 'CSEE' | 'ACSEE';
 
 export interface Student {
-  id: number;
+  id: string | number;
   regNo: string;
   name: string;
+  fullName?: string;
   gender?: 'Male' | 'Female' | '';
   sex?: string;
   status?: string;
@@ -86,7 +87,7 @@ export type SchoolStaffRole =
   | string;
 
 export interface Teacher {
-  id: number;
+  id: string | number;
   name: string;
   initial: string;
   gender?: 'Male' | 'Female' | '';
@@ -135,6 +136,8 @@ export interface PeriodSetting {
   assignedTeacherId?: number; // assigned teacher / duty master for this period
   defaultSubject?: string;
   isBreak?: boolean;
+  className?: string; // e.g. "Darasa la 1", "Form 1", or "All Classes"
+  streamName?: string; // e.g. "Mkondo A", "All Streams"
 }
 
 export interface StreamSetting {
@@ -233,7 +236,124 @@ export interface FormStreamTheme {
   text: string;
 }
 
-export type UserRole = 'HEADMASTER' | 'ACADEMIC' | 'TEACHER' | 'SUPER_ADMIN';
+export type UserRole = 'HEADMASTER' | 'ACADEMIC' | 'TEACHER' | 'ENVIRONMENT_TEACHER' | 'SUPER_ADMIN';
+
+export type EquipmentCondition = 'Nzuri' | 'Mbovu' | 'Inahitaji Matengenezo';
+export type EquipmentCategory = 'Kilimo' | 'Usafi' | 'Upimaji Hali ya Hewa' | 'Maji' | 'Bustani' | 'Miti na Misitu' | 'Vinginevyo';
+export type UsageStatus = 'Imetumika' | 'Imerudishwa' | 'Imepotea';
+
+export interface EnvironmentEquipment {
+  id: string;
+  name: string;
+  category: string;
+  quantity: number;
+  condition: EquipmentCondition;
+  location: string;
+  purchase_date?: string;
+  purchaseDate?: string;
+  added_by?: string;
+  addedBy?: string;
+  school_id?: string;
+  schoolId?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface EquipmentUsageLog {
+  id: string;
+  equipment_id: string;
+  equipmentId?: string;
+  equipment_name?: string;
+  equipmentName?: string;
+  used_by: string;
+  usedBy?: string;
+  quantity_used: number;
+  quantityUsed?: number;
+  purpose: string;
+  date_used: string;
+  dateUsed?: string;
+  returned_date?: string | null;
+  returnedDate?: string | null;
+  status: UsageStatus;
+  notes?: string;
+  school_id?: string;
+  schoolId?: string;
+  created_at?: string;
+}
+
+export type OrderStatus = 'Imeagizwa' | 'Imekuja' | 'Haijaja';
+
+export interface EnvironmentOrder {
+  id: string;
+  student_id?: string;
+  studentId?: string;
+  student_name: string;
+  studentName?: string;
+  class: string;
+  stream: string;
+  equipment_name: string;
+  equipmentName?: string;
+  quantity_ordered: number;
+  quantityOrdered?: number;
+  order_date: string;
+  orderDate?: string;
+  status: OrderStatus;
+  notes?: string;
+  ordered_by?: string;
+  orderedBy?: string;
+  school_id?: string;
+  schoolId?: string;
+  created_at?: string;
+}
+
+export interface SchoolPurchasedEquipment {
+  id: string;
+  equipment_name: string;
+  equipmentName?: string;
+  category: string;
+  quantity_bought: number;
+  quantityBought?: number;
+  unit_price: number;
+  unitPrice?: number;
+  total_cost: number;
+  totalCost?: number;
+  supplier?: string;
+  purchase_date: string;
+  purchaseDate?: string;
+  receipt_number?: string;
+  receiptNumber?: string;
+  condition: EquipmentCondition;
+  storage_location?: string;
+  storageLocation?: string;
+  school_id?: string;
+  schoolId?: string;
+  added_by?: string;
+  addedBy?: string;
+  created_at?: string;
+}
+
+export interface ReamPaperRecord {
+  id: string;
+  student_id?: string;
+  studentId?: string;
+  student_name: string;
+  studentName?: string;
+  class: string;
+  stream: string;
+  reams_brought: number;
+  reamsBrought?: number;
+  date_brought: string;
+  dateBrought?: string;
+  term: string;
+  academic_year: string;
+  academicYear?: string;
+  received_by?: string;
+  receivedBy?: string;
+  notes?: string;
+  school_id?: string;
+  schoolId?: string;
+  created_at?: string;
+}
 
 export interface SchoolAdminRecord {
   id: string;

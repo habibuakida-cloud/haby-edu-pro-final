@@ -23,8 +23,8 @@ import {
   Library,
   FileCheck
 } from 'lucide-react';
-import { PeriodSetting, TimetableAssignment } from '../../types';
-import { DAYS_OF_WEEK, EXTRA_CURRICULAR_ACTIVITIES, TANZANIAN_TEMPLATE_PERIOD_SETTINGS } from '../../constants/defaults';
+import { PeriodSetting, TimetableAssignment, StreamSetting } from '../../types';
+import { DAYS_OF_WEEK, EXTRA_CURRICULAR_ACTIVITIES, TANZANIAN_TEMPLATE_PERIOD_SETTINGS, DEFAULT_CLASSES } from '../../constants/defaults';
 import { getDayTheme } from '../../utils/colors';
 
 interface PeriodSettingsManagerProps {
@@ -33,6 +33,7 @@ interface PeriodSettingsManagerProps {
   assignments?: TimetableAssignment[];
   onUpdateAssignments?: (assignments: TimetableAssignment[]) => void;
   dayThemes?: Record<string, string>;
+  streamSettings?: StreamSetting[];
 }
 
 function calculateDuration(start: string, end: string): number {
@@ -83,7 +84,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
   onUpdatePeriodSettings,
   assignments = [],
   onUpdateAssignments,
-  dayThemes
+  dayThemes,
+  streamSettings = []
 }) => {
   // Day filter
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('All');
@@ -94,6 +96,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
   const [formName, setFormName] = useState<string>('Period 1');
   const [formStart, setFormStart] = useState<string>('08:00');
   const [formEnd, setFormEnd] = useState<string>('08:40');
+  const [formClassName, setFormClassName] = useState<string>('All Classes');
+  const [formStreamName, setFormStreamName] = useState<string>('All Streams');
   const [editingPeriodId, setEditingPeriodId] = useState<number | null>(null);
 
   // Inline Table Edit State (Allows editing directly inside the row)
@@ -102,6 +106,30 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
   const [inlineName, setInlineName] = useState<string>('');
   const [inlineStart, setInlineStart] = useState<string>('');
   const [inlineEnd, setInlineEnd] = useState<string>('');
+  const [inlineClassName, setInlineClassName] = useState<string>('All Classes');
+  const [inlineStreamName, setInlineStreamName] = useState<string>('All Streams');
+
+  const availableStreams = React.useMemo(() => {
+    if (!formClassName || formClassName === 'All Classes') {
+      return ['All Streams', 'Mkondo A', 'Mkondo B', 'Mkondo C'];
+    }
+    const found = streamSettings.find(s => s.className === formClassName);
+    if (found && found.streams && found.streams.length > 0) {
+      return ['All Streams', ...found.streams];
+    }
+    return ['All Streams', 'Mkondo A', 'Mkondo B'];
+  }, [formClassName, streamSettings]);
+
+  const inlineAvailableStreams = React.useMemo(() => {
+    if (!inlineClassName || inlineClassName === 'All Classes') {
+      return ['All Streams', 'Mkondo A', 'Mkondo B', 'Mkondo C'];
+    }
+    const found = streamSettings.find(s => s.className === inlineClassName);
+    if (found && found.streams && found.streams.length > 0) {
+      return ['All Streams', ...found.streams];
+    }
+    return ['All Streams', 'Mkondo A', 'Mkondo B'];
+  }, [inlineClassName, streamSettings]);
 
   // Bulk Selection State
   const [selectedIds, setSelectedIds] = useState<number[]>([]);
@@ -202,6 +230,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     setFormName(p.name);
     setFormStart(p.start);
     setFormEnd(p.end);
+    setFormClassName(p.className || 'All Classes');
+    setFormStreamName(p.streamName || 'All Streams');
     setInlineEditingId(null);
   };
 
@@ -211,6 +241,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     setFormName('Period 1');
     setFormStart('08:00');
     setFormEnd('08:40');
+    setFormClassName('All Classes');
+    setFormStreamName('All Streams');
   };
 
   // Start inline table editing
@@ -220,6 +252,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     setInlineName(p.name);
     setInlineStart(p.start);
     setInlineEnd(p.end);
+    setInlineClassName(p.className || 'All Classes');
+    setInlineStreamName(p.streamName || 'All Streams');
     // If top form was in edit mode for this, clear top edit
     if (editingPeriodId === p.id) {
       handleCancelEdit();
@@ -280,7 +314,9 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
           day: inlineDay,
           name: trimmedName,
           start: inlineStart,
-          end: inlineEnd
+          end: inlineEnd,
+          className: inlineClassName,
+          streamName: inlineStreamName
         };
       }
       return p;
@@ -342,7 +378,9 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
             day: formDay,
             name: trimmedName,
             start: formStart,
-            end: formEnd
+            end: formEnd,
+            className: formClassName,
+            streamName: formStreamName
           };
         }
         return p;
@@ -353,17 +391,16 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
       handleCancelEdit();
     } else {
       // ADD MODE
-      // Check for duplicate period name on same day
       const duplicateIndex = periodSettings.findIndex(
-        p => p.day === formDay && p.name.toLowerCase() === trimmedName.toLowerCase()
+        p => p.day === formDay && p.name.toLowerCase() === trimmedName.toLowerCase() && (p.className || 'All Classes') === formClassName
       );
       if (duplicateIndex > -1) {
-        // If already exists on that day, update the time slot without blocking window.confirm
         const updated = [...periodSettings];
         updated[duplicateIndex] = {
           ...updated[duplicateIndex],
           start: formStart,
-          end: formEnd
+          end: formEnd,
+          streamName: formStreamName
         };
         onUpdatePeriodSettings(updated);
         showFeedback(`Kipindi "${trimmedName}" (${formDay}) kimesasishwa: ${formStart} - ${formEnd}!`);
@@ -373,7 +410,9 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
           day: formDay,
           name: trimmedName,
           start: formStart,
-          end: formEnd
+          end: formEnd,
+          className: formClassName,
+          streamName: formStreamName
         };
 
         onUpdatePeriodSettings([...periodSettings, newPeriod]);
@@ -800,7 +839,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
           )}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           <div>
             <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
               Day of Week *
@@ -818,11 +857,11 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
 
           <div>
             <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
-              Period Name / Label *
+              Period Name *
             </label>
             <input
               type="text"
-              placeholder="e.g. Period 1, Sports, or Lunch"
+              placeholder="e.g. Period 1, Sports"
               value={formName}
               onChange={e => setFormName(e.target.value)}
               className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 font-medium"
@@ -831,9 +870,40 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
           </div>
 
           <div>
+            <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
+              Darasa (Class)
+            </label>
+            <select
+              value={formClassName}
+              onChange={e => setFormClassName(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All Classes">All Classes (General)</option>
+              {DEFAULT_CLASSES.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
+              Mkondo (Stream)
+            </label>
+            <select
+              value={formStreamName}
+              onChange={e => setFormStreamName(e.target.value)}
+              className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
+            >
+              {availableStreams.map(st => (
+                <option key={st} value={st}>{st === 'All Streams' ? 'All Streams (General)' : st}</option>
+              ))}
+            </select>
+          </div>
+
+          <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-bold text-slate-600 uppercase block">
-                Start Time (Editable) *
+                Start Time *
               </label>
               <div className="flex items-center gap-1">
                 <button
@@ -866,7 +936,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
           <div>
             <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-bold text-slate-600 uppercase block">
-                End Time (Editable) *
+                End Time *
               </label>
               <div className="flex items-center gap-1">
                 <button

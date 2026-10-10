@@ -21,6 +21,7 @@ import { StudentIDView } from './components/StudentIDView';
 import { SubscriptionData, getSchoolSubscription, initializeTrial, isSubscriptionValid } from './utils/SubscriptionService';
 import { SubscriptionModal } from './components/common/SubscriptionModal';
 import { DisciplineView } from './components/DisciplineView';
+import { EnvironmentModule } from './components/Environment/EnvironmentModule';
 import { LessonPlanView } from './components/LessonPlan/LessonPlanView';
 import { SchemeOfWorkView } from './components/SchemeOfWork/SchemeOfWorkView';
 import { TeacherPortalView } from './components/Teachers/TeacherPortalView';
@@ -29,6 +30,7 @@ import { AuthScreen } from './components/auth/AuthScreen';
 import { ParentPortalView } from './components/ParentPortalView';
 import { DailyTeachingTrackerView } from './components/DailyTeachingTrackerView';
 import { EvaluationAnalysisView } from './components/EvaluationAnalysisView';
+import { ReamPaperModule } from './components/Academic/ReamPaperModule';
 import { RemedialTimetableSetup } from './components/Remedial/RemedialTimetableSetup';
 import { RemedialDailyTracker } from './components/Remedial/RemedialDailyTracker';
 import { RemedialPaymentAnalyzer } from './components/Remedial/RemedialPaymentAnalyzer';
@@ -91,7 +93,7 @@ export default function App() {
     return <ParentPortalView onBackToMain={() => { window.location.pathname = '/'; }} />;
   }
 
-  const { user, userAccount, loading: authLoading, logout } = useAuth();
+  const { userAccount, loading: authLoading, logout } = useAuth();
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
   const [data, setData] = useState<AppData>(DEFAULT_APP_DATA);
 
@@ -245,6 +247,9 @@ export default function App() {
     // 0. Primary Database Load: Seamless Hybrid Sync (Supabase Relational + Firestore Realtime)
     const loadFromDatabase = async (isInitialBoot = false) => {
       console.log("Loading unified single source of truth for school:", schoolId);
+      const safetyTimer = setTimeout(() => {
+        setDataLoading(false);
+      }, 3000);
 
       try {
         // Fetch in parallel from Firestore and Supabase with safe async try/catch blocks
@@ -283,30 +288,33 @@ export default function App() {
           (async () => {
             try {
               const res = await supabase.from('classes').select('*').eq('school_id', schoolId);
-              if (res.error) console.warn("Classes fetch error:", res.error.message);
+              if (res.error && !res.error.message?.includes('Could not find the table')) {
+                console.warn("Classes fetch notice:", res.error.message);
+              }
               return res;
             } catch (err: any) {
-              console.warn("Classes table exception:", err?.message || err);
               return { data: null, error: err };
             }
           })(),
           (async () => {
             try {
               const res = await supabase.from('periods').select('*').eq('school_id', schoolId).order('start_time', { ascending: true });
-              if (res.error) console.warn("Periods fetch error:", res.error.message);
+              if (res.error && !res.error.message?.includes('Could not find the table')) {
+                console.warn("Periods fetch notice:", res.error.message);
+              }
               return res;
             } catch (err: any) {
-              console.warn("Periods table exception:", err?.message || err);
               return { data: null, error: err };
             }
           })(),
           (async () => {
             try {
               const res = await supabase.from('subjects').select('*').eq('school_id', schoolId);
-              if (res.error) console.warn("Subjects fetch error:", res.error.message);
+              if (res.error && !res.error.message?.includes('Could not find the table')) {
+                console.warn("Subjects fetch notice:", res.error.message);
+              }
               return res;
             } catch (err: any) {
-              console.warn("Subjects table exception:", err?.message || err);
               return { data: null, error: err };
             }
           })(),
@@ -422,9 +430,10 @@ export default function App() {
         });
 
         setIsCloudSynced(true);
-        setDataLoading(false);
       } catch (err) {
         console.warn("Error in loadFromDatabase:", err);
+      } finally {
+        clearTimeout(safetyTimer);
         setDataLoading(false);
       }
     };
@@ -753,9 +762,9 @@ export default function App() {
     const newEntry: ActivityLog = {
       id: `log_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
       timestamp: new Date().toISOString(),
-      userId: userAccount?.id || user?.uid || 'user',
-      userName: userAccount?.fullName || user?.displayName || 'Authorized User',
-      userEmail: userAccount?.email || user?.email || '',
+      userId: userAccount?.id || 'user',
+      userName: userAccount?.fullName || 'Authorized User',
+      userEmail: userAccount?.email || '',
       userRole: userAccount?.role || 'ACADEMIC',
       action,
       category,
@@ -766,7 +775,7 @@ export default function App() {
 
     const currentLogs = data.activityLogs || [];
     return [newEntry, ...currentLogs].slice(0, 300);
-  }, [userAccount, user, data.activityLogs]);
+  }, [userAccount, data.activityLogs]);
 
   // Auth Guard
   // Parent Portal Bypass for login
@@ -810,14 +819,9 @@ export default function App() {
     );
   }
 
-  if (dataLoading && (!data || !data.students || data.students.length === 0) && (!supabaseStudentCount || supabaseStudentCount === 0)) {
-    return (
-      <div className="min-h-screen bg-[#0f2948] text-white flex flex-col items-center justify-center font-sans">
-        <div className="w-12 h-12 border-4 border-white/20 border-t-sky-400 rounded-full animate-spin mb-4" />
-        <h2 className="text-xl font-black tracking-wider">HABY EDU PRO</h2>
-        <p className="text-xs text-blue-200 mt-1">Inapakia kanzidata ya shule...</p>
-      </div>
-    );
+  // Non-blocking background sync indicator instead of blocking screen
+  if (dataLoading && false) {
+    // never block
   }
 
   const handleUpdateStudents = (students: Student[]) => {
@@ -1486,14 +1490,8 @@ export default function App() {
                     name: selectedSchoolName
                   }
                 }));
-                if (userAccount) {
-                  setUserAccount({
-                    ...userAccount,
-                    schoolId: selectedSchoolId,
-                    school_id: selectedSchoolId
-                  });
-                }
                 setActiveView('dashboard');
+                window.location.reload();
               }}
               onNavigateToView={view => setActiveView(view)}
             />
@@ -1798,6 +1796,15 @@ export default function App() {
             />
           )}
 
+          {activeView === 'environment' && (
+            <EnvironmentModule
+              currentUser={userAccount}
+              schoolInfo={data.schoolInfo}
+              students={data.students}
+              streamSettings={data.streamSettings}
+            />
+          )}
+
           {activeView === 'studentid' && (
             <StudentIDView
               students={data.students}
@@ -1838,6 +1845,15 @@ export default function App() {
               schoolInfo={data.schoolInfo}
               timetableAssignments={data.timetableAssignments || []}
               teachers={data.teachers}
+            />
+          )}
+
+          {activeView === 'reampapers' && (
+            <ReamPaperModule
+              currentUser={userAccount}
+              schoolInfo={data.schoolInfo}
+              students={data.students}
+              streamSettings={data.streamSettings}
             />
           )}
 

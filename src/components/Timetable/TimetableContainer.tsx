@@ -2649,6 +2649,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             assignments={assignments}
             onUpdateAssignments={onUpdateAssignments}
             dayThemes={dayThemes}
+            streamSettings={streamSettings}
           />
 
           {/* Class Stream Settings */}

@@ -287,7 +287,7 @@ export const TeacherDailyScheduleSummary: React.FC<TeacherDailyScheduleSummaryPr
         teacherId: a.teacherId,
         teacherName: teacherObj?.name || 'Mwalimu',
         activityType: a.activityType,
-        isBreak: a.activityType === 'break' || a.activityType === 'lunch' || a.subject?.toLowerCase().includes('break'),
+        isBreak: (a.activityType as string) === 'break' || (a.activityType as string) === 'lunch' || a.subject?.toLowerCase().includes('break'),
         status
       });
     });

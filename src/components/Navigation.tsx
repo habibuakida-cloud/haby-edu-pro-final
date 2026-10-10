@@ -454,7 +454,9 @@ export const Navigation: React.FC<NavigationProps> = ({
                               className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                                 isSubActive
                                   ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-600/30 font-black scale-[1.01]'
-                                  : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
+                                  : sub.id === 'reampapers'
+                                    ? 'bg-blue-950/50 text-blue-300 hover:bg-blue-900/50 border border-blue-900/30'
+                                    : 'text-slate-400 hover:text-white hover:bg-slate-800/70'
                               }`}
                               title={sub.description || sub.label}
                             >

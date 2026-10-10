@@ -1,7 +1,7 @@
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
-/* 1. SCHOOL_SUBSCRIPTIONS: Add missing columns */
+/* 1. SCHOOL_SUBSCRIPTIONS */
 CREATE TABLE IF NOT EXISTS public.school_subscriptions (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
@@ -20,7 +20,7 @@ ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS subscription_ty
 ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS "schoolId" TEXT;
 ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE;
 
-/* 2. SCHOOL_DATA: Add missing columns */
+/* 2. SCHOOL_DATA */
 CREATE TABLE IF NOT EXISTS public.school_data (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL UNIQUE,
@@ -65,7 +65,35 @@ ALTER TABLE public.school_data ADD COLUMN IF NOT EXISTS subject_paper_configs JS
 ALTER TABLE public.school_data ADD COLUMN IF NOT EXISTS school_info JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE public.school_data ADD COLUMN IF NOT EXISTS data JSONB DEFAULT '{}'::jsonb;
 
-/* 3. SCHOOL_ADMINS: Ensure table and columns exist */
+/* 3. CLASSES, PERIODS & SUBJECTS */
+CREATE TABLE IF NOT EXISTS public.classes (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  level TEXT DEFAULT 'CSEE',
+  stream TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.periods (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  is_break BOOLEAN DEFAULT FALSE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.subjects (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  code TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+/* 4. SCHOOL_ADMINS & AUTHORIZED_STAFF */
 CREATE TABLE IF NOT EXISTS public.school_admins (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
@@ -80,7 +108,115 @@ ALTER TABLE public.school_admins ADD COLUMN IF NOT EXISTS full_name TEXT;
 ALTER TABLE public.school_admins ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'HEADMASTER';
 ALTER TABLE public.school_admins ADD COLUMN IF NOT EXISTS email TEXT;
 
-/* 4. PAYMENT_VERIFICATION_REQUESTS & SMS MODULE TABLES */
+CREATE TABLE IF NOT EXISTS public.authorized_staff (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT,
+  full_name TEXT,
+  email TEXT,
+  role TEXT DEFAULT 'TEACHER',
+  assigned_subjects JSONB DEFAULT '[]'::jsonb,
+  is_active BOOLEAN DEFAULT TRUE,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+/* 5. REMEDIAL MODULE TABLES */
+CREATE TABLE IF NOT EXISTS public.remedial_timetable (
+  id TEXT PRIMARY KEY,
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  day_of_week TEXT,
+  period_time TEXT,
+  start_time TEXT,
+  end_time TEXT,
+  class_name TEXT,
+  subject TEXT,
+  teacher_name TEXT,
+  stream TEXT DEFAULT 'A',
+  term TEXT DEFAULT 'Term 1',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.remedial_attendance (
+  id TEXT PRIMARY KEY,
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  date DATE,
+  day_of_week TEXT,
+  period_time TEXT,
+  class_name TEXT,
+  subject TEXT,
+  teacher_name TEXT,
+  stream TEXT,
+  status TEXT DEFAULT 'taught',
+  rate_per_period NUMERIC DEFAULT 5000,
+  marked_by TEXT,
+  marked_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.remedial_payment_settings (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  class_name TEXT,
+  rate_per_period NUMERIC DEFAULT 5000,
+  effective_date DATE DEFAULT CURRENT_DATE
+);
+
+/* 6. EXAM_RECORDS, USAL_RECORDS & SITTING_PLANS */
+CREATE TABLE IF NOT EXISTS public.exam_records (
+  id TEXT PRIMARY KEY,
+  school_id TEXT,
+  student_id TEXT,
+  reg_no TEXT,
+  student_name TEXT,
+  class_name TEXT,
+  level TEXT,
+  exam_id TEXT,
+  exam_name TEXT,
+  exam_type TEXT,
+  term TEXT,
+  year TEXT,
+  marks JSONB DEFAULT '{}'::jsonb,
+  total NUMERIC DEFAULT 0,
+  average NUMERIC DEFAULT 0,
+  division TEXT,
+  points INTEGER,
+  gpa TEXT,
+  rank INTEGER,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.usal_records (
+  id TEXT PRIMARY KEY,
+  school_id TEXT,
+  student_id TEXT,
+  exam_id TEXT,
+  subject TEXT,
+  test_1 NUMERIC,
+  test_2 NUMERIC,
+  midterm NUMERIC,
+  project NUMERIC,
+  terminal NUMERIC,
+  final_score NUMERIC,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.sitting_plans (
+  id TEXT PRIMARY KEY,
+  school_id TEXT,
+  name TEXT,
+  exam_id TEXT,
+  exam_name TEXT,
+  exam_date DATE,
+  exam_session TEXT,
+  total_candidates INTEGER DEFAULT 0,
+  grid_layout JSONB DEFAULT '{}'::jsonb,
+  theme TEXT DEFAULT 'navy',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+/* 7. PAYMENT & SMS TABLES */
 CREATE TABLE IF NOT EXISTS public.payment_verification_requests (
   id TEXT PRIMARY KEY,
   school_id TEXT,
@@ -105,10 +241,20 @@ CREATE TABLE IF NOT EXISTS public.sms_payment_history (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-/* 5. ENABLE ROW LEVEL SECURITY & POLICIES */
+/* 8. ROW LEVEL SECURITY (RLS) & PUBLIC POLICIES */
 ALTER TABLE public.school_subscriptions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.school_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.classes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.periods ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.subjects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.school_admins ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.authorized_staff ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.remedial_timetable ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.remedial_attendance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.remedial_payment_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.exam_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.usal_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sitting_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_verification_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sms_payment_history ENABLE ROW LEVEL SECURITY;
 
@@ -120,8 +266,38 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on school_data') THEN
     CREATE POLICY "Allow public all access on school_data" ON public.school_data FOR ALL USING (true) WITH CHECK (true);
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on classes') THEN
+    CREATE POLICY "Allow public all access on classes" ON public.classes FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on periods') THEN
+    CREATE POLICY "Allow public all access on periods" ON public.periods FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on subjects') THEN
+    CREATE POLICY "Allow public all access on subjects" ON public.subjects FOR ALL USING (true) WITH CHECK (true);
+  END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on school_admins') THEN
     CREATE POLICY "Allow public all access on school_admins" ON public.school_admins FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on authorized_staff') THEN
+    CREATE POLICY "Allow public all access on authorized_staff" ON public.authorized_staff FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on remedial_timetable') THEN
+    CREATE POLICY "Allow public all access on remedial_timetable" ON public.remedial_timetable FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on remedial_attendance') THEN
+    CREATE POLICY "Allow public all access on remedial_attendance" ON public.remedial_attendance FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on remedial_payment_settings') THEN
+    CREATE POLICY "Allow public all access on remedial_payment_settings" ON public.remedial_payment_settings FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on exam_records') THEN
+    CREATE POLICY "Allow public all access on exam_records" ON public.exam_records FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on usal_records') THEN
+    CREATE POLICY "Allow public all access on usal_records" ON public.usal_records FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on sitting_plans') THEN
+    CREATE POLICY "Allow public all access on sitting_plans" ON public.sitting_plans FOR ALL USING (true) WITH CHECK (true);
   END IF;
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'Allow public all access on payment_verification_requests') THEN
     CREATE POLICY "Allow public all access on payment_verification_requests" ON public.payment_verification_requests FOR ALL USING (true) WITH CHECK (true);
@@ -131,5 +307,5 @@ BEGIN
   END IF;
 END $$;
 
-/* 6. REFRESH SCHEMA CACHE */
+/* 9. REFRESH SCHEMA CACHE */
 NOTIFY pgrst, 'reload schema';

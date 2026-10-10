@@ -14,7 +14,7 @@ const rawKey =
   '';
 
 // Connected to user's Supabase project (tqazqaqdzqpbftdcekzb.supabase.co)
-export const DEFAULT_SUPABASE_URL = 'https://tqazqaqdzqpbftdcekzb.supabase.co';
+export const DEFAULT_SUPABASE_URL = 'https://rdrmptcdxtdjblaqsxjy.supabase.co';
 export const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_tjXiP5Cl7SuaPHrLeBPnLA_x-evZQPc';
 export const DEFAULT_PRIMARY_SCHOOL_ID = '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
 
@@ -29,24 +29,34 @@ export const supabaseKey = (rawKey && !rawKey.includes('placeholder') && rawKey.
 export const isConfiguredWithRealSupabase = true;
 
 const customFetch = async (input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> => {
-  const res = await fetch(input, init);
-  if (res.status === 401) {
-    if (typeof window !== 'undefined') {
-      try {
-        for (let i = 0; i < localStorage.length; i++) {
-          const k = localStorage.key(i);
-          if (k && (k.startsWith('sb-') || k.includes('supabase.auth.token'))) {
-            localStorage.removeItem(k);
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const signal = init.signal || controller.signal;
+
+  try {
+    const res = await fetch(input, { ...init, signal });
+    clearTimeout(timeoutId);
+    if (res.status === 401) {
+      if (typeof window !== 'undefined') {
+        try {
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && (k.startsWith('sb-') || k.includes('supabase.auth.token'))) {
+              localStorage.removeItem(k);
+            }
           }
-        }
-      } catch (e) {}
+        } catch (e) {}
+      }
+      const headers = new Headers(init.headers || {});
+      headers.set('apikey', supabaseKey);
+      headers.set('Authorization', `Bearer ${supabaseKey}`);
+      return fetch(input, { ...init, headers });
     }
-    const headers = new Headers(init.headers || {});
-    headers.set('apikey', supabaseKey);
-    headers.set('Authorization', `Bearer ${supabaseKey}`);
-    return fetch(input, { ...init, headers });
+    return res;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
   }
-  return res;
 };
 
 export const supabase = createClient(supabaseUrl, supabaseKey, {
@@ -326,7 +336,8 @@ export const fromSupabaseParent = (row: any) => {
     parent_name: row.full_name,
     full_name: row.full_name,
     password: row.password_hash,
-    created_at: row.created_at
+    created_at: row.created_at,
+    student_cno: row.student_cno || ''
   };
 };
 

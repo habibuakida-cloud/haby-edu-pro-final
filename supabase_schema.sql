@@ -472,8 +472,88 @@ CREATE TABLE IF NOT EXISTS public.period_attendance (
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- 17. ENVIRONMENT EQUIPMENT & USAGE LOGS TABLES
+CREATE TABLE IF NOT EXISTS public.environment_equipment (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Usafi',
+  quantity INTEGER NOT NULL DEFAULT 1,
+  condition TEXT NOT NULL DEFAULT 'Nzuri',
+  location TEXT DEFAULT 'Stoo ya Mazingira',
+  purchase_date DATE DEFAULT CURRENT_DATE,
+  added_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
 
--- 16. ROW LEVEL SECURITY (RLS) POLICIES
+CREATE TABLE IF NOT EXISTS public.equipment_usage_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  equipment_id UUID REFERENCES public.environment_equipment(id) ON DELETE CASCADE,
+  used_by TEXT NOT NULL,
+  quantity_used INTEGER NOT NULL DEFAULT 1,
+  purpose TEXT,
+  date_used DATE DEFAULT CURRENT_DATE,
+  returned_date DATE,
+  status TEXT DEFAULT 'Imetumika',
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.environment_orders (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  student_id TEXT,
+  student_name TEXT NOT NULL,
+  class TEXT NOT NULL,
+  stream TEXT,
+  equipment_name TEXT NOT NULL,
+  quantity_ordered INTEGER NOT NULL DEFAULT 1,
+  order_date DATE DEFAULT CURRENT_DATE,
+  status TEXT DEFAULT 'Imeagizwa',
+  notes TEXT,
+  ordered_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.school_purchased_equipment (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  equipment_name TEXT NOT NULL,
+  category TEXT NOT NULL DEFAULT 'Kilimo',
+  quantity_bought INTEGER NOT NULL DEFAULT 1,
+  unit_price NUMERIC(12,2) DEFAULT 0,
+  total_cost NUMERIC(12,2) DEFAULT 0,
+  supplier TEXT,
+  purchase_date DATE DEFAULT CURRENT_DATE,
+  receipt_number TEXT,
+  condition TEXT DEFAULT 'Nzuri',
+  storage_location TEXT,
+  added_by TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.ream_paper_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  student_id TEXT,
+  student_name TEXT NOT NULL,
+  class TEXT NOT NULL,
+  stream TEXT,
+  reams_brought NUMERIC(5,2) NOT NULL DEFAULT 1,
+  date_brought DATE DEFAULT CURRENT_DATE,
+  term TEXT DEFAULT 'Muhula 1',
+  academic_year TEXT DEFAULT '2026',
+  received_by TEXT,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Ensure Unique Index on school_subscriptions for school_id
+CREATE UNIQUE INDEX IF NOT EXISTS idx_school_subscriptions_school_id ON public.school_subscriptions(school_id);
+
+-- 18. ROW LEVEL SECURITY (RLS) POLICIES
 ALTER TABLE public.schools ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.students ENABLE ROW LEVEL SECURITY;
@@ -503,6 +583,11 @@ ALTER TABLE public.authorized_staff ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.contribution_types ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.student_ledger ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.period_attendance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.environment_equipment ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.equipment_usage_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.environment_orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.school_purchased_equipment ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.ream_paper_records ENABLE ROW LEVEL SECURITY;
 
 CREATE POLICY "Allow public all access on schools" ON public.schools FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on users" ON public.users FOR ALL USING (true) WITH CHECK (true);
@@ -533,6 +618,11 @@ CREATE POLICY "Allow public all access on authorized_staff" ON public.authorized
 CREATE POLICY "Allow public all access on contribution_types" ON public.contribution_types FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on student_ledger" ON public.student_ledger FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on period_attendance" ON public.period_attendance FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on environment_equipment" ON public.environment_equipment FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on equipment_usage_log" ON public.equipment_usage_log FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on environment_orders" ON public.environment_orders FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on school_purchased_equipment" ON public.school_purchased_equipment FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on ream_paper_records" ON public.ream_paper_records FOR ALL USING (true) WITH CHECK (true);
 
 -- 17. HIGH SPEED PERFORMANCE INDEXES
 CREATE INDEX IF NOT EXISTS idx_students_school ON public.students(school_id);
@@ -545,3 +635,11 @@ CREATE INDEX IF NOT EXISTS idx_remedial_tt_school ON public.remedial_timetable(s
 CREATE INDEX IF NOT EXISTS idx_remedial_att_school ON public.remedial_attendance(school_id, date);
 CREATE INDEX IF NOT EXISTS idx_activity_logs_school ON public.activity_logs(school_id);
 CREATE INDEX IF NOT EXISTS idx_discipline_school ON public.discipline_records(school_id);
+CREATE INDEX IF NOT EXISTS idx_environment_equipment_school ON public.environment_equipment(school_id);
+CREATE INDEX IF NOT EXISTS idx_equipment_usage_log_school ON public.equipment_usage_log(school_id);
+CREATE INDEX IF NOT EXISTS idx_environment_orders_school ON public.environment_orders(school_id);
+CREATE INDEX IF NOT EXISTS idx_school_purchased_equipment_school ON public.school_purchased_equipment(school_id);
+CREATE INDEX IF NOT EXISTS idx_ream_paper_records_school ON public.ream_paper_records(school_id);
+
+-- 18. NOTIFY POSTGREST SCHEMA CACHE RELOAD
+NOTIFY pgrst, 'reload schema';

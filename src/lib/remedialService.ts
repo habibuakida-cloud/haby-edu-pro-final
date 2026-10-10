@@ -136,8 +136,10 @@ export const clearRemedialTimetable = async (schoolId: string, className?: strin
 export const getRemedialTimetable = async (schoolId: string, className?: string) => {
   const { data, error } = await supabase.from('remedial_timetable').select('*').eq('school_id', schoolId);
   if (error) {
-    console.error("Supabase remedial fetch error:", error);
-    return { data: [], error };
+    if (!error.message?.includes('Could not find the table')) {
+      console.warn("Supabase remedial fetch notice:", error.message);
+    }
+    return { data: [], error: null };
   }
   
   if (className && className !== 'All') {

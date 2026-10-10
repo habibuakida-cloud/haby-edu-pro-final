@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "deploy:netlify": "node scripts/netlify-deploy.mjs"
+    "deploy:netlify": "node scripts/netlify-deploy.mjs",
+    "deploy": "npm run build && cp dist/index.html dist/200.html && surge dist --domain haby-edu-pro-final.surge.sh"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",
@@ -54,6 +55,7 @@
     "@types/react-dom": "^19.3.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
+    "surge": "^0.44.5",
     "tailwindcss": "^4.3.3",
     "typescript": "^7.0.2"
   }

@@ -496,7 +496,7 @@ export function getSlotConstraintViolation(
   day: string,
   period: string,
   report?: ConstraintValidationReport | null,
-  assignmentId?: number
+  assignmentId?: number | string
 ): {
   hasViolation: boolean;
   isCritical: boolean;
@@ -510,7 +510,7 @@ export function getSlotConstraintViolation(
 
   const slotKey = `${className}_${stream || 'A'}_${day}_${period}`;
   const slotIssues = report.violatingSlotsMap[slotKey] || [];
-  const idIssues = assignmentId ? (report.violatingAssignmentIds[assignmentId] || []) : [];
+  const idIssues = assignmentId !== undefined ? (report.violatingAssignmentIds[Number(assignmentId)] || []) : [];
 
   const combined = [...slotIssues, ...idIssues];
   // Deduplicate by issue ID
