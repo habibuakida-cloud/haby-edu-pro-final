@@ -222,8 +222,8 @@ export const Navigation: React.FC<NavigationProps> = ({
               </div>
             )}
             {saveStatus === 'saved' && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/20 text-emerald-300 rounded-full border border-emerald-400/30 text-[10px] font-black uppercase">
-                <Save className="w-3 h-3 text-emerald-400" />
+              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-500/20 text-slate-300 rounded-full border border-slate-400/30 text-[10px] font-black uppercase">
+                <Save className="w-3 h-3 text-slate-400" />
                 <span className="hidden xs:inline">Synced</span>
               </div>
             )}
@@ -269,13 +269,13 @@ export const Navigation: React.FC<NavigationProps> = ({
 
       {/* DESKTOP SIDEBAR COMPONENT */}
       <aside 
-        className={`hidden lg:flex flex-col fixed left-0 top-[53px] bottom-0 z-30 bg-gradient-to-br from-emerald-950 via-emerald-900 to-slate-950 border-r border-emerald-900/50 text-slate-200 transition-all duration-300 ${
+        className={`hidden lg:flex flex-col fixed left-0 top-[53px] bottom-0 z-30 bg-[#0a0a0a] border-r border-slate-800 text-slate-200 transition-all duration-300 ${
           isSidebarCollapsed ? 'w-20' : 'w-72'
         }`}
       >
         {/* Searchable Input Field at top of Sidebar */}
         {!isSidebarCollapsed && (
-          <div className="p-3 border-b border-slate-800/80 bg-slate-900/90 space-y-2">
+          <div className="p-3 border-b border-slate-800 bg-[#0f0f0f] space-y-2">
             <div className="relative">
               <Search className="w-3.5 h-3.5 text-blue-400 absolute left-3 top-2.5" />
               <input
@@ -395,15 +395,29 @@ export const Navigation: React.FC<NavigationProps> = ({
               filteredModuleGroups.map(group => {
                 const isGroupExpanded = expandedGroups[group.id] || !!searchQuery.trim();
                 const hasActiveChild = group.subModules.some(s => s.id === activeView);
-                const borderClass = group.iconColor.replace('text-', 'border-');
+                // Color Mapping for distinct module identification
+                const colors: Record<string, { border: string, bg: string, text: string }> = {
+                  people_management: { border: 'border-blue-500/30', bg: 'bg-blue-950/20', text: 'text-blue-400' },
+                  teaching: { border: 'border-amber-500/30', bg: 'bg-amber-950/20', text: 'text-amber-400' },
+                  academic_exams: { border: 'border-purple-500/30', bg: 'bg-purple-950/20', text: 'text-purple-400' },
+                  timetable_invigilation: { border: 'border-indigo-500/30', bg: 'bg-indigo-950/20', text: 'text-indigo-400' },
+                  student_affairs: { border: 'border-rose-500/30', bg: 'bg-rose-950/20', text: 'text-rose-400' },
+                  environment_management: { border: 'border-fuchsia-500/30', bg: 'bg-fuchsia-950/20', text: 'text-fuchsia-400' },
+                  finance_management: { border: 'border-sky-500/30', bg: 'bg-sky-950/20', text: 'text-sky-400' },
+                  communication: { border: 'border-cyan-500/30', bg: 'bg-cyan-950/20', text: 'text-cyan-400' },
+                  remedial_program: { border: 'border-teal-500/30', bg: 'bg-teal-950/20', text: 'text-teal-400' },
+                  system_settings: { border: 'border-slate-500/30', bg: 'bg-slate-950/20', text: 'text-slate-400' },
+                };
+                
+                const groupStyle = colors[group.id] || { border: 'border-slate-800', bg: 'bg-slate-900/20', text: 'text-slate-400' };
 
                 return (
                   <div 
                     key={group.id} 
                     className={`rounded-2xl border transition-all duration-300 ${
                       hasActiveChild 
-                        ? `${borderClass} bg-emerald-900/20` 
-                        : 'border-transparent bg-transparent hover:bg-emerald-800/20 hover:border-emerald-800/30'
+                        ? `${groupStyle.border} ${groupStyle.bg}` 
+                        : 'border-transparent bg-transparent hover:bg-slate-800/40 hover:border-slate-700'
                     }`}
                   >
                     {/* Group Header Button */}
@@ -411,17 +425,17 @@ export const Navigation: React.FC<NavigationProps> = ({
                       type="button"
                       onClick={() => toggleGroup(group.id)}
                       className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all cursor-pointer ${
-                        hasActiveChild ? 'text-white font-black' : 'text-slate-200 hover:text-emerald-100'
+                        hasActiveChild ? 'text-white font-black' : 'text-slate-200 hover:text-white'
                       }`}
                       title={group.title}
                     >
                       <div className="flex items-center gap-3 min-w-0">
-                        <span className={`p-2 rounded-xl bg-emerald-950/50 border border-emerald-900/30 shrink-0 ${group.iconColor}`}>
+                        <span className={`p-2 rounded-xl bg-slate-950/50 border border-slate-800/50 shrink-0 ${groupStyle.text}`}>
                           {group.icon}
                         </span>
                         {!isSidebarCollapsed && (
                           <div className="min-w-0">
-                            <span className="text-xs font-black tracking-tight block truncate uppercase">
+                            <span className={`text-xs font-black tracking-tight block truncate uppercase ${groupStyle.text}`}>
                               <HighlightText text={group.title} query={searchQuery} />
                             </span>
                           </div>
@@ -471,7 +485,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                               {sub.badge && (
                                 <span className={`px-1.5 py-0.5 rounded text-[9px] font-black uppercase shrink-0 ${
                                   sub.badge === 'RESTORED' 
-                                    ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                                    ? 'bg-slate-500/20 text-slate-300 border border-slate-500/30' 
                                     : 'bg-rose-500 text-white'
                                 }`}>
                                   {sub.badge}
