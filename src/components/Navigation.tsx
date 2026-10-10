@@ -269,7 +269,7 @@ export const Navigation: React.FC<NavigationProps> = ({
 
       {/* DESKTOP SIDEBAR COMPONENT */}
       <aside 
-        className={`hidden lg:flex flex-col fixed left-0 top-[53px] bottom-0 z-30 bg-slate-900 border-r border-slate-800 text-slate-200 transition-all duration-300 ${
+        className={`hidden lg:flex flex-col fixed left-0 top-[53px] bottom-0 z-30 bg-gradient-to-br from-emerald-950 via-emerald-900 to-slate-950 border-r border-emerald-900/50 text-slate-200 transition-all duration-300 ${
           isSidebarCollapsed ? 'w-20' : 'w-72'
         }`}
       >
@@ -395,27 +395,28 @@ export const Navigation: React.FC<NavigationProps> = ({
               filteredModuleGroups.map(group => {
                 const isGroupExpanded = expandedGroups[group.id] || !!searchQuery.trim();
                 const hasActiveChild = group.subModules.some(s => s.id === activeView);
+                const borderClass = group.iconColor.replace('text-', 'border-');
 
                 return (
                   <div 
                     key={group.id} 
-                    className={`rounded-2xl border transition-all ${
+                    className={`rounded-2xl border transition-all duration-300 ${
                       hasActiveChild 
-                        ? 'border-blue-500/40 bg-slate-850/60' 
-                        : 'border-slate-800/60 bg-slate-900/40'
+                        ? `${borderClass} bg-emerald-900/20` 
+                        : 'border-transparent bg-transparent hover:bg-emerald-800/20 hover:border-emerald-800/30'
                     }`}
                   >
                     {/* Group Header Button */}
                     <button
                       type="button"
                       onClick={() => toggleGroup(group.id)}
-                      className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition cursor-pointer ${
-                        hasActiveChild ? 'text-white font-bold' : 'text-slate-300 hover:bg-slate-800/80 hover:text-white'
+                      className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-all cursor-pointer ${
+                        hasActiveChild ? 'text-white font-black' : 'text-slate-200 hover:text-emerald-100'
                       }`}
                       title={group.title}
                     >
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <span className={`p-1.5 rounded-lg bg-slate-800 border border-slate-700/80 shrink-0 ${group.iconColor}`}>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <span className={`p-2 rounded-xl bg-emerald-950/50 border border-emerald-900/30 shrink-0 ${group.iconColor}`}>
                           {group.icon}
                         </span>
                         {!isSidebarCollapsed && (
