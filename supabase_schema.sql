@@ -175,15 +175,21 @@ CREATE TABLE IF NOT EXISTS public.sitting_plans (
 CREATE TABLE IF NOT EXISTS public.school_data (
   id TEXT PRIMARY KEY,
   school_id TEXT NOT NULL UNIQUE,
-  school_info JSONB,
+  school_info JSONB DEFAULT '{}'::jsonb,
+  "bubbleSettings" JSONB DEFAULT '{"count":12,"opacity":0.35,"colorPalette":"vibrant","enabled":true}'::jsonb,
+  bubble_settings JSONB DEFAULT '{"count":12,"opacity":0.35,"colorPalette":"vibrant","enabled":true}'::jsonb,
   students JSONB DEFAULT '[]'::jsonb,
   teachers JSONB DEFAULT '[]'::jsonb,
   exams JSONB DEFAULT '[]'::jsonb,
   examination_records JSONB DEFAULT '[]'::jsonb,
   timetable_assignments JSONB DEFAULT '[]'::jsonb,
+  "timetableAssignments" JSONB DEFAULT '[]'::jsonb,
   period_settings JSONB DEFAULT '[]'::jsonb,
+  "periodSettings" JSONB DEFAULT '[]'::jsonb,
   stream_settings JSONB DEFAULT '[]'::jsonb,
+  "streamSettings" JSONB DEFAULT '[]'::jsonb,
   institutional_policy JSONB DEFAULT '{}'::jsonb,
+  "institutionalPolicy" JSONB DEFAULT '{}'::jsonb,
   sessions JSONB DEFAULT '[]'::jsonb,
   supervisors JSONB DEFAULT '[]'::jsonb,
   selected_invigilators JSONB DEFAULT '[]'::jsonb,
@@ -191,10 +197,33 @@ CREATE TABLE IF NOT EXISTS public.school_data (
   activity_logs JSONB DEFAULT '[]'::jsonb,
   discipline_records JSONB DEFAULT '[]'::jsonb,
   daily_attendance JSONB DEFAULT '{}'::jsonb,
+  "dailyAttendance" JSONB DEFAULT '{}'::jsonb,
   schemes_of_work JSONB DEFAULT '[]'::jsonb,
+  "schemesOfWork" JSONB DEFAULT '[]'::jsonb,
   lesson_plans JSONB DEFAULT '[]'::jsonb,
+  "lessonPlans" JSONB DEFAULT '[]'::jsonb,
+  teacher_evaluations JSONB DEFAULT '[]'::jsonb,
+  "teacherEvaluations" JSONB DEFAULT '[]'::jsonb,
+  saved_timetable_records JSONB DEFAULT '[]'::jsonb,
+  "savedTimetableRecords" JSONB DEFAULT '[]'::jsonb,
+  saved_invigilation_records JSONB DEFAULT '[]'::jsonb,
+  "savedInvigilationRecords" JSONB DEFAULT '[]'::jsonb,
+  grade_cutoffs JSONB DEFAULT '{}'::jsonb,
+  "gradeCutoffs" JSONB DEFAULT '{}'::jsonb,
+  ledger_subject_keys JSONB DEFAULT '{}'::jsonb,
+  "ledgerSubjectKeys" JSONB DEFAULT '{}'::jsonb,
+  subject_period_allocations JSONB DEFAULT '[]'::jsonb,
+  "subjectPeriodAllocations" JSONB DEFAULT '[]'::jsonb,
+  teacher_assignments JSONB DEFAULT '[]'::jsonb,
+  "teacherAssignments" JSONB DEFAULT '[]'::jsonb,
+  subject_paper_configs JSONB DEFAULT '{}'::jsonb,
+  "subjectPaperConfigs" JSONB DEFAULT '{}'::jsonb,
+  data JSONB DEFAULT '{}'::jsonb,
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.school_data ADD COLUMN IF NOT EXISTS "bubbleSettings" JSONB DEFAULT '{"count":12,"opacity":0.35,"colorPalette":"vibrant","enabled":true}'::jsonb;
+ALTER TABLE public.school_data ADD COLUMN IF NOT EXISTS bubble_settings JSONB DEFAULT '{"count":12,"opacity":0.35,"colorPalette":"vibrant","enabled":true}'::jsonb;
 
 -- 11. PARENTS PORTAL TABLES
 CREATE TABLE IF NOT EXISTS public.parents (
@@ -214,7 +243,7 @@ CREATE TABLE IF NOT EXISTS public.parent_students (
 
 CREATE TABLE IF NOT EXISTS public.announcements (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  school_id REFERENCES public.schools(id) ON DELETE CASCADE,
   title TEXT NOT NULL,
   content TEXT NOT NULL,
   created_at TIMESTAMPTZ DEFAULT NOW()
@@ -238,12 +267,42 @@ CREATE TABLE IF NOT EXISTS public.school_subscriptions (
   school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
   "schoolId" TEXT,
   trial_started_at TIMESTAMPTZ,
-  subscription_expiry TIMESTAMPTZ,
+  "trialStartedAt" TIMESTAMPTZ,
+  subscription_expiry TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
+  "subscriptionExpiry" TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days'),
   subscription_type TEXT DEFAULT 'TRIAL',
+  "subscriptionType" TEXT DEFAULT 'TRIAL',
   is_active BOOLEAN DEFAULT TRUE,
+  "isActive" BOOLEAN DEFAULT TRUE,
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS "isActive" BOOLEAN DEFAULT TRUE;
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE;
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS "subscriptionExpiry" TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days');
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS subscription_expiry TIMESTAMPTZ DEFAULT (NOW() + INTERVAL '30 days');
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS "trialStartedAt" TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS trial_started_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS "subscriptionType" TEXT DEFAULT 'TRIAL';
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS subscription_type TEXT DEFAULT 'TRIAL';
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS "schoolId" TEXT;
+ALTER TABLE public.school_subscriptions ADD COLUMN IF NOT EXISTS school_id UUID;
+
+-- SCHOOL ADMINS TABLE
+CREATE TABLE IF NOT EXISTS public.school_admins (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  school_id UUID REFERENCES public.schools(id) ON DELETE CASCADE,
+  email TEXT NOT NULL,
+  full_name TEXT,
+  role TEXT DEFAULT 'HEADMASTER',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+ALTER TABLE public.school_admins ADD COLUMN IF NOT EXISTS school_id UUID;
+ALTER TABLE public.school_admins ADD COLUMN IF NOT EXISTS full_name TEXT;
+ALTER TABLE public.school_admins ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'HEADMASTER';
+ALTER TABLE public.school_admins ADD COLUMN IF NOT EXISTS email TEXT;
 
 CREATE TABLE IF NOT EXISTS public.remedial_timetable (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -425,6 +484,7 @@ ALTER TABLE public.usal_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.sitting_plans ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.school_data ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.school_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.school_admins ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.parents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.parent_students ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.announcements ENABLE ROW LEVEL SECURITY;
@@ -454,6 +514,7 @@ CREATE POLICY "Allow public all access on usal_records" ON public.usal_records F
 CREATE POLICY "Allow public all access on sitting_plans" ON public.sitting_plans FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on school_data" ON public.school_data FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on school_subscriptions" ON public.school_subscriptions FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Allow public all access on school_admins" ON public.school_admins FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on parents" ON public.parents FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on parent_students" ON public.parent_students FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Allow public all access on announcements" ON public.announcements FOR ALL USING (true) WITH CHECK (true);

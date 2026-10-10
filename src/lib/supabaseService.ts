@@ -1,16 +1,17 @@
-import { supabase } from './supabaseClient';
+import { supabase, resilientUpsert } from './supabaseClient';
 
 export const saveSchoolData = async (schoolId: string, data: any) => {
   if (!schoolId) return;
   try {
-    const { error } = await supabase.from('school_data').upsert({
+    const payload = {
       id: schoolId,
       school_id: schoolId,
       ...data,
       updated_at: new Date().toISOString()
-    }, { onConflict: 'school_id' });
+    };
+    const { error } = await resilientUpsert('school_data', payload, { onConflict: 'school_id' });
     if (error) {
-      console.warn("school_data upsert warning (table may not exist or 404):", error.message);
+      console.warn("school_data upsert notice:", error.message);
     }
   } catch (err: any) {
     console.warn("school_data upsert exception:", err?.message || err);

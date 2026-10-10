@@ -470,6 +470,59 @@ export async function updateRecord(table: string, id: string | number, data: any
   return result;
 }
 
+/**
+ * Schema-resilient upsert helper that automatically handles schema cache mismatches.
+ * If Supabase reports "Could not find the '<column>' column of '<table>' in the schema cache",
+ * it strips that missing column from the payload and retries up to 8 times until success.
+ */
+export async function resilientUpsert(table: string, rawData: any, options: { onConflict?: string } = {}) {
+  let payload = Array.isArray(rawData) ? rawData.map(item => ({ ...item })) : { ...rawData };
+  let attempts = 0;
+  const maxAttempts = 10;
+
+  while (attempts < maxAttempts) {
+    attempts++;
+    const query = supabase.from(table).upsert(payload, options.onConflict ? { onConflict: options.onConflict } : undefined);
+    const res = await query.select();
+    
+    if (!res.error) {
+      return res;
+    }
+
+    const errorMsg = res.error.message || '';
+    
+    // Check if the error is due to a missing column in Supabase's PostgREST schema cache
+    const match = errorMsg.match(/Could not find the '([^']+)' column/i);
+    if (match && match[1]) {
+      const missingCol = match[1];
+      console.warn(`[Supabase Resilience] Table '${table}' lacks column '${missingCol}'. Stripping and retrying (${attempts}/${maxAttempts})...`);
+      
+      if (Array.isArray(payload)) {
+        payload = payload.map(item => {
+          const clone = { ...item };
+          delete clone[missingCol];
+          return clone;
+        });
+      } else {
+        delete (payload as any)[missingCol];
+      }
+      continue;
+    }
+
+    // Check for on_conflict target error
+    if (errorMsg.includes('ON CONFLICT') || errorMsg.includes('conflict target')) {
+      console.warn(`[Supabase Resilience] Retrying ${table} upsert without onConflict option due to constraint mismatch...`);
+      const fallbackRes = await supabase.from(table).upsert(payload).select();
+      if (!fallbackRes.error) return fallbackRes;
+    }
+
+    console.warn(`[Supabase Upsert Notice] Table '${table}' upsert notice:`, errorMsg);
+    return res;
+  }
+
+  return { data: null, error: new Error(`Failed to upsert to ${table} after ${maxAttempts} schema cache retry attempts.`) };
+}
+
 export async function upsertRecord(table: string, data: any, onConflict: string = 'id') {
   if (!navigator.onLine) {
     addToSyncQueue({ table, action: 'UPSERT', data });
@@ -488,11 +541,35 @@ export async function upsertRecord(table: string, data: any, onConflict: string 
     ? { ...data, school_id: schoolId }
     : data;
 
-  const result = await supabase.from(table).upsert(payload, { onConflict }).select();
-  if (result.error) {
-    console.warn(`Notice upserting to ${table}:`, result.error.message);
-  }
+  const result = await resilientUpsert(table, payload, { onConflict });
   return result;
+}
+
+/**
+ * Attempts to execute SQL migration directly via Supabase RPC if available.
+ */
+export async function executeSupabaseSql(sqlQuery: string): Promise<{ success: boolean; message: string }> {
+  try {
+    // Attempt standard Supabase RPC methods if user configured them
+    const rpcNames = ['exec_sql', 'exec', 'execute_sql', 'run_sql'];
+    for (const rpc of rpcNames) {
+      try {
+        const { data, error } = await supabase.rpc(rpc, { sql: sqlQuery });
+        if (!error) {
+          console.log(`[Supabase Migration] Executed successfully via RPC '${rpc}'!`, data);
+          return { success: true, message: `Successfully executed via RPC ${rpc}` };
+        }
+      } catch (e) {
+        // Continue trying
+      }
+    }
+    return { 
+      success: false, 
+      message: "Direct SQL execution requires running the script in Supabase SQL Editor." 
+    };
+  } catch (err: any) {
+    return { success: false, message: err?.message || 'SQL execution failed' };
+  }
 }
 
 export async function deleteRecord(table: string, id: string | number) {

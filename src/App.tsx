@@ -180,22 +180,12 @@ export default function App() {
         subjectPaperConfigs: snapData.subjectPaperConfigs || {},
         subject_paper_configs: snapData.subjectPaperConfigs || {},
         bubbleSettings: snapData.bubbleSettings || {},
+        bubble_settings: snapData.bubbleSettings || {},
         updated_at: new Date().toISOString()
       };
       
-      // 1. Save to Firestore
+      // Persist snapshot to Supabase school_data table with resilience
       await saveSchoolData(schId, payload);
-
-      // 2. Save to Supabase school_data table (Dual Cloud Persistence)
-      try {
-        await supabase.from('school_data').upsert({
-          id: schId,
-          school_id: schId,
-          ...payload
-        }, { onConflict: 'school_id' });
-      } catch (supaErr) {
-        console.warn("Supabase school_data sync notice:", supaErr);
-      }
     } catch (err) {
       console.warn("Error saving school snapshot:", err);
     }
