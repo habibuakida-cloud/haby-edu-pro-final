@@ -95,7 +95,21 @@ export default function App() {
 
   const { userAccount, loading: authLoading, logout } = useAuth();
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
-  const [data, setData] = useState<AppData>(DEFAULT_APP_DATA);
+  const [data, setData] = useState<AppData>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const storedSchool = localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
+        const local = localStorage.getItem(`haby_school_data_snapshot_${storedSchool}`) || localStorage.getItem(`haby_school_data_${storedSchool}`);
+        if (local) {
+          const parsed = JSON.parse(local);
+          if (parsed && typeof parsed === 'object') {
+            return { ...DEFAULT_APP_DATA, ...parsed };
+          }
+        }
+      } catch (e) {}
+    }
+    return DEFAULT_APP_DATA;
+  });
 
   useEffect(() => {
     if (userAccount?.role === 'TEACHER' && activeView !== 'teacherportal') {
@@ -387,10 +401,16 @@ export default function App() {
         const remoteData = { ...rawSchoolData } as Partial<AppData>;
         
         setData(prev => {
-          // Resolve students: prioritize Supabase relational rows if present, else snapshot
-          const resolvedStudents = supaStudents.length > 0 ? supaStudents : (remoteData.students || prev.students);
-          const resolvedTeachers = supaTeachers.length > 0 ? supaTeachers : (remoteData.teachers || prev.teachers);
-          const resolvedExams = supaExams.length > 0 ? supaExams : (remoteData.exams || prev.exams);
+          // Resolve students: prioritize Supabase relational rows if present, else remote snapshot, else keep prev data
+          const resolvedStudents = supaStudents.length > 0 
+            ? supaStudents 
+            : (remoteData.students && remoteData.students.length > 0 ? remoteData.students : prev.students);
+          const resolvedTeachers = supaTeachers.length > 0 
+            ? supaTeachers 
+            : (remoteData.teachers && remoteData.teachers.length > 0 ? remoteData.teachers : prev.teachers);
+          const resolvedExams = supaExams.length > 0 
+            ? supaExams 
+            : (remoteData.exams && remoteData.exams.length > 0 ? remoteData.exams : prev.exams);
 
           // Build or merge streamSettings from Supabase classes if available
           let resolvedStreamSettings = remoteData.streamSettings || prev.streamSettings || [];
@@ -411,7 +431,78 @@ export default function App() {
           // Use Supabase periods if present and periodSettings is empty
           const resolvedPeriods = (supaPeriods.length > 0 && (!remoteData.periodSettings || remoteData.periodSettings.length === 0))
             ? supaPeriods
-            : (remoteData.periodSettings || prev.periodSettings || []);
+            : (rawSchoolData.periodSettings || rawSchoolData.period_settings || prev.periodSettings || []);
+
+          // Safe resolution for Timetable & Invigilation (handles both camelCase and snake_case from Supabase)
+          const resolvedTimetableAssignments = 
+            (rawSchoolData.timetableAssignments && Array.isArray(rawSchoolData.timetableAssignments) && rawSchoolData.timetableAssignments.length > 0)
+              ? rawSchoolData.timetableAssignments
+              : (rawSchoolData.timetable_assignments && Array.isArray(rawSchoolData.timetable_assignments) && rawSchoolData.timetable_assignments.length > 0)
+                ? rawSchoolData.timetable_assignments
+                : (prev.timetableAssignments && prev.timetableAssignments.length > 0)
+                  ? prev.timetableAssignments
+                  : [];
+
+          const resolvedSessions = 
+            (rawSchoolData.sessions && Array.isArray(rawSchoolData.sessions) && rawSchoolData.sessions.length > 0)
+              ? rawSchoolData.sessions
+              : (prev.sessions && prev.sessions.length > 0 ? prev.sessions : []);
+
+          const resolvedSupervisors = 
+            (rawSchoolData.supervisors && Array.isArray(rawSchoolData.supervisors) && rawSchoolData.supervisors.length > 0)
+              ? rawSchoolData.supervisors
+              : (prev.supervisors && prev.supervisors.length > 0 ? prev.supervisors : []);
+
+          const resolvedSelectedInvigilators = 
+            (rawSchoolData.selectedInvigilators && Array.isArray(rawSchoolData.selectedInvigilators) && rawSchoolData.selectedInvigilators.length > 0)
+              ? rawSchoolData.selectedInvigilators
+              : (rawSchoolData.selected_invigilators && Array.isArray(rawSchoolData.selected_invigilators) && rawSchoolData.selected_invigilators.length > 0)
+                ? rawSchoolData.selected_invigilators
+                : (prev.selectedInvigilators || []);
+
+          const resolvedInvigilationAssignments = 
+            (rawSchoolData.invigilationAssignments && typeof rawSchoolData.invigilationAssignments === 'object' && Object.keys(rawSchoolData.invigilationAssignments).length > 0)
+              ? rawSchoolData.invigilationAssignments
+              : (rawSchoolData.invigilation_assignments && typeof rawSchoolData.invigilation_assignments === 'object' && Object.keys(rawSchoolData.invigilation_assignments).length > 0)
+                ? rawSchoolData.invigilation_assignments
+                : (prev.invigilationAssignments || {});
+
+          const resolvedSavedTimetableRecords = 
+            (rawSchoolData.savedTimetableRecords && Array.isArray(rawSchoolData.savedTimetableRecords) && rawSchoolData.savedTimetableRecords.length > 0)
+              ? rawSchoolData.savedTimetableRecords
+              : (rawSchoolData.saved_timetable_records && Array.isArray(rawSchoolData.saved_timetable_records) && rawSchoolData.saved_timetable_records.length > 0)
+                ? rawSchoolData.saved_timetable_records
+                : (prev.savedTimetableRecords || []);
+
+          const resolvedSavedInvigilationRecords = 
+            (rawSchoolData.savedInvigilationRecords && Array.isArray(rawSchoolData.savedInvigilationRecords) && rawSchoolData.savedInvigilationRecords.length > 0)
+              ? rawSchoolData.savedInvigilationRecords
+              : (rawSchoolData.saved_invigilation_records && Array.isArray(rawSchoolData.saved_invigilation_records) && rawSchoolData.saved_invigilation_records.length > 0)
+                ? rawSchoolData.saved_invigilation_records
+                : (prev.savedInvigilationRecords || []);
+
+          const resolvedSubjectPeriodAllocations = 
+            (rawSchoolData.subjectPeriodAllocations && Array.isArray(rawSchoolData.subjectPeriodAllocations) && rawSchoolData.subjectPeriodAllocations.length > 0)
+              ? rawSchoolData.subjectPeriodAllocations
+              : (rawSchoolData.subject_period_allocations && Array.isArray(rawSchoolData.subject_period_allocations) && rawSchoolData.subject_period_allocations.length > 0)
+                ? rawSchoolData.subject_period_allocations
+                : (prev.subjectPeriodAllocations || []);
+
+          const resolvedTeacherAssignments = 
+            (rawSchoolData.teacherAssignments && Array.isArray(rawSchoolData.teacherAssignments) && rawSchoolData.teacherAssignments.length > 0)
+              ? rawSchoolData.teacherAssignments
+              : (rawSchoolData.teacher_assignments && Array.isArray(rawSchoolData.teacher_assignments) && rawSchoolData.teacher_assignments.length > 0)
+                ? rawSchoolData.teacher_assignments
+                : (prev.teacherAssignments || []);
+
+          const resolvedInstitutionalPolicy = 
+            rawSchoolData.institutionalPolicy || rawSchoolData.institutional_policy || prev.institutionalPolicy || {};
+
+          const resolvedJournalRecords = 
+            rawSchoolData.journalRecords || rawSchoolData.journal_records || prev.journalRecords || {};
+
+          const resolvedDailyAttendance = 
+            rawSchoolData.dailyAttendance || rawSchoolData.daily_attendance || prev.dailyAttendance || {};
 
           const updatedState: AppData = {
             ...prev,
@@ -421,9 +512,26 @@ export default function App() {
             exams: resolvedExams,
             streamSettings: resolvedStreamSettings,
             periodSettings: resolvedPeriods,
+            timetableAssignments: resolvedTimetableAssignments,
+            sessions: resolvedSessions,
+            supervisors: resolvedSupervisors,
+            selectedInvigilators: resolvedSelectedInvigilators,
+            invigilationAssignments: resolvedInvigilationAssignments,
+            savedTimetableRecords: resolvedSavedTimetableRecords,
+            savedInvigilationRecords: resolvedSavedInvigilationRecords,
+            subjectPeriodAllocations: resolvedSubjectPeriodAllocations,
+            teacherAssignments: resolvedTeacherAssignments,
+            institutionalPolicy: resolvedInstitutionalPolicy,
+            journalRecords: resolvedJournalRecords,
+            dailyAttendance: resolvedDailyAttendance,
             parents: remoteData.parents || prev.parents,
             examinationRecords: remoteData.examinationRecords || prev.examinationRecords,
           };
+
+          try {
+            localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(updatedState));
+            localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(updatedState));
+          } catch (e) {}
 
           setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
           return updatedState;
@@ -587,7 +695,11 @@ export default function App() {
       return nextData;
     });
 
-    // Immediately persist to IndexedDB so any fast navigation or reload retains changes
+    // Immediately persist to localStorage and IndexedDB so any fast navigation or reload retains changes
+    try {
+      localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextData));
+      localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextData));
+    } catch (e) {}
     setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
 
     // If periodSettings or streamSettings are directly modified, push snapshot immediately

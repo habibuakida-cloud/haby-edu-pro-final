@@ -2,6 +2,12 @@ import { supabase, resilientUpsert } from './supabaseClient';
 
 export const saveSchoolData = async (schoolId: string, data: any) => {
   if (!schoolId) return;
+  // Always persist locally first so state is never lost even if remote tables are not yet migrated
+  try {
+    localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(data));
+    localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(data));
+  } catch (e) {}
+
   try {
     const payload = {
       id: schoolId,
@@ -20,19 +26,23 @@ export const saveSchoolData = async (schoolId: string, data: any) => {
 
 export const getSchoolData = async (schoolId: string) => {
   if (!schoolId) return null;
+  let remoteData = null;
   try {
     const { data, error } = await supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1);
-    if (error) {
-      if (!error.message?.includes('Could not find the table')) {
-        console.warn("school_data notice:", error.message);
-      }
-      return null;
+    if (!error && data && data.length > 0) {
+      remoteData = data[0];
     }
-    if (!data || data.length === 0) return null;
-    return data[0];
-  } catch (err: any) {
-    return null;
-  }
+  } catch (err: any) {}
+
+  if (remoteData) return remoteData;
+
+  // Seamless fallback to locally preserved snapshot
+  try {
+    const local = localStorage.getItem(`haby_school_data_snapshot_${schoolId}`) || localStorage.getItem(`haby_school_data_${schoolId}`);
+    if (local) return JSON.parse(local);
+  } catch (e) {}
+
+  return null;
 };
 
 export const measureFirestoreLatency = async (schoolId: string): Promise<{ latencyMs: number; ok: boolean; error?: string }> => {

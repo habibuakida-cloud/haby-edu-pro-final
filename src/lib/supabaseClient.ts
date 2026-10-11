@@ -14,8 +14,8 @@ const rawKey =
   '';
 
 // Connected to user's Supabase project (tqazqaqdzqpbftdcekzb.supabase.co)
-export const DEFAULT_SUPABASE_URL = 'https://rdrmptcdxtdjblaqsxjy.supabase.co';
-export const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_tjXiP5Cl7SuaPHrLeBPnLA_x-evZQPc';
+export const DEFAULT_SUPABASE_URL = 'https://tqazqaqdzqpbftdcekzb.supabase.co';
+export const DEFAULT_SUPABASE_PUBLISHABLE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRxYXpxYXFkenFwYmZ0ZGNla3piIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTE1MTI0NDUsImV4cCI6MjEwNzA4ODQ0NX0.rKwTCx4WW4Lf9GBYuL-4Yk61vB6_EPqB17FXNE6wAls';
 export const DEFAULT_PRIMARY_SCHOOL_ID = '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
 
 export const supabaseUrl = (rawUrl && rawUrl.startsWith('http') && !rawUrl.includes('placeholder')) 
@@ -196,8 +196,10 @@ export async function measureSupabaseLatency(): Promise<{ latencyMs: number; ok:
 
 // Student Serializers (maps between React App model and Supabase table schema)
 export const toSupabaseStudent = (s: any, schoolId?: string, classId?: string) => {
+  const effectiveSchoolId = schoolId || s.schoolId || s.school_id || getCurrentSchoolId();
   const genderClean = (s.gender && String(s.gender).toLowerCase() === 'female') ? 'Female' : 'Male';
   const row: Record<string, any> = {
+    school_id: effectiveSchoolId,
     full_name: s.name || s.fullName || s.full_name || 'Mwanafunzi',
     gender: genderClean,
     class_name: s.className || s.class || 'Form 1',
@@ -216,8 +218,8 @@ export const toSupabaseStudent = (s: any, schoolId?: string, classId?: string) =
   if (s.dob) {
     row.dob = s.dob;
   }
-  if (s.id && typeof s.id === 'string' && s.id.includes('-')) {
-    row.id = s.id;
+  if (s.id) {
+    row.id = String(s.id);
   }
   return row;
 };
@@ -248,8 +250,10 @@ export const fromSupabaseStudent = (row: any, idx = 0) => {
 
 // Teacher Serializers
 export const toSupabaseTeacher = (t: any, schoolId?: string) => {
+  const effectiveSchoolId = schoolId || t.schoolId || t.school_id || getCurrentSchoolId();
   const genderClean = (t.gender && String(t.gender).toLowerCase() === 'female') ? 'Female' : 'Male';
   const row: Record<string, any> = {
+    school_id: effectiveSchoolId,
     full_name: t.name || t.fullName || t.full_name || 'Mwalimu',
     gender: genderClean,
     staff_role_name: t.schoolRole || t.role || 'Subject Teacher (Standard)',
@@ -261,8 +265,8 @@ export const toSupabaseTeacher = (t: any, schoolId?: string) => {
     invigilation_availability: (t.excludeInvigilation || t.exclude_invigilation) ? 'Unavailable' : 'Available for Invigilation',
     passport_photo_url: t.photo || t.passportPhoto || null
   };
-  if (t.id && typeof t.id === 'string' && t.id.includes('-')) {
-    row.id = t.id;
+  if (t.id) {
+    row.id = String(t.id);
   }
   return row;
 };
@@ -287,7 +291,9 @@ export const fromSupabaseTeacher = (row: any, idx = 0) => {
 
 // Exam Serializers
 export const toSupabaseExam = (e: any, schoolId?: string) => {
+  const effectiveSchoolId = schoolId || e.schoolId || e.school_id || getCurrentSchoolId();
   const row: Record<string, any> = {
+    school_id: effectiveSchoolId,
     name: e.name || 'Examination',
     exam_type: e.type || e.term || 'Terminal',
     status: (e.status || 'Active').toLowerCase() === 'active' ? 'active' : 'upcoming'
@@ -295,8 +301,8 @@ export const toSupabaseExam = (e: any, schoolId?: string) => {
   if (e.date) {
     row.start_date = e.date.slice(0, 10);
   }
-  if (e.id && typeof e.id === 'string' && e.id.includes('-')) {
-    row.id = e.id;
+  if (e.id) {
+    row.id = String(e.id);
   }
   return row;
 };
@@ -548,9 +554,18 @@ export async function upsertRecord(table: string, data: any, onConflict: string 
 
   const schoolId = getCurrentSchoolId();
   const shouldAttachSchoolId = !TABLES_WITHOUT_SCHOOL_ID.has(table);
-  const payload = (schoolId && shouldAttachSchoolId && !Array.isArray(data) && !data.school_id)
-    ? { ...data, school_id: schoolId }
-    : data;
+  
+  let payload = data;
+  if (Array.isArray(data)) {
+    payload = data.map(item => {
+      if (schoolId && shouldAttachSchoolId && item && typeof item === 'object' && !item.school_id) {
+        return { ...item, school_id: schoolId };
+      }
+      return item;
+    });
+  } else if (schoolId && shouldAttachSchoolId && data && !data.school_id) {
+    payload = { ...data, school_id: schoolId };
+  }
 
   const result = await resilientUpsert(table, payload, { onConflict });
   return result;

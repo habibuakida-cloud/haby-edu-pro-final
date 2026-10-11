@@ -397,16 +397,16 @@ export const Navigation: React.FC<NavigationProps> = ({
                 const hasActiveChild = group.subModules.some(s => s.id === activeView);
                 // Color Mapping for distinct module identification
                 const colors: Record<string, { border: string, bg: string, text: string }> = {
-                  people_management: { border: 'border-blue-500/30', bg: 'bg-blue-950/20', text: 'text-blue-400' },
-                  teaching: { border: 'border-amber-500/30', bg: 'bg-amber-950/20', text: 'text-amber-400' },
-                  academic_exams: { border: 'border-purple-500/30', bg: 'bg-purple-950/20', text: 'text-purple-400' },
-                  timetable_invigilation: { border: 'border-indigo-500/30', bg: 'bg-indigo-950/20', text: 'text-indigo-400' },
-                  student_affairs: { border: 'border-rose-500/30', bg: 'bg-rose-950/20', text: 'text-rose-400' },
-                  environment_management: { border: 'border-fuchsia-500/30', bg: 'bg-fuchsia-950/20', text: 'text-fuchsia-400' },
-                  finance_management: { border: 'border-sky-500/30', bg: 'bg-sky-950/20', text: 'text-sky-400' },
-                  communication: { border: 'border-cyan-500/30', bg: 'bg-cyan-950/20', text: 'text-cyan-400' },
-                  remedial_program: { border: 'border-teal-500/30', bg: 'bg-teal-950/20', text: 'text-teal-400' },
-                  system_settings: { border: 'border-slate-500/30', bg: 'bg-slate-950/20', text: 'text-slate-400' },
+                  people_management: { border: 'border-blue-600/50', bg: 'bg-blue-800/40', text: 'text-blue-100' },
+                  teaching: { border: 'border-amber-600/50', bg: 'bg-amber-800/40', text: 'text-amber-100' },
+                  academic_exams: { border: 'border-violet-600/50', bg: 'bg-violet-800/40', text: 'text-violet-100' },
+                  timetable_invigilation: { border: 'border-indigo-600/50', bg: 'bg-indigo-800/40', text: 'text-indigo-100' },
+                  student_affairs: { border: 'border-rose-600/50', bg: 'bg-rose-800/40', text: 'text-rose-100' },
+                  environment_management: { border: 'border-fuchsia-600/50', bg: 'bg-fuchsia-800/40', text: 'text-fuchsia-100' },
+                  finance_management: { border: 'border-sky-600/50', bg: 'bg-sky-800/40', text: 'text-sky-100' },
+                  communication: { border: 'border-cyan-600/50', bg: 'bg-cyan-800/40', text: 'text-cyan-100' },
+                  remedial_program: { border: 'border-teal-600/50', bg: 'bg-teal-800/40', text: 'text-teal-100' },
+                  system_settings: { border: 'border-slate-600/50', bg: 'bg-slate-800/40', text: 'text-slate-100' },
                 };
                 
                 const groupStyle = colors[group.id] || { border: 'border-slate-800', bg: 'bg-slate-900/20', text: 'text-slate-400' };
@@ -417,7 +417,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                     className={`rounded-2xl border transition-all duration-300 ${
                       hasActiveChild 
                         ? `${groupStyle.border} ${groupStyle.bg}` 
-                        : 'border-transparent bg-transparent hover:bg-slate-800/40 hover:border-slate-700'
+                        : `border-transparent bg-transparent hover:${groupStyle.bg} hover:${groupStyle.border.replace('border-', 'border-')}`
                     }`}
                   >
                     {/* Group Header Button */}

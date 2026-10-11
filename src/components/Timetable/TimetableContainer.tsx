@@ -2693,7 +2693,22 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Streams (Comma Separated)</label>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Select/Add Streams</label>
+                <select
+                  onChange={e => {
+                    const selected = e.target.value;
+                    if (selected && selected !== 'Custom') {
+                      setNewStreamNames(selected);
+                    }
+                  }}
+                  className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white mb-2"
+                >
+                  <option value="">-- Choose Preset --</option>
+                  <option value="STREAM A, STREAM B">STREAM A, STREAM B</option>
+                  <option value="STREAM A, STREAM B, STREAM C">STREAM A, STREAM B, STREAM C</option>
+                  <option value="PCM, PCB, CBG, HGE">PCM, PCB, CBG, HGE</option>
+                  <option value="Custom">Custom (Manual Entry)</option>
+                </select>
                 <input
                   type="text"
                   value={newStreamNames}
