@@ -59,7 +59,7 @@ export const DailyTeachingTrackerView: React.FC<DailyTeachingTrackerViewProps> =
       
       setTimetableSlots(filteredSlots);
 
-      // 2. Fetch existing attendance records from Firestore for today, this class and stream
+      // 2. Fetch existing attendance records from Supabase for today, this class and stream
       const aData = await getPeriodAttendance(schoolId, todayDate, selectedClass);
       // Filter by stream locally if the service doesn't support it yet or to be safe
       const streamData = (aData || []).filter(a => a.stream === selectedStream);

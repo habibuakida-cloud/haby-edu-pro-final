@@ -31,7 +31,8 @@ import {
   Award,
   BookOpen
 } from 'lucide-react';
-import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../../lib/supabaseClient';
+import { db, DEFAULT_PRIMARY_SCHOOL_ID } from '../../firebase';
+import { collection, getDocs, addDoc, deleteDoc, doc, setDoc } from '../../lib/firestoreShim';
 import { 
   INITIAL_STUDENTS, 
   INITIAL_TEACHERS, 
@@ -133,58 +134,32 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setLoading(true);
     setLoadingMetrics(true);
     try {
-      // 1. Fetch schools using exact requested query: supabase.from('schools').select('*')
       let fetchedSchools: SupabaseSchoolRecord[] = [];
       try {
-        const { data: schoolsData, error: sErr } = await supabase
-          .from('schools')
-          .select('*');
+        const querySnapshot = await getDocs(collection(db, "schools"));
+        fetchedSchools = querySnapshot.docs.map(docSnap => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        })) as SupabaseSchoolRecord[];
 
-        if (!sErr && Array.isArray(schoolsData)) {
-          fetchedSchools = [...schoolsData].sort((a: any, b: any) => 
-            (a.name || '').localeCompare(b.name || '')
-          ) as SupabaseSchoolRecord[];
-        } else {
-          console.warn("[SuperAdmin] Schools fetch notice:", sErr);
-          // If query failed, keep existing schools or fallback
-          fetchedSchools = schools.length > 0 ? schools : [
-            { id: '02dff10d-78fb-4af6-ab5a-db1d275d7e06', name: 'HABY EDU SCHOOL' }
-          ];
+        fetchedSchools.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || ''));
+        if (fetchedSchools.length === 0) {
+          fetchedSchools = [{ id: '02dff10d-78fb-4af6-ab5a-db1d275d7e06', name: 'HABY EDU SCHOOL' }];
         }
       } catch (err) {
         console.warn("[SuperAdmin] Schools query exception:", err);
-        fetchedSchools = schools.length > 0 ? schools : [
-          { id: '02dff10d-78fb-4af6-ab5a-db1d275d7e06', name: 'HABY EDU SCHOOL' }
-        ];
+        fetchedSchools = [{ id: '02dff10d-78fb-4af6-ab5a-db1d275d7e06', name: 'HABY EDU SCHOOL' }];
       }
       setSchools(fetchedSchools);
 
       // 2. Fetch school admins
       let fetchedAdmins: SchoolAdminRecord[] = [];
       try {
-        // Try with created_at order first
-        const res1 = await supabase
-          .from('school_admins')
-          .select('*')
-          .order('created_at', { ascending: false });
-
-        if (!res1.error && Array.isArray(res1.data)) {
-          fetchedAdmins = res1.data as any;
-        } else {
-          // Fallback to select without order in case created_at column is missing or indexing
-          const res2 = await supabase
-            .from('school_admins')
-            .select('*');
-
-          if (!res2.error && Array.isArray(res2.data)) {
-            fetchedAdmins = res2.data as any;
-          } else {
-            const msg = res2.error?.message || res1.error?.message || '';
-            if (!msg.includes('Could not find the table')) {
-              console.warn("[SuperAdmin] school_admins fetch notice:", msg);
-            }
-          }
-        }
+        const adminSnapshot = await getDocs(collection(db, "school_admins"));
+        fetchedAdmins = adminSnapshot.docs.map(docSnap => ({
+          id: docSnap.id,
+          ...docSnap.data()
+        })) as SchoolAdminRecord[];
       } catch (adminErr) {
         console.warn("[SuperAdmin] Exception fetching school_admins:", adminErr);
       }
@@ -199,24 +174,15 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
 
       setSchoolAdmins(fetchedAdmins);
 
-      // 3. Fetch summary metrics for each school (students, teachers, active exam records)
+      // 3. Fetch summary metrics for each school
       try {
-        const { data: supaSchools, error: supaSchoolsErr } = await supabase.from('schools').select('*');
-        const fsDataMap = new Map<string, any>();
-        if (supaSchools && !supaSchoolsErr) {
-          supaSchools.forEach((sch: any) => {
-            fsDataMap.set(sch.id, sch);
-          });
-        }
-
         const metricsMap: Record<string, SchoolSummaryMetrics> = {};
 
         for (const s of fetchedSchools) {
-          const fsDoc = fsDataMap.get(s.id);
-          let students = Array.isArray(fsDoc?.students) ? fsDoc.students : [];
-          let teachers = Array.isArray(fsDoc?.teachers) ? fsDoc.teachers : [];
-          let exams = Array.isArray(fsDoc?.exams) ? fsDoc.exams : [];
-          let examRecords = Array.isArray(fsDoc?.examinationRecords) ? fsDoc.examinationRecords : [];
+          let students = (s as any).students || [];
+          let teachers = (s as any).teachers || [];
+          let exams = (s as any).exams || [];
+          let examRecords = (s as any).examinationRecords || [];
 
           // If currently active school and in-memory live data provided via props
           if (s.id === currentSchoolId && currentSchoolData) {
@@ -234,28 +200,11 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             }
           }
 
-          // If DEFAULT_PRIMARY_SCHOOL_ID or primary demo and counts are empty, fallback to seed defaults
           if ((s.id === DEFAULT_PRIMARY_SCHOOL_ID || s.name?.toUpperCase().includes('HABY EDU')) && students.length === 0) {
             students = INITIAL_STUDENTS;
             teachers = INITIAL_TEACHERS;
             exams = INITIAL_EXAMS;
             examRecords = INITIAL_EXAMINATION_RECORDS;
-          }
-
-          // Local storage cache lookup if still 0
-          if (students.length === 0 && typeof window !== 'undefined') {
-            try {
-              const cached = localStorage.getItem(`haby_school_data_${s.id}`) || localStorage.getItem(`school_data_${s.id}`);
-              if (cached) {
-                const parsed = JSON.parse(cached);
-                if (Array.isArray(parsed.students) && parsed.students.length > 0) students = parsed.students;
-                if (Array.isArray(parsed.teachers) && parsed.teachers.length > 0) teachers = parsed.teachers;
-                if (Array.isArray(parsed.exams) && parsed.exams.length > 0) exams = parsed.exams;
-                if (Array.isArray(parsed.examinationRecords) && parsed.examinationRecords.length > 0) examRecords = parsed.examinationRecords;
-              }
-            } catch {
-              // ignore cache parse error
-            }
           }
 
           const activeExams = exams.filter((e: any) => (e.status || 'Active').toLowerCase() === 'active');
@@ -279,7 +228,6 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
       }
     } catch (err: any) {
       console.warn("[SuperAdmin] Error in fetchEcosystemData:", err);
-      // Ensure we still have the Root Super Admin even if a global error occurred
       setSchoolAdmins(prev => prev.length > 0 ? prev : [ROOT_SUPER_ADMIN]);
     } finally {
       setLoading(false);
@@ -292,8 +240,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     const checkConnection = async () => {
       setSupabaseStatus('checking');
       try {
-        const { error } = await supabase.from('schools').select('id').limit(1);
-        setSupabaseStatus(error ? 'error' : 'connected');
+        await getDocs(collection(db, "schools"));
+        setSupabaseStatus('connected');
       } catch (e) {
         setSupabaseStatus('error');
       }
@@ -313,40 +261,14 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setSchoolError(null);
 
     try {
-      let insertResult: any = null;
+      await addDoc(collection(db, "schools"), {
+        name: newSchoolName.trim(),
+        email: newSchoolEmail.trim() || null,
+        phone: newSchoolPhone.trim() || null,
+        createdAt: new Date().toISOString()
+      });
 
-      // Check if email or phone is provided
-      if (newSchoolEmail.trim() || newSchoolPhone.trim()) {
-        const fullInsert = await supabase
-          .from('schools')
-          .insert({
-            name: newSchoolName.trim(),
-            email: newSchoolEmail.trim() || null,
-            phone: newSchoolPhone.trim() || null
-          })
-          .select();
-
-        // If schema doesn't have email/phone columns, fallback to name only
-        if (fullInsert.error && (fullInsert.error.code === 'PGRST204' || fullInsert.error.message?.includes('column'))) {
-          insertResult = await supabase
-            .from('schools')
-            .insert({ name: newSchoolName.trim() })
-            .select();
-        } else {
-          insertResult = fullInsert;
-        }
-      } else {
-        insertResult = await supabase
-          .from('schools')
-          .insert({ name: newSchoolName.trim() })
-          .select();
-      }
-
-      if (insertResult?.error) {
-        throw insertResult.error;
-      }
-
-      showNotification('success', `Shule ya "${newSchoolName.trim()}" imesajiliwa kikamilifu kwenye Supabase!`);
+      showNotification('success', `Shule ya "${newSchoolName.trim()}" imesajiliwa kikamilifu kwenye Firebase Firestore!`);
       setNewSchoolName('');
       setNewSchoolEmail('');
       setNewSchoolPhone('');
@@ -382,24 +304,15 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
         email: adminEmail.trim().toLowerCase(),
         password: adminPassword.trim(),
         role: adminRole,
-        school_id: adminRole === 'super_admin' ? (adminSchoolId || null) : adminSchoolId
+        school_id: adminRole === 'super_admin' ? (adminSchoolId || null) : adminSchoolId,
+        created_at: new Date().toISOString()
       };
 
-      const { data, error } = await supabase
-        .from('school_admins')
-        .insert(payload)
-        .select();
-
-      if (error) {
-        if (error.code === '23505') {
-          throw new Error(`Barua pepe "${adminEmail.trim()}" tayari imesajiliwa kwa mtawala mwingine.`);
-        }
-        throw error;
-      }
+      await addDoc(collection(db, "school_admins"), payload);
 
       showNotification(
         'success', 
-        `Mtawala ${adminFullName.trim()} (${adminEmail.trim()}) amesajiliwa kwenye school_admins!`
+        `Mtawala ${adminFullName.trim()} (${adminEmail.trim()}) amesajiliwa kwenye Firestore!`
       );
       setAdminFullName('');
       setAdminEmail('');
@@ -416,6 +329,42 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     }
   };
 
+  const [seeding, setSeeding] = useState(false);
+
+  // Seed Demo Data Utility for developers
+  const handleSeedDemoData = async () => {
+    if (!window.confirm("Je, unataka kuweka taarifa za mfano (Seed Demo Data) kwenye Firebase Firestore? Hii itaongeza shule ya mfano na data zote za wanafunzi, walimu, na mitihani.")) {
+      return;
+    }
+    setSeeding(true);
+    try {
+      const schoolRef = await addDoc(collection(db, "schools"), {
+        name: "HABY EDU PRO HIGH SCHOOL (DEMO)",
+        email: "demo@habyedu.ac.tz",
+        phone: "+255 712 999 888",
+        createdAt: new Date().toISOString()
+      });
+      const schoolId = schoolRef.id;
+
+      await setDoc(doc(db, "school_data", schoolId), {
+        school_id: schoolId,
+        students: INITIAL_STUDENTS,
+        teachers: INITIAL_TEACHERS,
+        exams: INITIAL_EXAMS,
+        classes: ['Form 1', 'Form 2', 'Form 3', 'Form 4'],
+        updated_at: new Date().toISOString()
+      }, { merge: true });
+
+      showNotification('success', `Taarifa za mfano (Seed Demo Data) zimewekwa kwenye Firebase Firestore kwa Shule ID: ${schoolId}!`);
+      await fetchEcosystemData();
+    } catch (err: any) {
+      console.error("Error seeding demo data:", err);
+      showNotification('error', err.message || 'Hitilafu wakati wa kuweka taarifa za mfano.');
+    } finally {
+      setSeeding(false);
+    }
+  };
+
   // Handle Delete School
   const handleDeleteSchool = async (schoolId: string, schoolName: string) => {
     if (!window.confirm(`Je, una uhakika unataka kufuta shule ya "${schoolName}"? Hii itafuta kumbukumbu zote za shule hii.`)) {
@@ -423,8 +372,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     }
 
     try {
-      const { error } = await supabase.from('schools').delete().eq('id', schoolId);
-      if (error) throw error;
+      await deleteDoc(doc(db, "schools", schoolId));
       showNotification('success', `Shule ya "${schoolName}" imefutwa.`);
       await fetchEcosystemData();
     } catch (err: any) {
@@ -444,8 +392,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     }
 
     try {
-      const { error } = await supabase.from('school_admins').delete().eq('id', adminId);
-      if (error) throw error;
+      await deleteDoc(doc(db, "school_admins", adminId));
       showNotification('success', `Mtawala "${adminEmail}" amefutwa.`);
       await fetchEcosystemData();
     } catch (err: any) {
@@ -662,7 +609,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
               <div className="flex items-center gap-2">
                 <SchoolIcon className="w-5 h-5 text-blue-600" />
                 <h3 className="text-sm font-black text-slate-800 tracking-wide uppercase">
-                  Jedwali la Shule Zote (Supabase: schools table)
+                  JEDWALI LA SHULE ZOTE
                 </h3>
                 <span className="px-2.5 py-0.5 rounded-full text-xs font-black bg-blue-600 text-white shadow-2xs">
                   {filteredSchools.length} {filteredSchools.length === 1 ? 'Shule' : 'Shule'}
@@ -672,7 +619,7 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                 <span className="font-semibold text-slate-600">Query Inayotumika:</span>
                 <code className="bg-white px-2 py-0.5 rounded-md font-mono text-[11px] font-bold text-blue-700 border border-blue-200 shadow-2xs flex items-center gap-1.5">
                   <Database className="w-3 h-3 text-blue-500" />
-                  supabase.from('schools').select('*')
+                  getDocs(collection(db, "schools"))
                 </code>
                 <span className="inline-flex items-center gap-1 text-[11px] text-emerald-600 font-bold bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
                   <CheckCircle2 className="w-3 h-3 text-emerald-500" /> Imeunganishwa Moja kwa Moja
@@ -708,6 +655,16 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
                   <span>Cards View</span>
                 </button>
               </div>
+
+              <button
+                onClick={handleSeedDemoData}
+                disabled={seeding}
+                className="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition cursor-pointer disabled:opacity-50"
+                title="Weka data za mfano kwenye Firebase Firestore"
+              >
+                <Sparkles className="w-4 h-4" />
+                <span>{seeding ? 'Inapakia...' : 'Seed Demo Data'}</span>
+              </button>
 
               <button
                 onClick={() => setIsAddSchoolOpen(true)}

@@ -177,7 +177,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // ==== FUNCTION YA KUSAJILI USER - ATOMIC AUTH + FIRESTORE ====
+  // ==== FUNCTION YA KUSAJILI USER - ATOMIC AUTH + SUPABASE ====
   const createSchoolUser = async (email: string, password: string, displayName: string, role: UserRole): Promise<boolean> => {
     const adminSchoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     if (!adminSchoolId) throw new Error("Admin hana schoolId - tafadhali login tena");

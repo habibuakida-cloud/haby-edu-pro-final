@@ -237,23 +237,23 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
         if (recs && recs.length > 0) {
           setChildResults(recs);
         } else {
-          // Check Firestore examination records
-          let foundInFirestore = false;
+          // Check Supabase examination records
+          let foundInSupabaseRecords = false;
           try {
             const schoolId = localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
-            const fsData = await getSchoolData(schoolId);
-            if (fsData && fsData.examinationRecords && Array.isArray(fsData.examinationRecords)) {
-              const matchedRecs = fsData.examinationRecords.filter((r: any) => 
+            const supaData = await getSchoolData(schoolId);
+            if (supaData && supaData.examinationRecords && Array.isArray(supaData.examinationRecords)) {
+              const matchedRecs = supaData.examinationRecords.filter((r: any) => 
                 String(r.studentId) === String(studentId) || (phone && (r.parentPhone === phone || normalizeTzPhone(r.parentPhone || '') === normalizeTzPhone(phone)))
               );
               if (matchedRecs.length > 0) {
                 setChildResults(matchedRecs);
-                foundInFirestore = true;
+                foundInSupabaseRecords = true;
               }
             }
           } catch (e) {}
 
-          if (!foundInFirestore) {
+          if (!foundInSupabaseRecords) {
             // Default comprehensive exam records for nice presentation
             setChildResults([
               {

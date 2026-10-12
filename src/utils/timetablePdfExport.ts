@@ -201,9 +201,9 @@ export function exportTimetablePDF(options: TimetablePdfExportOptions): void {
           // Find assignment
           const normPeriodName = period.name.split(' (')[0].trim().toUpperCase();
           const assignment = assignments.find(a => {
-            const matchClass = a.className.toLowerCase() === selectedClass.toLowerCase();
+            const matchClass = (a?.className || '').toLowerCase() === (selectedClass || '').toLowerCase();
             const matchStream = selectedStream === 'All' || !a.stream || a.stream.toLowerCase().includes(selectedStream.toLowerCase());
-            const matchDay = a.day.toLowerCase() === day.toLowerCase();
+            const matchDay = (a?.day || '').toLowerCase() === (day || '').toLowerCase();
             const aPeriod = (a.periodName || a.period || '').split(' (')[0].trim().toUpperCase();
             return matchClass && matchStream && matchDay && (aPeriod === normPeriodName || aPeriod.includes(normPeriodName));
           });
@@ -418,8 +418,8 @@ export function exportTimetablePDF(options: TimetablePdfExportOptions): void {
       y += 6;
 
       const dayAssignments = assignments.filter(a => {
-        const matchDay = a.day.toLowerCase() === day.toLowerCase();
-        const matchClass = selectedClass === 'All' || a.className.toLowerCase() === selectedClass.toLowerCase();
+        const matchDay = (a?.day || '').toLowerCase() === (day || '').toLowerCase();
+        const matchClass = selectedClass === 'All' || (a?.className || '').toLowerCase() === (selectedClass || '').toLowerCase();
         const matchStream = selectedStream === 'All' || !a.stream || a.stream.toLowerCase().includes(selectedStream.toLowerCase());
         return matchDay && matchClass && matchStream;
       });

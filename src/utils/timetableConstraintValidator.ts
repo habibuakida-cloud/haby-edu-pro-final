@@ -54,7 +54,7 @@ export interface ConstraintValidationIssue {
   affectedSubject?: string;
   day?: string;
   period?: string;
-  assignmentId?: number;
+  assignmentId?: number | string;
   suggestedFix?: string;
 }
 
@@ -69,7 +69,7 @@ export interface ConstraintValidationReport {
   doublePeriodComplianceSummary: Record<string, { subject: string; classStream: string; doublePeriodsCount: number; isCompliant: boolean }>;
   // Fast lookup maps for UI highlighting in red
   violatingSlotsMap: Record<string, ConstraintValidationIssue[]>; // key: `${className}_${stream}_${day}_${period}`
-  violatingAssignmentIds: Record<number, ConstraintValidationIssue[]>; // key: assignmentId
+  violatingAssignmentIds: Record<number | string, ConstraintValidationIssue[]>; // key: assignmentId
   violatingTeacherSlotsMap: Record<string, ConstraintValidationIssue[]>; // key: `${teacherId}_${day}_${period}`
 }
 

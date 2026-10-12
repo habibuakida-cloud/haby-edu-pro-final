@@ -512,7 +512,7 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
         {/* Modal Footer */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between shrink-0">
           <div className="text-xs text-slate-500 font-medium">
-            Usajili unaohifadhiwa hapa unahifadhiwa kwenye Cloud (Firestore & Supabase) papo hapo.
+            Usajili unaohifadhiwa hapa unahifadhiwa kwenye Seva ya Supabase Cloud papo hapo.
           </div>
           <button
             type="button"

@@ -89,7 +89,7 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
   const typesStorageKey = `haby_contribution_types_${schoolId}`;
   const ledgerStorageKey = `haby_student_ledger_${schoolId}`;
 
-  // Fetch Contribution Types with Firestore & Supabase directly
+  // Fetch Contribution Types with Supabase directly
   const loadContributionTypes = async () => {
     setLoadingTypes(true);
 
@@ -109,18 +109,18 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
       console.warn('Error loading contribution_types from Supabase:', err);
     }
 
-    // 2. Fallback to Firestore snapshot
+    // 2. Fallback to Supabase school_data snapshot
     try {
-      const fsData = await getSchoolData(schoolId);
-      if (fsData && Array.isArray(fsData.contributionTypes) && fsData.contributionTypes.length > 0) {
-        setContributionTypes(fsData.contributionTypes);
+      const supaData = await getSchoolData(schoolId);
+      if (supaData && Array.isArray(supaData.contributionTypes) && supaData.contributionTypes.length > 0) {
+        setContributionTypes(supaData.contributionTypes);
       }
     } catch (e) {}
 
     setLoadingTypes(false);
   };
 
-  // Fetch Student Ledger with Firestore & Supabase directly
+  // Fetch Student Ledger with Supabase directly
   const loadStudentLedger = async () => {
     setLoadingLedger(true);
 
@@ -140,11 +140,11 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
       console.warn('Error loading student_ledger from Supabase:', err);
     }
 
-    // 2. Fallback to Firestore snapshot
+    // 2. Fallback to Supabase school_data snapshot
     try {
-      const fsData = await getSchoolData(schoolId);
-      if (fsData && Array.isArray(fsData.studentLedger) && fsData.studentLedger.length > 0) {
-        setLedger(fsData.studentLedger);
+      const supaData = await getSchoolData(schoolId);
+      if (supaData && Array.isArray(supaData.studentLedger) && supaData.studentLedger.length > 0) {
+        setLedger(supaData.studentLedger);
       }
     } catch (e) {}
 
@@ -263,7 +263,7 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
         showToast(`Mchango mpya wa "${formName}" umeongezwa na kuunganishwa kwa wanafunzi ${targetStudents.length}!`);
       }
 
-      // Sync state and Firestore
+      // Sync state and Supabase
       setContributionTypes(updatedTypes);
       setLedger(updatedLedger);
       await saveSchoolData(schoolId, {

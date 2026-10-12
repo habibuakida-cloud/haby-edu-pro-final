@@ -176,9 +176,10 @@ export const getStreamsForClass = (
   const streamsSet = new Set<string>();
 
   // Check streamSettings first (Authoritative source)
+  const normClassName = (className || '').toLowerCase().trim();
   if (streamSettings && streamSettings.length > 0) {
     const found = streamSettings.find(
-      s => s.className.toLowerCase().trim() === className.toLowerCase().trim()
+      s => (s?.className || '').toLowerCase().trim() === normClassName
     );
     if (found && Array.isArray(found.streams)) {
       found.streams.forEach(st => {
@@ -193,7 +194,7 @@ export const getStreamsForClass = (
   // Check students in that class
   if (students && students.length > 0) {
     students.forEach(st => {
-      if (st.className && st.className.toLowerCase().trim() === className.toLowerCase().trim()) {
+      if (st && st.className && (st.className || '').toLowerCase().trim() === normClassName) {
         if (st.stream && st.stream.trim()) {
           streamsSet.add(normalizeStreamName(st.stream));
         }
@@ -229,7 +230,7 @@ export const syncClassAndStreamToSettings = (
   const existing = [...(currentSettings.length > 0 ? currentSettings : INITIAL_STREAM_SETTINGS)];
   
   const classIndex = existing.findIndex(
-    s => s.className.toLowerCase().trim() === cleanClass.toLowerCase()
+    s => (s?.className || '').toLowerCase().trim() === cleanClass.toLowerCase()
   );
 
   let wasChanged = false;

@@ -319,7 +319,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       if (schoolError) throw new Error(`Supabase School Error: ${schoolError.message}`);
 
-      // 2. Initialize school snapshot in Firestore (durable store)
+      // 2. Initialize school snapshot in Supabase (durable store)
       const fullSchoolData = {
         ...DEFAULT_APP_DATA,
         schoolInfo: {
@@ -636,7 +636,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setNewFullName('');
       setNewPassword('');
       setNewAssignedSubjects([]);
-      setUserMsg("User created successfully in Auth & Firestore!");
+      setUserMsg("User created successfully in Auth & Supabase!");
       setTimeout(() => setUserMsg(null), 8000);
       alert("User created successfully!");
       
@@ -825,7 +825,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       console.error("[Registration Error] Error registering school admin:", err);
       setAdminRegisterMsg({
         type: 'error',
-        text: `Failed to register school admin: ${err.message || 'Firestore write error'}`
+        text: `Failed to register school admin: ${err.message || 'Supabase write error'}`
       });
       alert(`Registration error: ${err.message || err}`);
     } finally {
@@ -2040,7 +2040,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </span>
               </div>
               <span className="text-[11px] text-slate-400 font-mono">
-                Real-time Firebase Cloud Storage Sync
+                Real-time Supabase Cloud Storage Sync
               </span>
             </div>
 
@@ -2445,7 +2445,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               ) : loadingTargetSchoolUsers ? (
                 <div className="py-8 text-center text-slate-500 flex flex-col items-center gap-2 bg-white rounded-lg border border-slate-200">
                   <RefreshCw className="w-5 h-5 animate-spin text-blue-600" />
-                  <span className="text-xs font-semibold">Fetching registered users from Firestore...</span>
+                  <span className="text-xs font-semibold">Kupakua watumiaji kutoka Supabase...</span>
                 </div>
               ) : targetSchoolUsers.length === 0 ? (
                 <div className="py-6 text-center text-slate-500 text-xs bg-white rounded-lg border border-dashed border-slate-200">
@@ -2459,7 +2459,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         <th className="py-2.5 px-3">Admin / Staff Name</th>
                         <th className="py-2.5 px-3">Official Login Email</th>
                         <th className="py-2.5 px-3">System Role</th>
-                        <th className="py-2.5 px-3">Auth UID (Firestore doc ID)</th>
+                        <th className="py-2.5 px-3">Mtumiaji ID (Supabase UID)</th>
                         <th className="py-2.5 px-3">Password</th>
                         <th className="py-2.5 px-3">Status</th>
                       </tr>

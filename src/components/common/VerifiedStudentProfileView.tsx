@@ -306,21 +306,21 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
         }
       }
 
-      // 3. Query Firestore schools documents (unauthenticated public read enabled)
+      // 3. Query Supabase schools documents (unauthenticated public read enabled)
       if (!matched) {
         try {
           const { data: schools, error } = await getAll('schools');
           if (schools) {
             for (const dData of schools) {
             if (Array.isArray(dData.students)) {
-              const foundInFs = dData.students.find((s: Student) => {
+              const foundInSchool = dData.students.find((s: Student) => {
                 const sNorm = normalizeRegNo(s.regNo || '');
                 return sNorm === cleanTargetReg ||
                        (cleanTargetReg.includes(sNorm) && sNorm.length >= 4) ||
                        ((regNo.match(/\d{3,5}/) || [])[0] && ((s.regNo || '').match(/\d{3,5}/) || [])[0] === (regNo.match(/\d{3,5}/) || [])[0]);
               });
-              if (foundInFs) {
-                matched = foundInFs;
+              if (foundInSchool) {
+                matched = foundInSchool;
                 if (dData.schoolInfo) {
                   setSchoolData(prev => ({ ...prev, ...dData.schoolInfo }));
                 }
@@ -330,7 +330,7 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
           }
           }
         } catch (e) {
-          console.warn("Firestore public search:", e);
+          console.warn("Supabase schools search:", e);
         }
       }
 

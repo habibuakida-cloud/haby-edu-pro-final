@@ -267,7 +267,7 @@ export const ReamPaperModule: React.FC<ReamPaperModuleProps> = ({
         const reams = bulkReamsMap[student.id] !== undefined ? bulkReamsMap[student.id] : 0;
         if (reams > 0) {
           await saveReamPaperRecord(schoolId, {
-            student_id: student.id,
+            student_id: String(student.id),
             student_name: student.name || student.fullName || 'Mwanafunzi',
             class: bulkClass,
             stream: bulkStream || 'Stream A',

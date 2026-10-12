@@ -26,7 +26,8 @@ import {
   MessageSquare,
   Smartphone,
   Send,
-  Trash2
+  Trash2,
+  Trophy
 } from 'lucide-react';
 import { 
   ExaminationRecord, 
@@ -49,6 +50,7 @@ import { StudentTransferModal } from './StudentTransferModal';
 import { AutoPromotionModal } from './AutoPromotionModal';
 import { HistoryAuditModal } from './HistoryAuditModal';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
+import { TopPerformersLeaderboard } from './TopPerformersLeaderboard';
 import { GenderSummary, formatGenderSummaryText } from '../common/GenderSummary';
 import { HabyEduProLogo } from '../common/HabyEduProLogo';
 
@@ -95,6 +97,7 @@ export const ExaminationRecordsView: React.FC<ExaminationRecordsViewProps> = ({
   onNavigateToNectaAnalyzer
 }) => {
   // Filters
+  const [activeSubView, setActiveSubView] = useState<'ledger' | 'leaderboard'>('ledger');
   const [selectedYear, setSelectedYear] = useState<string>('2026');
   const [selectedClass, setSelectedClass] = useState<string>('All');
   const [selectedStream, setSelectedStream] = useState<string>('All');
@@ -460,6 +463,17 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
 
           {/* Action Center Buttons */}
           <div className="flex items-center gap-2.5 flex-wrap">
+            {/* Top Performers Feature Button */}
+            <button
+              type="button"
+              onClick={() => setActiveSubView('leaderboard')}
+              className="px-4 py-2.5 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-500 hover:to-amber-700 text-slate-950 font-black rounded-xl text-xs shadow-md shadow-amber-500/20 flex items-center gap-2 transition cursor-pointer active:scale-[0.98] border border-amber-300"
+              title="Tazama orodha ya vinara wa mitihani (Top Performers Leaderboard)"
+            >
+              <Trophy className="w-4 h-4 fill-slate-950 text-slate-950" />
+              <span>Top Performers (Vinara)</span>
+            </button>
+
             {onNavigateToSms && (
               <button
                 type="button"
@@ -525,6 +539,58 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
         </div>
       </div>
 
+      {/* Sub-view switcher tabs (no-print) */}
+      <div className="no-print flex items-center justify-between bg-white p-2 rounded-2xl border border-slate-200 shadow-xs flex-wrap gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setActiveSubView('ledger')}
+            className={`px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-2 ${
+              activeSubView === 'ledger'
+                ? 'bg-[#1f4d8b] text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Examination Broadsheet Ledger</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveSubView('leaderboard')}
+            className={`px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-2 ${
+              activeSubView === 'leaderboard'
+                ? 'bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 shadow-xs font-black'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Trophy className="w-4 h-4 text-amber-500 fill-amber-500" />
+            <span>Top Performers Leaderboard (Vinara)</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-amber-400 text-slate-950">
+              NEW
+            </span>
+          </button>
+        </div>
+
+        <div className="text-xs text-slate-500 font-medium px-2 hidden sm:block">
+          {activeSubView === 'leaderboard' ? (
+            <span className="text-amber-800 font-bold">Ubao wa Vinara na Nafasi za Masomo (Live Ranking)</span>
+          ) : (
+            <span>Ledger ya Alama, Ufaulu na Madaraja ya NECTA</span>
+          )}
+        </div>
+      </div>
+
+      {activeSubView === 'leaderboard' ? (
+        <TopPerformersLeaderboard
+          examinationRecords={examinationRecords}
+          students={students}
+          schoolInfo={schoolInfo}
+          defaultYear={selectedYear !== 'All' ? selectedYear : '2026'}
+          defaultClass={selectedClass}
+          onBackToLedger={() => setActiveSubView('ledger')}
+        />
+      ) : (
+        <>
       {/* Control Panel: Filters, Search, View Toggles & Sorting */}
       <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 space-y-4">
         {/* Primary Filter Row */}
@@ -1300,6 +1366,8 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
           </div>
         </div>
       </div>
+      </>
+    )}
 
       {/* Bulk WhatsApp Modal */}
       {isBulkWhatsAppOpen && (

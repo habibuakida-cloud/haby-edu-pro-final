@@ -124,7 +124,7 @@ export const TimetableIntegrityReportModal: React.FC<TimetableIntegrityReportMod
   if (!isOpen && !inlineMode) return null;
 
   // Single Conflict Fix: Unassign teacher from specific assignment
-  const handleUnassignTeacher = (assignmentId: number) => {
+  const handleUnassignTeacher = (assignmentId: number | string) => {
     const updated = assignments.map(a => {
       if (a.id === assignmentId) {
         return { ...a, teacherId: undefined };
@@ -137,7 +137,7 @@ export const TimetableIntegrityReportModal: React.FC<TimetableIntegrityReportMod
   };
 
   // Single Conflict Fix: Remove duplicate assignment
-  const handleDeleteAssignment = (assignmentId: number) => {
+  const handleDeleteAssignment = (assignmentId: number | string) => {
     if (window.confirm('Are you sure you want to remove this redundant lesson slot?')) {
       const updated = assignments.filter(a => a.id !== assignmentId);
       onUpdateAssignments(updated);

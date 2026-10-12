@@ -968,10 +968,10 @@ export function autoResolveTimetableClashes(
 ): {
   updatedAssignments: TimetableAssignment[];
   resolvedCount: number;
-  changesLog: { assignmentId: number; description: string }[];
+  changesLog: { assignmentId: number | string; description: string }[];
 } {
   const resolved = assignments.map(a => ({ ...a }));
-  const changesLog: { assignmentId: number; description: string }[] = [];
+  const changesLog: { assignmentId: number | string; description: string }[] = [];
   let resolvedCount = 0;
 
   // 1. Group by day + period + teacherId

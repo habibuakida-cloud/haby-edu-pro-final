@@ -118,7 +118,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
       { id: 'results', label: 'Academic / Results Dashboard', description: 'Performance reports, report cards & student analysis' },
       { id: 'markentry', label: 'Mark Entry', description: 'Subject mark entry, teacher grading & USAL scores', badge: 'RESTORED' },
       { id: 'exams', label: 'Exams', description: 'Examination sessions, paper configs & grading thresholds' },
-      { id: 'examrecords', label: 'Exam Records', description: 'Master marksheets, yearly profiles & promotion audit' },
+      { id: 'examrecords', label: 'Exam Records & Top Performers', description: 'Master marksheets, Top Performers leaderboard, yearly profiles & promotion', badge: 'Leaderboard' },
       { id: 'nectaanalyzer', label: 'NECTA Analyzer', description: 'National exam statistics, divisions & GPA analysis' },
       { id: 'sittingplan', label: 'Sitting Plan', description: 'Automated exam hall seating arrangement & desk labels' },
       { id: 'evaluationanalysis', label: 'Evaluation Analysis', description: 'Subject teacher evaluation & class performance audit' },
@@ -148,7 +148,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     iconColor: 'text-rose-400',
     badgeBg: 'bg-rose-100 text-rose-800 border-rose-200',
     subModules: [
-      { id: 'attendance', label: 'Student Attendance', description: 'Daily rollcall with 3-day absence auto-flagging', badge: 'Auto-Flag' },
+      { id: 'attendance', label: 'Smart Attendance', description: 'Daily class rollcall & automatic monthly parent reports', badge: 'Smart' },
       { id: 'discipline', label: 'Discipline Management', description: 'Student conduct, warnings, suspensions & offenses' },
       { id: 'studentid', label: 'Student ID Generator', description: 'Generate & print student ID cards with QR codes' }
     ]

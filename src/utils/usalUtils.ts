@@ -4,7 +4,6 @@ import {
   NURSERY_SUBJECTS, 
   LOWER_PRIMARY_SUBJECTS, 
   UPPER_PRIMARY_SUBJECTS,
-  SUBJECT_LIST,
   PRIMARY_CLASSES,
   NURSERY_CLASSES
 } from '../constants/defaults';
@@ -12,13 +11,19 @@ import {
 /**
  * Determine curriculum subjects for a class name
  */
-export function getCurriculumSubjectsForClass(className: string, students: Student[] = []): string[] {
+export function getCurriculumSubjectsForClass(className: string = '', students: Student[] = []): string[] {
+  const safeClassName = typeof className === 'string' ? className.trim() : '';
+  const norm = safeClassName.toLowerCase();
+
   // 1. Gather subjects actually enrolled by students in this class
-  const classStudents = students.filter(s => s.className.toLowerCase() === className.toLowerCase());
+  const classStudents = (Array.isArray(students) ? students : []).filter(
+    s => s && typeof s.className === 'string' && s.className.trim().toLowerCase() === norm
+  );
+
   const enrolledSubjectSet = new Set<string>();
   classStudents.forEach(s => {
-    (s.subjects || []).forEach(sub => {
-      if (sub && sub.trim()) enrolledSubjectSet.add(sub.trim());
+    (s?.subjects || []).forEach(sub => {
+      if (typeof sub === 'string' && sub.trim()) enrolledSubjectSet.add(sub.trim());
     });
   });
 
@@ -27,14 +32,13 @@ export function getCurriculumSubjectsForClass(className: string, students: Stude
   }
 
   // 2. Default curriculum subjects based on class level
-  const norm = className.toLowerCase();
-  if (NURSERY_CLASSES.some(c => c.toLowerCase() === norm)) {
+  if (NURSERY_CLASSES.some(c => typeof c === 'string' && c.toLowerCase() === norm)) {
     return NURSERY_SUBJECTS;
   }
   if (norm.includes('standard 1') || norm.includes('standard 2') || norm.includes('std 1') || norm.includes('std 2')) {
     return LOWER_PRIMARY_SUBJECTS;
   }
-  if (PRIMARY_CLASSES.some(c => c.toLowerCase() === norm) || norm.includes('standard') || norm.includes('std')) {
+  if (PRIMARY_CLASSES.some(c => typeof c === 'string' && c.toLowerCase() === norm) || norm.includes('standard') || norm.includes('std')) {
     return UPPER_PRIMARY_SUBJECTS;
   }
 
@@ -60,28 +64,52 @@ export function getCurriculumSubjectsForClass(className: string, students: Stude
  */
 export function generateUsalRecordsForExam(
   exam: Exam,
-  students: Student[],
-  teachers: Teacher[],
+  students: Student[] = [],
+  teachers: Teacher[] = [],
   existingUsals: UsalRecord[] = []
 ): UsalRecord[] {
+  if (!exam || !exam.id) return [];
+
+  const safeStudents = Array.isArray(students) ? students : [];
+  const safeTeachers = Array.isArray(teachers) ? teachers : [];
+  const safeExistingUsals = Array.isArray(existingUsals) ? existingUsals : [];
+
   const existingMap = new Map<string, UsalRecord>();
-  existingUsals.forEach(r => existingMap.set(r.id, r));
+  safeExistingUsals.forEach(r => {
+    if (r && r.id) existingMap.set(r.id, r);
+  });
 
   const targetClasses = (exam.className === 'All' || !exam.className)
-    ? Array.from(new Set(students.map(s => s.className).filter(Boolean)))
-    : [exam.className];
+    ? Array.from(new Set(
+        safeStudents
+          .map(s => s?.className)
+          .filter((c): c is string => typeof c === 'string' && c.trim().length > 0)
+      ))
+    : [exam.className].filter((c): c is string => typeof c === 'string' && c.trim().length > 0);
+
+  if (targetClasses.length === 0) {
+    return [];
+  }
 
   const newRecords: UsalRecord[] = [];
 
   targetClasses.forEach(cName => {
-    const classStudents = students.filter(s => s.className.toLowerCase() === cName.toLowerCase());
-    const subjects = getCurriculumSubjectsForClass(cName, students);
-    const policy = getNectaPolicyForClass(cName);
+    if (!cName || typeof cName !== 'string') return;
+    const cNameClean = cName.trim();
+    const cNameLower = cNameClean.toLowerCase();
+
+    const classStudents = safeStudents.filter(
+      s => s && typeof s.className === 'string' && s.className.trim().toLowerCase() === cNameLower
+    );
+    const subjects = getCurriculumSubjectsForClass(cNameClean, safeStudents);
+    const policy = getNectaPolicyForClass(cNameClean);
 
     // Identify streams in this class
     const streamSet = new Set<string>();
     classStudents.forEach(s => {
-      const st = s.stream ? s.stream.replace(/^STREAM\s+/i, '').trim().toUpperCase() : 'A';
+      const st = (s?.stream && typeof s.stream === 'string')
+        ? s.stream.replace(/^STREAM\s+/i, '').trim().toUpperCase()
+        : 'A';
       streamSet.add(st || 'A');
     });
     if (streamSet.size === 0) streamSet.add('A');
@@ -89,9 +117,13 @@ export function generateUsalRecordsForExam(
     const streams = Array.from(streamSet);
 
     subjects.forEach(subject => {
+      if (!subject || typeof subject !== 'string') return;
+      const subClean = subject.trim();
+      const subLower = subClean.toLowerCase();
+
       streams.forEach(stream => {
-        const streamClean = stream.replace(/^STREAM\s+/i, '').trim().toUpperCase();
-        const recordId = `usal_${exam.id}_${cName.replace(/\s+/g, '_')}_${streamClean}_${subject.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const streamClean = (stream || 'A').replace(/^STREAM\s+/i, '').trim().toUpperCase();
+        const recordId = `usal_${exam.id}_${cNameClean.replace(/\s+/g, '_')}_${streamClean}_${subClean.replace(/[^a-zA-Z0-9]/g, '_')}`;
 
         // If record already exists, preserve its current data (especially sealed state and entered marks)
         if (existingMap.has(recordId)) {
@@ -99,36 +131,52 @@ export function generateUsalRecordsForExam(
         }
 
         // Find assigned teacher
-        const assignedTeacher = teachers.find(t => {
-          const teachesSubject = (t.subjects || []).some(s => 
-            s.toLowerCase() === subject.toLowerCase() ||
-            subject.toLowerCase().includes(s.toLowerCase()) ||
-            s.toLowerCase().includes(subject.toLowerCase())
-          );
+        const assignedTeacher = safeTeachers.find(t => {
+          if (!t) return false;
+          const teachesSubject = (t.subjects || []).some(s => {
+            if (!s || typeof s !== 'string') return false;
+            const sLower = s.toLowerCase();
+            return (
+              sLower === subLower ||
+              subLower.includes(sLower) ||
+              sLower.includes(subLower)
+            );
+          });
           if (!teachesSubject) return false;
 
           // Check stream if configured
-          if (t.teachingStreams && t.teachingStreams.length > 0) {
-            return t.teachingStreams.some(ts => 
-              ts.toLowerCase().includes(cName.toLowerCase()) && 
-              (ts.toUpperCase().includes(streamClean) || ts.includes(stream))
-            );
+          if (t.teachingStreams && Array.isArray(t.teachingStreams) && t.teachingStreams.length > 0) {
+            return t.teachingStreams.some(ts => {
+              if (!ts || typeof ts !== 'string') return false;
+              const tsLower = ts.toLowerCase();
+              return (
+                tsLower.includes(cNameLower) && 
+                (ts.toUpperCase().includes(streamClean) || ts.includes(stream))
+              );
+            });
           }
           return true;
         });
 
         // Filter candidates in this class & stream enrolled in this subject
         const candidatesInStream = classStudents.filter(s => {
-          const sStream = s.stream ? s.stream.replace(/^STREAM\s+/i, '').trim().toUpperCase() : 'A';
+          if (!s) return false;
+          const sStream = (s.stream && typeof s.stream === 'string')
+            ? s.stream.replace(/^STREAM\s+/i, '').trim().toUpperCase()
+            : 'A';
           const matchStream = sStream === streamClean || streamClean === 'ALL';
-          const enrolledInSubject = !s.subjects || s.subjects.length === 0 || 
-            s.subjects.some(sub => sub.toLowerCase() === subject.toLowerCase() || sub.includes(subject) || subject.includes(sub));
+          const enrolledInSubject = !s.subjects || !Array.isArray(s.subjects) || s.subjects.length === 0 || 
+            s.subjects.some(sub => {
+              if (!sub || typeof sub !== 'string') return false;
+              const curSubLower = sub.toLowerCase();
+              return curSubLower === subLower || curSubLower.includes(subLower) || subLower.includes(curSubLower);
+            });
           return matchStream && enrolledInSubject;
         });
 
         // Build candidate records
         const candidates: UsalCandidateRecord[] = candidatesInStream.map(st => {
-          const existingScore = st.marks?.[subject];
+          const existingScore = st?.marks?.[subClean] ?? st?.marks?.[subject];
           const hasScore = typeof existingScore === 'number' && !isNaN(existingScore);
           const totalMarks = hasScore ? Math.min(100, Math.round(existingScore)) : 0;
           // Split into CA (30%) and Exam (70%) if total exists
@@ -137,29 +185,29 @@ export function generateUsalRecordsForExam(
           const gradeInfo = getGradeForScore(totalMarks, policy);
 
           return {
-            studentId: st.id,
-            regNo: st.regNo,
-            studentName: st.name,
-            gender: st.gender || 'Unknown',
-            stream: st.stream || streamClean,
+            studentId: st?.id || Date.now(),
+            regNo: st?.regNo || '',
+            studentName: st?.name || 'Mwanafunzi',
+            gender: st?.gender || 'Unknown',
+            stream: st?.stream || streamClean,
             caMarks,
             examMarks,
             totalMarks,
-            grade: gradeInfo.grade as any,
-            points: gradeInfo.points,
-            remarks: gradeInfo.remark
+            grade: (gradeInfo?.grade || 'F') as any,
+            points: gradeInfo?.points ?? 5,
+            remarks: gradeInfo?.remark || 'Poor'
           };
         });
 
         const newUsal: UsalRecord = {
           id: recordId,
           examId: exam.id,
-          examName: exam.name,
+          examName: exam.name || 'Mtihani',
           academicYear: '2026',
           term: 'Term 1',
-          className: cName,
+          className: cNameClean,
           stream: streamClean,
-          subject,
+          subject: subClean,
           assignedTeacherId: assignedTeacher?.id,
           assignedTeacherName: assignedTeacher?.name,
           isSealed: false,
@@ -180,22 +228,33 @@ export function generateUsalRecordsForExam(
  * Ensures all registered exams have USAL records for all subjects
  */
 export function ensureUsalRecordsForAllExams(
-  exams: Exam[],
-  students: Student[],
-  teachers: Teacher[],
+  exams: Exam[] = [],
+  students: Student[] = [],
+  teachers: Teacher[] = [],
   existingUsals: UsalRecord[] = []
 ): UsalRecord[] {
-  let combined = [...existingUsals];
-  const existingIds = new Set(existingUsals.map(u => u.id));
+  if (!Array.isArray(exams) || exams.length === 0) return existingUsals || [];
+
+  const safeStudents = Array.isArray(students) ? students : [];
+  const safeTeachers = Array.isArray(teachers) ? teachers : [];
+  const safeExistingUsals = Array.isArray(existingUsals) ? existingUsals : [];
+
+  let combined = [...safeExistingUsals];
+  const existingIds = new Set(safeExistingUsals.map(u => u?.id).filter(Boolean));
 
   exams.forEach(exam => {
-    const generated = generateUsalRecordsForExam(exam, students, teachers, combined);
-    generated.forEach(rec => {
-      if (!existingIds.has(rec.id)) {
-        existingIds.add(rec.id);
-        combined.push(rec);
-      }
-    });
+    if (!exam || !exam.id) return;
+    try {
+      const generated = generateUsalRecordsForExam(exam, safeStudents, safeTeachers, combined);
+      generated.forEach(rec => {
+        if (rec && rec.id && !existingIds.has(rec.id)) {
+          existingIds.add(rec.id);
+          combined.push(rec);
+        }
+      });
+    } catch (err) {
+      console.warn(`[USAL] Could not generate records for exam ${exam.id}:`, err);
+    }
   });
 
   return combined;

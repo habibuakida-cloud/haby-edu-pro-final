@@ -45,7 +45,7 @@ export const EvaluationAnalysisView: React.FC<EvaluationAnalysisViewProps> = ({
         endDate = '2023-03-17';
       }
 
-      // 2. Fetch period attendance from Firestore for selected class and date range
+      // 2. Fetch period attendance from Supabase for selected class and date range
       const attendance = await getWeeklyAttendance(schoolId, startDate, endDate, selectedClass);
 
       // Group by Subject + Teacher Name

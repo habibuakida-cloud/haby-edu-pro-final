@@ -661,7 +661,7 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
     }
   };
 
-  // SAVE TO SUPABASE/FIRESTORE TABLE "exam_records"
+  // SAVE TO SUPABASE TABLE "exam_records"
   const handleSaveToExamRecords = async () => {
     if (!parsedData.length) {
       alert('Hakuna data ya kuhifadhi! Chakata data kwanza.');

@@ -32,6 +32,7 @@ import { GenderSummary } from './common/GenderSummary';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
 import { AttendanceHistoryDashboard } from './Attendance/AttendanceHistoryDashboard';
 import { AttendanceAuditDashboard } from './Attendance/AttendanceAuditDashboard';
+import { SmartAttendanceModule } from './Attendance/SmartAttendanceModule';
 
 interface AttendanceViewProps {
   students: Student[];
@@ -77,7 +78,7 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
     return students.length > 0 ? students[0].id : 1;
   });
 
-  const [activeTab, setActiveTab] = useState<'daily_rollcall' | 'attendance_history' | 'attendance_audit' | 'summary' | 'subjects' | 'weekly' | 'official_slip'>('daily_rollcall');
+  const [activeTab, setActiveTab] = useState<'smart_attendance' | 'monthly_parent_reports' | 'daily_rollcall' | 'attendance_history' | 'attendance_audit' | 'summary' | 'subjects' | 'weekly' | 'official_slip'>('smart_attendance');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedClass, setSelectedClass] = useState<string>('all');
   const [selectedStream, setSelectedStream] = useState<string>('all');
@@ -119,11 +120,16 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
   // Filtered students matching Search, Class and Stream (same as Registration filter)
   const filteredStudents = useMemo(() => {
-    return students.filter(s => {
-      const matchSearch = !searchQuery ||
-        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.regNo.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchClass = selectedClass === 'all' || s.className.toLowerCase() === selectedClass.toLowerCase();
+    const qLower = (searchQuery || '').toLowerCase();
+    const selClassLower = (selectedClass || 'all').toLowerCase();
+    return (students || []).filter(s => {
+      if (!s) return false;
+      const sName = (s.name || '').toLowerCase();
+      const sReg = (s.regNo || '').toLowerCase();
+      const sClass = (s.className || '').toLowerCase();
+
+      const matchSearch = !qLower || sName.includes(qLower) || sReg.includes(qLower);
+      const matchClass = selClassLower === 'all' || sClass === selClassLower;
       const matchStream = selectedStream === 'all' ||
         (s.stream ? (
           s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === selectedStream.toUpperCase() ||
@@ -268,8 +274,11 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
   // Filter students for Daily Roll Call by class and stream
   const rollCallStudents = useMemo(() => {
-    return students.filter(s => {
-      const matchClass = rollCallClass === 'all' || s.className.toLowerCase() === rollCallClass.toLowerCase();
+    const rcClassLower = (rollCallClass || 'all').toLowerCase();
+    return (students || []).filter(s => {
+      if (!s) return false;
+      const sClass = (s.className || '').toLowerCase();
+      const matchClass = rcClassLower === 'all' || sClass === rcClassLower;
       const matchStream = rollCallStream === 'all' ||
         (s.stream ? (
           s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === rollCallStream.toUpperCase() ||
@@ -596,6 +605,19 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       <div className="flex flex-wrap gap-1.5 border-b border-slate-200 pb-2">
         <button
           type="button"
+          onClick={() => setActiveTab('smart_attendance')}
+          className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+            activeTab === 'smart_attendance' || activeTab === 'monthly_parent_reports'
+              ? 'bg-[#1f4d8b] text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 hover:text-slate-900 border border-slate-200'
+          }`}
+        >
+          <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+          <span>Smart Attendance &amp; Parent Reports</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('daily_rollcall')}
           className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
             activeTab === 'daily_rollcall'
@@ -685,6 +707,19 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
           <span>Official Attendance Slip (Printable)</span>
         </button>
       </div>
+
+      {/* TAB: SMART ATTENDANCE & PARENT REPORTS */}
+      {(activeTab === 'smart_attendance' || activeTab === 'monthly_parent_reports') && (
+        <SmartAttendanceModule
+          students={students}
+          schoolInfo={schoolInfo}
+          currentUser={currentUser}
+          dailyAttendance={dailyAttendance}
+          onSaveDailyAttendance={onSaveDailyAttendance}
+          onNavigateToResults={onNavigateToResults}
+          onNavigateToDiscipline={onNavigateToDiscipline}
+        />
+      )}
 
       {/* TAB: ATTENDANCE HISTORY DASHBOARD & QR CALENDAR */}
       {activeTab === 'attendance_history' && (

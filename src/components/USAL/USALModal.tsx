@@ -96,7 +96,7 @@ export const USALModal: React.FC<USALModalProps> = ({
 
   const policy = currentRecord ? getNectaPolicyForClass(currentRecord.className) : null;
 
-  const handleScoreChange = (studentId: number, field: 'ca' | 'exam', value: string) => {
+  const handleScoreChange = (studentId: number | string, field: 'ca' | 'exam', value: string) => {
     if (currentRecord?.isSealed && isTeacher) {
       alert("This USAL ledger is SEALED. Marks cannot be edited without authorization.");
       return;
@@ -187,8 +187,11 @@ export const USALModal: React.FC<USALModalProps> = ({
   // Calculate CSEE / CPS Summary for all students in this class
   const classCandidatesForCPS = useMemo(() => {
     if (!currentRecord) return [];
-    const targetClass = currentRecord.className;
-    const matchingStudents = students.filter(s => s.className.toLowerCase() === targetClass.toLowerCase());
+    const targetClass = currentRecord.className || '';
+    const targetClassLower = targetClass.toLowerCase();
+    const matchingStudents = (students || []).filter(
+      s => s && typeof s.className === 'string' && s.className.toLowerCase() === targetClassLower
+    );
 
     return matchingStudents.map((st, idx) => {
       const res = calculateNectaLevelResults(st.marks || {}, targetClass);

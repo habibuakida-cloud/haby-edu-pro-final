@@ -52,7 +52,7 @@ import { HabyEduProLogo } from './common/HabyEduProLogo';
 import { supabase } from '../lib/supabaseClient';
 import { PhoneInputPlugin } from './common/PhoneInputPlugin';
 import { StudentPhoneBadge } from './common/StudentPhoneBadge';
-import { StudentCsvImportModal } from './Students/StudentCsvImportModal';
+import { StudentBulkImportModal } from './Students/StudentBulkImportModal';
 import { StudentQrScannerModal } from './Students/StudentQrScannerModal';
 import { StudentDashboardModal } from './Students/StudentDashboardModal';
 import { BulkPromotionWizard } from './Students/BulkPromotionWizard';
@@ -1227,11 +1227,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           <button
             type="button"
             onClick={() => setIsCsvImportModalOpen(true)}
-            className="px-3.5 py-2 text-xs font-bold text-purple-700 bg-purple-50 hover:bg-purple-100 rounded-lg flex items-center gap-1.5 transition-colors border border-purple-200 cursor-pointer"
-            title="Import Students from CSV file with phone numbers"
+            className="px-3.5 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg flex items-center gap-1.5 transition-colors border border-emerald-200 cursor-pointer shadow-xs"
+            title="Bulk Import Students from Excel (.xlsx) or CSV with column mapping & validation"
           >
-            <Upload className="w-4 h-4 text-purple-600" />
-            <span>Import CSV</span>
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>Import Excel / CSV</span>
           </button>
           <button
             type="button"
@@ -1572,10 +1572,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               <button
                 type="button"
                 onClick={() => setIsCsvImportModalOpen(true)}
-                className="px-4 py-2.5 text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer"
+                className="px-4 py-2.5 text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-300 hover:bg-emerald-100 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer"
               >
-                <Upload className="w-4 h-4 text-purple-600" />
-                <span>Import CSV (Batch with Phone)</span>
+                <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                <span>Bulk Import (Excel / CSV)</span>
               </button>
 
               {/* Quick tip banner for multiple deletion after registration */}
@@ -3251,8 +3251,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         </div>
       )}
 
-      {/* Official Student CSV Import Modal with Phone Validation */}
-      <StudentCsvImportModal
+      {/* Official Student Bulk Excel & CSV Import Modal with Column Mapping & Validation */}
+      <StudentBulkImportModal
         isOpen={isCsvImportModalOpen}
         onClose={() => setIsCsvImportModalOpen(false)}
         onImportStudents={newBatch => {
@@ -3262,10 +3262,11 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             newBatch.forEach(s => onAddStudent(s));
           }
           setActiveTab('register_list');
-          setStudentCreatedNotice(`Imported ${newBatch.length} students successfully with verified phone numbers!`);
+          setStudentCreatedNotice(`Wanafunzi ${newBatch.length} wameingizwa kikamilifu kwenye database na kuhakikiwa!`);
           setTimeout(() => setStudentCreatedNotice(null), 6000);
         }}
         existingStudentsCount={students.length}
+        existingStudents={students}
         schoolInfo={schoolInfo}
       />
 

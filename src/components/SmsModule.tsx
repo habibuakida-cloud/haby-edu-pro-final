@@ -324,7 +324,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
       
       setNotification({
         type: 'success',
-        message: `Imefanikiwa ku-re-process malipo ${retriedCount} yaliyoshindwa kutoka Firestore na Supabase!`
+        message: `Imefanikiwa ku-re-process malipo ${retriedCount} yaliyoshindwa kutoka Supabase!`
       });
     } catch (err) {
       console.error("Error retrying failed payments:", err);

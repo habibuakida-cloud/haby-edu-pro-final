@@ -154,7 +154,7 @@ export default function App() {
   const debounceTimer = useRef<NodeJS.Timeout | undefined>(undefined);
   const [supabaseStudentCount, setSupabaseStudentCount] = useState<number | null>(null);
 
-  // Helper function to persist school state snapshot to Firestore & Supabase
+  // Helper function to persist school state snapshot to Supabase
   const saveSchoolDataToSupabase = async (schId: string, snapData: any) => {
     if (!schId) return;
     try {
@@ -207,7 +207,7 @@ export default function App() {
     }
   };
 
-  // Sync with Firestore & Real-Time Single Source of Truth
+  // Sync with Supabase & Real-Time Single Source of Truth
   useEffect(() => {
     if (!userAccount?.schoolId || userAccount.schoolId === 'PENDING') {
       setDataLoading(false);
@@ -258,7 +258,7 @@ export default function App() {
       }
     }).catch(e => console.warn("Initial IDB cache load error:", e));
 
-    // 0. Primary Database Load: Seamless Hybrid Sync (Supabase Relational + Firestore Realtime)
+    // 0. Primary Database Load: Pure Supabase Sync (Relational + Snapshot Engine)
     const loadFromDatabase = async (isInitialBoot = false) => {
       console.log("Loading unified single source of truth for school:", schoolId);
       const safetyTimer = setTimeout(() => {
@@ -266,8 +266,8 @@ export default function App() {
       }, 3000);
 
       try {
-        // Fetch in parallel from Firestore and Supabase with safe async try/catch blocks
-        const [firestoreData, studRes, teachRes, examRes, classRes, perRes, subjRes] = await Promise.all([
+        // Fetch in parallel from Supabase core tables and school_data snapshot
+        const [supabaseDataSnapshot, studRes, teachRes, examRes] = await Promise.all([
           getSchoolData(schoolId).catch(() => null),
           (async () => {
             try {
@@ -275,7 +275,6 @@ export default function App() {
               if (res.error) console.warn("Students fetch error:", res.error.message);
               return res;
             } catch (err: any) {
-              console.warn("Students table exception:", err?.message || err);
               return { data: null, error: err };
             }
           })(),
@@ -285,7 +284,6 @@ export default function App() {
               if (res.error) console.warn("Teachers fetch error:", res.error.message);
               return res;
             } catch (err: any) {
-              console.warn("Teachers table exception:", err?.message || err);
               return { data: null, error: err };
             }
           })(),
@@ -295,64 +293,19 @@ export default function App() {
               if (res.error) console.warn("Exams fetch error:", res.error.message);
               return res;
             } catch (err: any) {
-              console.warn("Exams table exception:", err?.message || err);
-              return { data: null, error: err };
-            }
-          })(),
-          (async () => {
-            try {
-              const res = await supabase.from('classes').select('*').eq('school_id', schoolId);
-              if (res.error && !res.error.message?.includes('Could not find the table')) {
-                console.warn("Classes fetch notice:", res.error.message);
-              }
-              return res;
-            } catch (err: any) {
-              return { data: null, error: err };
-            }
-          })(),
-          (async () => {
-            try {
-              const res = await supabase.from('periods').select('*').eq('school_id', schoolId).order('start_time', { ascending: true });
-              if (res.error && !res.error.message?.includes('Could not find the table')) {
-                console.warn("Periods fetch notice:", res.error.message);
-              }
-              return res;
-            } catch (err: any) {
-              return { data: null, error: err };
-            }
-          })(),
-          (async () => {
-            try {
-              const res = await supabase.from('subjects').select('*').eq('school_id', schoolId);
-              if (res.error && !res.error.message?.includes('Could not find the table')) {
-                console.warn("Subjects fetch notice:", res.error.message);
-              }
-              return res;
-            } catch (err: any) {
               return { data: null, error: err };
             }
           })(),
         ]);
 
         // Process Supabase core tables
-        console.log("Supabase fetch results:", { studRes, teachRes, examRes, classRes, perRes, subjRes });
-        
         const supaStudents = (studRes?.data || []).map((s: any, idx: number) => fromSupabaseStudent(s, idx));
         const supaTeachers = (teachRes?.data || []).map((t: any, idx: number) => fromSupabaseTeacher(t, idx));
         const supaExams = (examRes?.data || []).map((e: any, idx: number) => fromSupabaseExam(e, idx));
-        const supaClasses = classRes?.data || [];
-        const supaPeriods = (perRes?.data || []).map((p: any, idx: number) => ({
-          id: p.id || `period-${idx + 1}`,
-          name: p.name || `Period ${idx + 1}`,
-          start: p.start_time || '07:30',
-          end: p.end_time || '08:10',
-          isBreak: Boolean(p.is_break),
-          isAssembly: false,
-          isSports: false,
-          isReligion: false
-        }));
+        const supaClasses = [];
+        const supaPeriods = [];
 
-        // Fetch users from Supabase users and authorized_staff tables
+        // Fetch users from Supabase users table
         try {
           const userMap = new Map<string, any>();
 
@@ -361,34 +314,7 @@ export default function App() {
             if (supaUsers && !uErr) {
               supaUsers.forEach((u: any) => userMap.set(u.id, u));
             }
-          } catch (e1) {
-            console.warn("Could not query users:", e1);
-          }
-
-          try {
-            const { data: supaStaff, error: sErr } = await supabase.from('authorized_staff').select('*').eq('school_id', schoolId);
-            if (supaStaff && !sErr) {
-              supaStaff.forEach((sd: any) => {
-                if (!userMap.has(sd.id)) {
-                  userMap.set(sd.id, {
-                    id: sd.id,
-                    uid: sd.id,
-                    email: sd.auth_email || sd.email,
-                    fullName: sd.staff_identity || sd.full_name,
-                    displayName: sd.staff_identity || sd.full_name,
-                    role: sd.role || 'HEADMASTER',
-                    schoolId,
-                    school_id: schoolId,
-                    password: sd.assigned_password,
-                    assignedSubjects: sd.assigned_subjects || [],
-                    isActive: true
-                  });
-                }
-              });
-            }
-          } catch (e2) {
-            console.warn("Could not query authorized_staff:", e2);
-          }
+          } catch (e1) {}
 
           if (userMap.size > 0) {
             setUsers(Array.from(userMap.values()) as UserAccount[]);
@@ -397,7 +323,7 @@ export default function App() {
           console.warn("Could not load users from Supabase:", uErr);
         }
 
-        const rawSchoolData = (firestoreData || {}) as Record<string, any>;
+        const rawSchoolData = (supabaseDataSnapshot || {}) as Record<string, any>;
         const remoteData = { ...rawSchoolData } as Partial<AppData>;
         
         setData(prev => {
@@ -419,6 +345,7 @@ export default function App() {
             const newStreamEntries = supaClasses
               .filter((c: any) => !existingClassNames.has(c.name))
               .map((c: any) => ({
+                id: Date.now() + Math.floor(Math.random() * 1000),
                 className: c.name,
                 level: c.level || 'CSEE',
                 streams: c.stream ? [c.stream] : ['STREAM A', 'STREAM B']
@@ -631,13 +558,13 @@ export default function App() {
       // Also save the entire school data state in Supabase school_data snapshot
       await saveSchoolDataToSupabase(schoolId, data);
 
-      // 2. Now PULL latest remote data from Supabase to verify sync
+      // 2. Now PULL latest remote data from Firebase Firestore to verify sync
       const [studRes, recRes, teachRes, examRes, parentRes, psRes, schoolDataRes] = await Promise.all([
-        supabase.from('students').select('*').eq('school_id', schoolId),
-        supabase.from('exam_records').select('*').eq('school_id', schoolId),
-        supabase.from('teachers').select('*').eq('school_id', schoolId),
-        supabase.from('exams').select('*').eq('school_id', schoolId),
-        supabase.from('parents').select('*').eq('school_id', schoolId),
+        supabase.from('students').select('*'),
+        supabase.from('exam_records').select('*'),
+        supabase.from('teachers').select('*'),
+        supabase.from('exams').select('*'),
+        supabase.from('parents').select('*'),
         supabase.from('parent_students').select('*'),
         supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1)
       ]);
@@ -675,7 +602,7 @@ export default function App() {
       });
 
       setIsCloudSynced(true);
-      alert(`Orodha imesawazishwa na Wingu kikamilifu! Wanafunzi ${data.students.length} wamerushwa kwenye Supabase.`);
+      alert(`Orodha imesawazishwa na Firebase Firestore kikamilifu! Wanafunzi ${data.students.length} wamehifadhiwa kwenye wingu.`);
     } catch (err: any) {
       console.error("Force sync error:", err);
       alert("Hitilafu wakati wa kusawazisha na Wingu: " + (err.message || err));
@@ -796,16 +723,20 @@ export default function App() {
 
   // Auto-ensure USAL records exist for all registered exams
   useEffect(() => {
-    if (data.exams && data.exams.length > 0 && data.students && data.students.length > 0) {
-      const ensured = ensureUsalRecordsForAllExams(data.exams, data.students, data.teachers, data.usalRecords || []);
-      if (ensured.length > (data.usalRecords || []).length) {
-        setData(prev => ({ ...prev, usalRecords: ensured }));
-        if (userAccount?.schoolId) {
-          updateRemoteData({ usalRecords: ensured });
+    try {
+      if (Array.isArray(data.exams) && data.exams.length > 0 && Array.isArray(data.students) && data.students.length > 0) {
+        const ensured = ensureUsalRecordsForAllExams(data.exams, data.students, data.teachers || [], data.usalRecords || []);
+        if (ensured.length > (data.usalRecords || []).length) {
+          setData(prev => ({ ...prev, usalRecords: ensured }));
+          if (userAccount?.schoolId) {
+            updateRemoteData({ usalRecords: ensured });
+          }
         }
       }
+    } catch (err) {
+      console.warn("[App] Error in auto-ensuring USAL records:", err);
     }
-  }, [data.exams, data.students.length, data.teachers.length]);
+  }, [data.exams, data.students?.length, data.teachers?.length]);
 
   // Auto-upgrade school name for Super Admin to 'HabyEduPro3A'
   useEffect(() => {
@@ -950,12 +881,7 @@ export default function App() {
     const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
     console.log("Current school_id (handleAddStudent):", schoolId);
 
-    // Ensure we assign a valid UUID
-    const isUuid = typeof student.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(student.id);
-    const validId = isUuid ? student.id : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-      const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-      return v.toString(16);
-    });
+    const validId = typeof student.id === 'number' ? student.id : (Number(student.id) || Date.now());
 
     const studentWithId = {
       ...student,
@@ -1007,7 +933,7 @@ export default function App() {
       });
       return {
         ...s,
-        id: validId,
+        id: Number(s.id) || (Date.now() + Math.floor(Math.random() * 10000)),
         school_id: schoolId
       };
     });

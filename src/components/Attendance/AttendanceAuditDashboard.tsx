@@ -118,11 +118,14 @@ export const AttendanceAuditDashboard: React.FC<AttendanceAuditDashboardProps> =
 
   // Filtered student list
   const filteredStudents = useMemo(() => {
-    return students.filter(s => {
-      const matchClass = selectedClass === 'all' || s.className.toLowerCase() === selectedClass.toLowerCase();
-      const matchSearch = !searchQuery || 
-        s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        s.regNo.toLowerCase().includes(searchQuery.toLowerCase());
+    const selClassLower = (selectedClass || 'all').toLowerCase();
+    const qLower = (searchQuery || '').toLowerCase();
+    return (students || []).filter(s => {
+      if (!s) return false;
+      const matchClass = selClassLower === 'all' || (s.className || '').toLowerCase() === selClassLower;
+      const matchSearch = !qLower || 
+        (s.name || '').toLowerCase().includes(qLower) ||
+        (s.regNo || '').toLowerCase().includes(qLower);
       return matchClass && matchSearch;
     });
   }, [students, selectedClass, searchQuery]);
@@ -243,9 +246,10 @@ export const AttendanceAuditDashboard: React.FC<AttendanceAuditDashboardProps> =
 
       // Class summary for this date
       let classEarly = 0, classOnTime = 0, classLate = 0;
-      const cohort = selectedClass === 'all' 
-        ? students 
-        : students.filter(s => s.className.toLowerCase() === selectedClass.toLowerCase());
+      const selClassLower = (selectedClass || 'all').toLowerCase();
+      const cohort = selClassLower === 'all' 
+        ? (students || []) 
+        : (students || []).filter(s => (s?.className || '').toLowerCase() === selClassLower);
 
       if (!isWeekend) {
         cohort.forEach(st => {
@@ -330,8 +334,9 @@ export const AttendanceAuditDashboard: React.FC<AttendanceAuditDashboardProps> =
 
   // Scans for Selected Audit Date (Daily view)
   const scansForAuditDate = useMemo(() => {
-    return students
-      .filter(s => selectedClass === 'all' || s.className.toLowerCase() === selectedClass.toLowerCase())
+    const selClassLower = (selectedClass || 'all').toLowerCase();
+    return (students || [])
+      .filter(s => selClassLower === 'all' || (s?.className || '').toLowerCase() === selClassLower)
       .map(s => getScanRecordForStudentOnDate(s, selectedAuditDate))
       .filter((s): s is QrScanAttendanceRecord => s !== null);
   }, [students, selectedClass, selectedAuditDate]);

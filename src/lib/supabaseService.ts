@@ -1,136 +1,124 @@
-import { supabase, resilientUpsert } from './supabaseClient';
+export * from './supabaseClient';
+import { supabase, DEFAULT_PRIMARY_SCHOOL_ID, getCurrentSchoolId } from './supabaseClient';
 
-export const saveSchoolData = async (schoolId: string, data: any) => {
-  if (!schoolId) return;
-  // Always persist locally first so state is never lost even if remote tables are not yet migrated
+const LOCAL_STORAGE_KEY_PREFIX = 'haby_school_data_';
+
+const getCachedSchoolData = (schoolId: string): any => {
+  if (typeof window === 'undefined') return null;
   try {
+    const raw =
+      localStorage.getItem(`${LOCAL_STORAGE_KEY_PREFIX}${schoolId}`) ||
+      localStorage.getItem(`haby_school_data_snapshot_${schoolId}`);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedSchoolData = (schoolId: string, data: any): void => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(`${LOCAL_STORAGE_KEY_PREFIX}${schoolId}`, JSON.stringify(data));
     localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(data));
-    localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(data));
-  } catch (e) {}
+  } catch {}
+};
 
+/**
+ * Fetch school data record from Supabase 'school_data' table
+ */
+export const getSchoolData = async (schoolId: string = DEFAULT_PRIMARY_SCHOOL_ID): Promise<any> => {
+  const cached = getCachedSchoolData(schoolId);
   try {
-    const payload = {
-      id: schoolId,
-      school_id: schoolId,
-      ...data,
-      updated_at: new Date().toISOString()
-    };
-    const { error } = await resilientUpsert('school_data', payload, { onConflict: 'school_id' });
-    if (error) {
-      console.warn("school_data upsert notice:", error.message);
-    }
-  } catch (err: any) {
-    console.warn("school_data upsert exception:", err?.message || err);
-  }
-};
-
-export const getSchoolData = async (schoolId: string) => {
-  if (!schoolId) return null;
-  let remoteData = null;
-  try {
-    const { data, error } = await supabase.from('school_data').select('*').eq('school_id', schoolId).limit(1);
-    if (!error && data && data.length > 0) {
-      remoteData = data[0];
-    }
-  } catch (err: any) {}
-
-  if (remoteData) return remoteData;
-
-  // Seamless fallback to locally preserved snapshot
-  try {
-    const local = localStorage.getItem(`haby_school_data_snapshot_${schoolId}`) || localStorage.getItem(`haby_school_data_${schoolId}`);
-    if (local) return JSON.parse(local);
-  } catch (e) {}
-
-  return null;
-};
-
-export const measureFirestoreLatency = async (schoolId: string): Promise<{ latencyMs: number; ok: boolean; error?: string }> => {
-  const start = performance.now();
-  try {
-    const { error } = await supabase.from('schools').select('id').limit(1);
-    const end = performance.now();
-    return { latencyMs: Math.round(end - start), ok: !error };
-  } catch (err: any) {
-    return { latencyMs: -1, ok: false, error: err?.message || 'Supabase connection error' };
-  }
-};
-
-// Subscription isn't directly supported by Supabase client in the same way as onSnapshot without setting up real-time in Supabase.
-// For now, I'll return a no-op function and console.warn
-export const subscribeSchoolData = (schoolId: string, callback: (data: any) => void) => {
-  console.warn("Real-time subscription not yet fully implemented for Supabase migration.");
-  return () => {};
-};
-
-export const markPeriodAttendance = async (schoolId: string, record: any) => {
-  const recordId = `${schoolId}_${record.date}_${record.class_name}_${record.stream}_${record.period_number}`;
-  await supabase.from('period_attendance').upsert({
-    id: recordId,
-    ...record,
-    school_id: schoolId,
-    updated_at: new Date().toISOString()
-  }, { onConflict: 'id' });
-};
-
-export const getPeriodAttendance = async (schoolId: string, date: string, className: string) => {
-  const { data, error } = await supabase.from('period_attendance')
-    .select('*')
-    .eq('school_id', schoolId)
-    .eq('date', date)
-    .eq('class_name', className);
-  return error ? [] : data;
-};
-
-export const getWeeklyAttendance = async (schoolId: string, startDate: string, endDate: string, className: string) => {
-  const { data, error } = await supabase.from('period_attendance')
-    .select('*')
-    .eq('school_id', schoolId)
-    .eq('class_name', className)
-    .gte('date', startDate)
-    .lte('date', endDate);
-  return error ? [] : data;
-};
-
-export interface GatePassLogEntry {
-  id?: string;
-  studentId?: string | number;
-  studentName: string;
-  regNo: string;
-  className: string;
-  stream?: string;
-  photo?: string;
-  type: 'CHECK_IN' | 'CHECK_OUT';
-  reason: string;
-  officerName: string;
-  timestamp: string;
-  schoolId: string;
-  status: 'VALID' | 'INACTIVE';
-  feeStatus: 'PAID' | 'WARNING';
-}
-
-export const saveGatePassLog = async (log: GatePassLogEntry) => {
-  try {
-    // Save to Supabase
-    await supabase.from('gate_pass_logs').insert({
-      ...log,
-      school_id: log.schoolId,
-      created_at: log.timestamp || new Date().toISOString()
-    });
-  } catch (err) {
-    console.warn("Error saving gate pass log to Supabase:", err);
-  }
-};
-
-export const getGatePassLogs = async (schoolId: string, limitCount = 50): Promise<GatePassLogEntry[]> => {
-  try {
-    const { data, error } = await supabase.from('gate_pass_logs')
+    const { data, error } = await supabase
+      .from('school_data')
       .select('*')
       .eq('school_id', schoolId)
-      .order('created_at', { ascending: false })
-      .limit(limitCount);
-    return error ? [] : (data as GatePassLogEntry[]);
-  } catch (e) {
-    return [];
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[Supabase getSchoolData] query warning:', error.message);
+      return cached || {};
+    }
+
+    if (data) {
+      setCachedSchoolData(schoolId, data);
+      return data;
+    }
+  } catch (err) {
+    console.warn('[Supabase getSchoolData] exception:', err);
   }
+  return cached || {};
+};
+
+/**
+ * Save school data into Supabase 'school_data' table
+ */
+export const saveSchoolData = async (schoolId: string, payload: any): Promise<{ data: any; error: any }> => {
+  const cleanPayload = {
+    ...payload,
+    school_id: schoolId || getCurrentSchoolId(),
+    id: schoolId || getCurrentSchoolId(),
+    updated_at: new Date().toISOString()
+  };
+
+  // Always update local cache immediately for zero latency
+  setCachedSchoolData(schoolId, cleanPayload);
+
+  try {
+    const { data, error } = await supabase
+      .from('school_data')
+      .upsert(cleanPayload, { onConflict: 'school_id' });
+
+    if (error) {
+      console.warn('[Supabase saveSchoolData] error:', error.message);
+      return { data: cleanPayload, error };
+    }
+
+    return { data, error: null };
+  } catch (err: any) {
+    console.warn('[Supabase saveSchoolData] exception:', err);
+    return { data: cleanPayload, error: err };
+  }
+};
+
+/**
+ * Real-time subscription to Supabase 'school_data' changes
+ */
+export const subscribeSchoolData = (schoolId: string, onUpdate?: (data: any) => void) => {
+  try {
+    const channel = supabase
+      .channel(`school_data_${schoolId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'school_data',
+          filter: `school_id=eq.${schoolId}`,
+        },
+        (payload) => {
+          if (payload.new && onUpdate) {
+            setCachedSchoolData(schoolId, payload.new);
+            onUpdate(payload.new);
+          }
+        }
+      )
+      .subscribe();
+
+    return {
+      unsubscribe: () => {
+        supabase.removeChannel(channel);
+      }
+    };
+  } catch (err) {
+    return {
+      unsubscribe: () => {}
+    };
+  }
+};
+
+export default {
+  getSchoolData,
+  saveSchoolData,
+  subscribeSchoolData,
 };
