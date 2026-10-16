@@ -16,7 +16,8 @@ import {
   Calendar, 
   FileSpreadsheet,
   Layers,
-  ShieldAlert
+  ShieldAlert,
+  Sparkles
 } from 'lucide-react';
 import { ReamPaperRecord, Student, UserAccount, SchoolInfo, StreamSetting } from '../../types';
 import { 

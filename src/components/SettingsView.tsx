@@ -13,13 +13,18 @@ import {
 } from '../types';
 import { PeriodSettingsManager } from './Timetable/PeriodSettingsManager';
 import { ClassStreamManagerModal } from './common/ClassStreamManagerModal';
-import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
+
+import { useAppTheme } from './common/ThemeCustomizerModal';
 import { INITIAL_STREAM_SETTINGS } from '../constants/defaults';
 import { normalizeStreamName, getNextLogicalStream } from '../utils/classStreamUtils';
-import { supabase } from '../lib/supabaseClient';
+import { db } from '../lib/firebaseClient';
+import { supabase } from '../lib/dbClient';
+import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
 import { useAuth } from '../context/AuthContext';
 import { SUBJECT_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
-import { saveSchoolData } from '../lib/supabaseService';
+import { saveSchoolData } from '../lib/dataService';
+import { fetchSchoolsFromFirestore, saveSchoolToFirestore, saveStudentToFirestore, saveTeacherToFirestore } from '../lib/firestoreService';
+
 
 const generateUUID = () => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -71,7 +76,67 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   activityLogs = [],
   onClearActivityLogs
 }) => {
-  const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'users' | 'audit' | 'network' | 'github' | 'backup' | 'dbhealth'>('periods');
+  const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'users' | 'audit' | 'network' | 'github' | 'backup' | 'dbhealth' | 'themepresets'>('periods');
+  const { config, updateConfig } = useAppTheme();
+  const [customTailwindOverride, setCustomTailwindOverride] = useState<string>(() => {
+    return localStorage.getItem('haby_custom_tailwind_override') || 'bg-blue-600 text-white shadow-md';
+  });
+
+  const themePresets = [
+    {
+      id: 'modern',
+      name: 'Corporate Blue',
+      desc: 'Professional corporate blue palette with sleek indigo accents',
+      themeMode: 'modern' as const,
+      tailwindClass: 'bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/30',
+      badgeColor: 'bg-blue-600',
+      borderColor: 'border-blue-500'
+    },
+    {
+      id: 'sunset',
+      name: 'Sunset Orange',
+      desc: 'Warm amber and energetic orange academic palette',
+      themeMode: 'sunset' as const,
+      tailwindClass: 'bg-amber-600 hover:bg-amber-700 text-white shadow-amber-500/30',
+      badgeColor: 'bg-amber-600',
+      borderColor: 'border-amber-500'
+    },
+    {
+      id: 'emerald',
+      name: 'Forest Green',
+      desc: 'Rich emerald forest green palette symbolizing growth and nature',
+      themeMode: 'emerald' as const,
+      tailwindClass: 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-emerald-500/30',
+      badgeColor: 'bg-emerald-700',
+      borderColor: 'border-emerald-600'
+    },
+    {
+      id: 'cyberpunk',
+      name: 'Royal Purple',
+      desc: 'Deep royal purple & violet palette with modern contrast',
+      themeMode: 'cyberpunk' as const,
+      tailwindClass: 'bg-purple-700 hover:bg-purple-800 text-white shadow-purple-500/30',
+      badgeColor: 'bg-purple-700',
+      borderColor: 'border-purple-600'
+    },
+    {
+      id: 'classic',
+      name: 'Crimson Red',
+      desc: 'Bold crimson and ruby red accents for formal institutional prestige',
+      themeMode: 'classic' as const,
+      tailwindClass: 'bg-rose-700 hover:bg-rose-800 text-white shadow-rose-500/30',
+      badgeColor: 'bg-rose-700',
+      borderColor: 'border-rose-600'
+    }
+  ];
+
+  const handleApplyPreset = (preset: typeof themePresets[0]) => {
+    updateConfig({ themeMode: preset.themeMode });
+    setCustomTailwindOverride(preset.tailwindClass);
+    localStorage.setItem('haby_custom_tailwind_override', preset.tailwindClass);
+    alert(`Theme Preset "${preset.name}" imetumika na kuhifadhiwa kikamilifu!`);
+  };
+
   const [allSchools, setAllSchools] = useState<SchoolType[]>([]);
   const { switchSchool, createSchoolUser } = useAuth();
   const [schoolsLoading, setSchoolsLoading] = useState(false);
@@ -287,12 +352,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setSchoolsLoading(true);
     const fetchSchools = async () => {
       try {
-        const { data } = await supabase.from('schools').select('*');
-        if (data && Array.isArray(data)) {
-          setAllSchools([...data].sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+        const list = await fetchSchoolsFromFirestore();
+        if (list && Array.isArray(list)) {
+          setAllSchools([...list].sort((a, b) => (a.name || '').localeCompare(b.name || '')) as any);
         }
       } catch (err) {
-        console.warn("Error fetching schools from supabase:", err);
+        console.warn("Error fetching schools from Firestore:", err);
       } finally {
         setSchoolsLoading(false);
       }
@@ -308,18 +373,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     try {
       const newSchoolId = generateUUID();
       
-      // 1. Insert into Supabase 'schools' table (valid columns only)
-      const { error: schoolError } = await supabase.from('schools').insert({
+      // 1. Save school to Firestore & LocalStorage via firestoreService
+      await saveSchoolToFirestore({
         id: newSchoolId,
         name: newSchoolName.trim(),
         code: `CTR-${Date.now().toString().slice(-4)}`,
         district: newSchoolAddress.trim() || 'Tanzania',
-        created_at: new Date().toISOString()
+        address: newSchoolAddress.trim() || 'P.O. Box, Tanzania',
+        phone: newSchoolPhone.trim() || '+255',
+        email: newSchoolEmail.trim() || 'info@school.ac.tz',
+        principal: newSchoolPrincipal.trim() || 'Headmaster',
+        motto: newSchoolMotto.trim() || 'Education & Excellence',
+        status: 'ACTIVE'
       });
 
-      if (schoolError) throw new Error(`Supabase School Error: ${schoolError.message}`);
-
-      // 2. Initialize school snapshot in Supabase (durable store)
+      // 2. Initialize school snapshot in durable data store
       const fullSchoolData = {
         ...DEFAULT_APP_DATA,
         schoolInfo: {
@@ -336,34 +404,39 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       
       await saveSchoolData(newSchoolId, fullSchoolData);
 
-      // 3. Pre-populate Supabase core tables (mapped correctly)
-      if (DEFAULT_APP_DATA.students && DEFAULT_APP_DATA.students.length > 0) {
-        const mappedStudents = DEFAULT_APP_DATA.students.map(s => ({
-          id: generateUUID(),
-          school_id: newSchoolId,
-          name: s.name,
-          class: s.className || 'Form 1',
-          stream: s.stream || 'STREAM A',
-          gender: s.sex === 'F' ? 'Female' : 'Male',
-          created_at: new Date().toISOString()
-        }));
-        await supabase.from('students').insert(mappedStudents);
-      }
+      // 3. Pre-populate default students & teachers if available
+      try {
+        if (DEFAULT_APP_DATA.students && DEFAULT_APP_DATA.students.length > 0) {
+          for (const s of DEFAULT_APP_DATA.students.slice(0, 5)) {
+            await saveStudentToFirestore({
+              id: generateUUID(),
+              schoolId: newSchoolId,
+              name: s.name,
+              className: s.className || 'Form 1',
+              stream: s.stream || 'STREAM A',
+              gender: s.sex === 'F' ? 'Female' : 'Male',
+              feeStatus: 'UNPAID'
+            });
+          }
+        }
+      } catch (e) {}
 
-      if (DEFAULT_APP_DATA.teachers && DEFAULT_APP_DATA.teachers.length > 0) {
-        const mappedTeachers = DEFAULT_APP_DATA.teachers.map(t => ({
-          id: generateUUID(),
-          school_id: newSchoolId,
-          name: t.name,
-          subject: t.subjects[0] || 'General',
-          created_at: new Date().toISOString()
-        }));
-        await supabase.from('teachers').insert(mappedTeachers);
-      }
+      try {
+        if (DEFAULT_APP_DATA.teachers && DEFAULT_APP_DATA.teachers.length > 0) {
+          for (const t of DEFAULT_APP_DATA.teachers.slice(0, 3)) {
+            await saveTeacherToFirestore({
+              id: generateUUID(),
+              schoolId: newSchoolId,
+              name: t.name,
+              subject: t.subjects[0] || 'General'
+            });
+          }
+        }
+      } catch (e) {}
 
-      const { data: updatedList } = await supabase.from('schools').select('*');
+      const updatedList = await fetchSchoolsFromFirestore();
       if (updatedList) {
-        setAllSchools([...updatedList].sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+        setAllSchools([...updatedList].sort((a, b) => (a.name || '').localeCompare(b.name || '')) as any);
       }
 
       setNewSchoolName('');
@@ -372,11 +445,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setNewSchoolEmail('');
       setNewSchoolPrincipal('');
       setNewSchoolMotto('');
-      setUserMsg(`School "${newSchoolName}" registered successfully!`);
+      setUserMsg(`Shule "${newSchoolName}" imesajiliwa na kuhifadhiwa kwenye Firestore na database kikamilifu!`);
       setTimeout(() => setUserMsg(null), 4000);
     } catch (err: any) {
       console.error("Error creating school:", err);
-      setUserMsg(`Failed to register school: ${err.message}`);
+      setUserMsg(`Imeshindikana kusajili shule: ${err.message}`);
       setTimeout(() => setUserMsg(null), 5000);
     } finally {
       setCreatingSchool(false);
@@ -418,6 +491,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     schoolInfo.institutionalLevels || ['NURSERY', 'PRIMARY', 'SECONDARY']
   );
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [nectaStartNumber, setNectaStartNumber] = useState(schoolInfo.nectaStartNumber || '0001');
+  const [nectaEndNumber, setNectaEndNumber] = useState(schoolInfo.nectaEndNumber || '0200');
 
   // Sync state when schoolInfo changes
   useEffect(() => {
@@ -431,6 +506,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setPrincipal(schoolInfo.principal || '');
       setLogo(schoolInfo.logo || DEFAULT_SCHOOL_LOGO);
       setInstitutionalLevels(schoolInfo.institutionalLevels || ['NURSERY', 'PRIMARY', 'SECONDARY']);
+      setNectaStartNumber(schoolInfo.nectaStartNumber || '0001');
+      setNectaEndNumber(schoolInfo.nectaEndNumber || '0200');
     }
   }, [schoolInfo]);
 
@@ -686,6 +763,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       email: email.trim(),
       motto: motto.trim(),
       principal: principal.trim(),
+      nectaStartNumber: nectaStartNumber.trim() || '0001',
+      nectaEndNumber: nectaEndNumber.trim() || '0200',
       logo: logo || DEFAULT_SCHOOL_LOGO
     });
     setSavedSuccess(true);
@@ -946,6 +1025,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <button
           type="button"
+          onClick={() => setActiveTab('themepresets')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
+            activeTab === 'themepresets'
+              ? 'bg-indigo-600 text-white shadow-xs'
+              : 'bg-white text-indigo-600 hover:bg-indigo-50 border border-indigo-200'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-indigo-500" />
+          Theme Presets & Palettes
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('periods')}
           className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
             activeTab === 'periods'
@@ -1072,6 +1164,118 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </>
         )}
       </div>
+
+      {/* TAB: THEME PRESETS & PALETTES */}
+      {activeTab === 'themepresets' && (
+        <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 shadow-xs space-y-6">
+          <div className="border-b border-slate-200 dark:border-slate-800 pb-4 flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-indigo-600" />
+                <span>Theme Presets & Tailwind Color Palettes</span>
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                Save and switch between predefined visual color palettes ('Corporate Blue', 'Sunset Orange', 'Forest Green', 'Royal Purple', 'Crimson Red') using Tailwind utility class overrides.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {themePresets.map((preset) => {
+              const isActive = config.themeMode === preset.themeMode;
+              return (
+                <div 
+                  key={preset.id}
+                  className={`rounded-2xl border-2 p-5 transition flex flex-col justify-between ${
+                    isActive 
+                      ? 'border-indigo-600 bg-indigo-50/40 dark:bg-indigo-950/20 shadow-md' 
+                      : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-white dark:bg-slate-900'
+                  }`}
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className={`w-10 h-10 rounded-xl ${preset.badgeColor} flex items-center justify-center text-white font-black shadow-md`}>
+                          <Sparkles className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <h3 className="font-black text-sm text-slate-900 dark:text-white">{preset.name}</h3>
+                          <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Preset Palette</span>
+                        </div>
+                      </div>
+                      {isActive && (
+                        <span className="px-2.5 py-1 rounded-full bg-indigo-600 text-white text-[10px] font-black shadow-xs">
+                          Inatumika
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-600 dark:text-slate-300 font-medium">{preset.desc}</p>
+                    
+                    <div className="p-3 bg-slate-50 dark:bg-slate-800/60 rounded-xl border border-slate-200 dark:border-slate-700 space-y-2">
+                      <span className="text-[10px] font-black uppercase text-slate-400">Tailwind Utility Class Overrides:</span>
+                      <code className="block text-[11px] font-mono text-indigo-600 dark:text-indigo-400 bg-white dark:bg-slate-900 p-2 rounded-lg border border-slate-200 dark:border-slate-800 select-all truncate">
+                        {preset.tailwindClass}
+                      </code>
+                    </div>
+
+                    {/* Live Preview Sample Component */}
+                    <div className="pt-2 space-y-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase">Live UI Preview:</span>
+                      <div className="flex items-center gap-2">
+                        <button 
+                          type="button" 
+                          className={`px-4 py-2 rounded-xl text-xs font-bold transition shadow-md ${preset.tailwindClass}`}
+                        >
+                          Sample Button
+                        </button>
+                        <span className={`px-2.5 py-1 rounded-lg text-xs font-black ${preset.badgeColor} text-white`}>
+                          Badge
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="pt-5 mt-5 border-t border-slate-200 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => handleApplyPreset(preset)}
+                      className={`w-full py-2.5 px-4 rounded-xl text-xs font-black transition shadow-md flex items-center justify-center gap-2 ${
+                        isActive 
+                          ? 'bg-slate-900 text-white dark:bg-white dark:text-slate-900' 
+                          : `${preset.badgeColor} text-white hover:opacity-90`
+                      }`}
+                    >
+                      {isActive ? 'Preset Inatumika' : `Tumia Preset ${preset.name}`}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="p-4 bg-slate-50 dark:bg-slate-800/50 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <div className="p-2.5 bg-indigo-600 text-white rounded-xl">
+                <Sliders className="w-5 h-5" />
+              </div>
+              <div>
+                <h4 className="text-sm font-black text-slate-900 dark:text-white">Custom Tailwind Override State</h4>
+                <p className="text-xs text-slate-500 dark:text-slate-400">Current applied override: <code className="font-mono text-indigo-600">{customTailwindOverride}</code></p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                localStorage.setItem('haby_custom_tailwind_override', customTailwindOverride);
+                alert('Tailwind custom override saved successfully!');
+              }}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-md transition cursor-pointer"
+            >
+              Hifadhi Tailwind Override
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* TAB: CLASSES & STREAMS STRUCTURE */}
       {activeTab === 'classes' && (
@@ -1513,6 +1717,28 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <p className="text-[10px] text-blue-600 mt-1">
                   Format: S + School Number + /0001 + Registration Year
                 </p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">NECTA Start Number</label>
+                <input
+                  type="text"
+                  value={nectaStartNumber}
+                  onChange={e => setNectaStartNumber(e.target.value)}
+                  placeholder="e.g. 0001"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">NECTA End Number</label>
+                <input
+                  type="text"
+                  value={nectaEndNumber}
+                  onChange={e => setNectaEndNumber(e.target.value)}
+                  placeholder="e.g. 0200"
+                  className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 font-mono font-bold"
+                />
               </div>
 
               <div>

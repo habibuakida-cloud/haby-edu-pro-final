@@ -37,6 +37,7 @@ export type EducationLevel = 'PRE_PRIMARY' | 'PRIMARY' | 'CSEE' | 'ACSEE';
 
 export interface Student {
   id: number;
+  firestoreDocId?: string;
   regNo: string;
   name: string;
   fullName?: string;
@@ -62,6 +63,7 @@ export interface Student {
   phone?: string;
   parentPhone?: string;
   parentName?: string;
+  feeStatus?: 'PAID' | 'UNPAID' | string;
 }
 
 export type SchoolStaffRole =
@@ -88,6 +90,7 @@ export type SchoolStaffRole =
 
 export interface Teacher {
   id: number;
+  firestoreDocId?: string;
   name: string;
   initial: string;
   gender?: 'Male' | 'Female' | '';
@@ -213,6 +216,8 @@ export interface SchoolInfo {
   email: string;
   motto: string;
   principal: string;
+  nectaStartNumber?: string;
+  nectaEndNumber?: string;
   logo?: string; // base64 or URL for official school emblem / crest
   badge?: string;
   website?: string;

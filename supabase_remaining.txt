@@ -1,0 +1,160 @@
+src/components/TeachingPeriodTrackingView.tsx:import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
+src/components/TeachingPeriodTrackingView.tsx:      const { data: tData } = await supabase
+src/components/TeachingPeriodTrackingView.tsx:      const { data: lData } = await supabase
+src/components/TeachingPeriodTrackingView.tsx:      await supabase.from('teaching_logs').upsert(updatedLog, { onConflict: 'id' });
+src/components/common/DatabaseHealthWidget.tsx:import { measureSupabaseLatency, supabaseUrl } from '../../lib/dbClient';
+src/components/common/DatabaseHealthWidget.tsx:  const [supabaseLatency, setSupabaseLatency] = useState<LatencyResult>({ latencyMs: 0, ok: true });
+src/components/common/DatabaseHealthWidget.tsx:  if (!supabaseLatency.ok) healthScore -= 50;
+src/components/common/DatabaseHealthWidget.tsx:  if (supabaseLatency.ok && supabaseLatency.latencyMs > 300) healthScore -= 10;
+src/components/common/DatabaseHealthWidget.tsx:              {getLatencyBadge(supabaseLatency.latencyMs, supabaseLatency.ok)}
+src/components/common/DatabaseHealthWidget.tsx:                  {supabaseLatency.ok ? `${supabaseLatency.latencyMs} ms` : 'Inajaribu kuunganisha...'}
+src/components/common/DatabaseHealthWidget.tsx:                    !supabaseLatency.ok ? 'bg-amber-500 w-full' :
+src/components/common/DatabaseHealthWidget.tsx:                    supabaseLatency.latencyMs <= 100 ? 'bg-emerald-500' :
+src/components/common/DatabaseHealthWidget.tsx:                    supabaseLatency.latencyMs <= 300 ? 'bg-emerald-400' : 'bg-amber-500'
+src/components/common/DatabaseHealthWidget.tsx:                  style={{ width: `${Math.min(100, Math.max(5, (supabaseLatency.latencyMs / 400) * 100))}%` }}
+src/components/common/DatabaseHealthWidget.tsx:                <span className="truncate text-slate-600" title={supabaseUrl}>
+src/components/common/DatabaseHealthWidget.tsx:                  Seva: <span className="font-semibold text-emerald-700">{supabaseUrl.replace('https://', '')}</span>
+src/components/common/DatabaseHealthWidget.tsx:                  <li>Ingia kwenye akaunti yako ya Supabase Dashboard (<span className="text-emerald-700 font-mono">supabase.com</span>).</li>
+src/components/common/VerifiedStudentProfileView.tsx:import { supabase } from '../../lib/dbClient';
+src/components/common/VerifiedStudentProfileView.tsx:          const { data: supaRes } = await supabase.from('students').select('*');
+src/components/SuperAdmin/SuperAdminDashboard.tsx:import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../../lib/dbClient';
+src/components/SuperAdmin/SuperAdminDashboard.tsx:  const [supabaseStatus, setSupabaseStatus] = useState<'checking' | 'connected' | 'error'>('checking');
+src/components/SuperAdmin/SuperAdminDashboard.tsx:        const { data: schoolsData, error: schoolsErr } = await supabase.from('schools').select('*');
+src/components/SuperAdmin/SuperAdminDashboard.tsx:        const { data: adminsData, error: adminsErr } = await supabase.from('school_admins').select('*');
+src/components/SuperAdmin/SuperAdminDashboard.tsx:        await supabase.from('schools').select('id').limit(1);
+src/components/SuperAdmin/SuperAdminDashboard.tsx:      const { error } = await supabase.from('school_admins').insert([payload]);
+src/components/SuperAdmin/SuperAdminDashboard.tsx:      const { data: schoolRes, error: schoolErr } = await supabase.from('schools').insert([{
+src/components/SuperAdmin/SuperAdminDashboard.tsx:      await supabase.from('school_data').upsert({
+src/components/SuperAdmin/SuperAdminDashboard.tsx:      const { error } = await supabase.from('schools').delete().eq('id', schoolId);
+src/components/SuperAdmin/SuperAdminDashboard.tsx:      const { error } = await supabase.from('school_admins').delete().eq('id', adminId);
+src/components/SuperAdmin/SuperAdminDashboard.tsx:                <Database className={`w-3.5 h-3.5 ${supabaseStatus === 'connected' ? 'text-emerald-400' : supabaseStatus === 'error' ? 'text-rose-400' : 'text-amber-400'}`} /> 
+src/components/SuperAdmin/SuperAdminDashboard.tsx:                {supabaseStatus === 'connected' && <span className="text-[10px] text-emerald-400 font-bold ml-1">(OK)</span>}
+src/components/DashboardView.tsx:  supabaseStudentCount?: number;
+src/components/DashboardView.tsx:  supabaseStudentCount,
+src/components/DashboardView.tsx:  const displayStudentCount = supabaseStudentCount !== undefined ? supabaseStudentCount : students.length;
+src/components/Laboratory/LaboratoryInventoryView.tsx:import { supabase, getCurrentSchoolId } from '../../lib/dbClient';
+src/components/Laboratory/LaboratoryInventoryView.tsx:      const { data, error } = await supabase
+src/components/Laboratory/LaboratoryInventoryView.tsx:      const channel = supabase
+src/components/Laboratory/LaboratoryInventoryView.tsx:        supabase.removeChannel(channel);
+src/components/Laboratory/LaboratoryInventoryView.tsx:        const { error } = await supabase
+src/components/Laboratory/LaboratoryInventoryView.tsx:        const { error } = await supabase
+src/components/Laboratory/LaboratoryInventoryView.tsx:      const { error } = await supabase
+src/components/ParentPortalView.tsx:import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
+src/components/ParentPortalView.tsx:    const announcementsSub = supabase
+src/components/ParentPortalView.tsx:    const messagesSub = supabase
+src/components/ParentPortalView.tsx:      const { data: students, error: studError } = await supabase
+src/components/ParentPortalView.tsx:      const { data: linkedParents } = await supabase
+src/components/ParentPortalView.tsx:      const { data: studentRows } = await supabase
+src/components/ParentPortalView.tsx:        const { data: annRows } = await supabase
+src/components/ParentPortalView.tsx:        const { data: msgRows } = await supabase
+src/components/ParentPortalView.tsx:        const { data: recs } = await supabase
+src/components/ParentPortalView.tsx:        const { data: plans } = await supabase
+src/components/ParentPortalView.tsx:      await supabase.from('parent_messages').insert(payload);
+src/components/auth/AuthScreen.tsx:import { supabase } from '../../lib/dbClient';
+src/components/auth/AuthScreen.tsx:        await supabase.from('parents').upsert({
+src/components/auth/AuthScreen.tsx:      const { data: parentRows, error } = await supabase
+src/components/Navigation.tsx:import { getCurrentSchoolId, db, supabase, measureSupabaseLatency, DEFAULT_PRIMARY_SCHOOL_ID, SUPABASE_URL, SUPABASE_ANON_KEY } from '../lib/dbClient';
+src/components/Navigation.tsx:      await supabase.auth.getSession();
+src/components/Navigation.tsx:      const { data, error } = await supabase.from('school_data').select('id, school_id').limit(1);
+src/components/Navigation.tsx:      const { error: errSchool } = await supabase.from('school_data').upsert({
+src/components/Navigation.tsx:        const { error } = await supabase.from('students').upsert({
+src/components/Navigation.tsx:        const { error } = await supabase.from('teachers').upsert({
+src/components/Navigation.tsx:        const { error } = await supabase.from('exams').upsert({
+src/components/StudentsView.tsx:      const { data, error } = await supabase
+src/components/SettingsView.tsx:      await supabase.from('schools').update({ code: status }).eq('id', schoolId);
+src/components/SettingsView.tsx:        const { data: supaUsers, error: supaErr } = await supabase.from('users').select('*').eq('school_id', sId);
+src/components/SettingsView.tsx:        const { data: supaStaff, error: staffErr } = await supabase.from('authorized_staff').select('*').eq('school_id', sId);
+src/components/SettingsView.tsx:        const { data: authData, error: authError } = await supabase.auth.signUp({
+src/components/SettingsView.tsx:          await supabase.from("users").upsert({
+src/components/SettingsView.tsx:      const { data: authData, error: authError } = await supabase.auth.signUp({
+src/components/SettingsView.tsx:      await supabase.from('users').upsert({
+src/components/SettingsView.tsx:      await supabase.from('school_admins').upsert({
+src/components/SettingsView.tsx:      await supabase.from('authorized_staff').upsert({
+src/components/SettingsView.tsx:        await supabase.from('users').upsert({
+src/components/SmsModule.tsx:      const { data } = await supabase
+src/components/SmsModule.tsx:      const { data } = await supabase
+src/components/SmsModule.tsx:      const { error } = await supabase.from('parent_messages').insert(payload);
+src/components/SmsModule.tsx:    const inboxChannel = supabase
+src/components/SmsModule.tsx:      const { data: requests, error } = await supabase.from('payment_verification_requests').select('*').eq('school_id', schoolId);
+src/components/SmsModule.tsx:            await supabase.from('payment_verification_requests').update({
+src/components/SmsModule.tsx:            await supabase.from('sms_payment_history').insert({
+src/components/SmsModule.tsx:        await supabase.from('sms_payment_history').update({ status: 'SUCCESS' }).eq('id', item.id);
+src/components/SmsModule.tsx:      const res = await supabase
+src/components/SmsModule.tsx:      const res = await supabase.from('sms_wallet').select().eq('school_id', schoolId).maybeSingle();
+src/components/SmsModule.tsx:        supabase.from('parents').select().eq('school_id', schoolId),
+src/components/SmsModule.tsx:        supabase.from('parent_students').select('*'),
+src/components/SmsModule.tsx:        supabase.from('students').select('id, reg_no, name, class, stream').eq('school_id', schoolId)
+src/components/SmsModule.tsx:      const res = await supabase.from('exam_records').select().eq('school_id', schoolId);
+src/components/SmsModule.tsx:      const res = await supabase.from('sms_logs').select().eq('school_id', schoolId);
+src/components/SmsModule.tsx:      await supabase.from('sms_wallet').upsert({
+src/components/SmsModule.tsx:        await supabase.from('sms_logs').insert(logsToInsert);
+src/components/SmsModule.tsx:      await supabase.from('sms_wallet').upsert({
+src/components/SmsModule.tsx:      await supabase.from('announcements').insert({
+src/components/SmsModule.tsx:        await supabase.from('sms_logs').insert(logsToInsert);
+src/components/SmsModule.tsx:      const { data: existingParents, error: checkError } = await supabase
+src/components/SmsModule.tsx:        const { error: updateError } = await supabase
+src/components/SmsModule.tsx:        const { data: newParent, error: insertError } = await supabase
+src/components/SmsModule.tsx:      const { data: studentRows } = await supabase
+src/components/SmsModule.tsx:        const { data: existingLink } = await supabase
+src/components/SmsModule.tsx:          const { error: linkError } = await supabase.from('parent_students').insert({
+src/components/SmsModule.tsx:        await supabase.from('sms_wallet').upsert({
+src/components/SmsModule.tsx:        await supabase.from('sms_payment_history').insert({
+src/components/SmsModule.tsx:                      await supabase.from('announcements').delete().eq('id', ann.id);
+src/components/SmsModule.tsx:                                await supabase.from('parents').delete().eq('id', p.id);
+src/components/NectaAnalyzer.jsx:      const res = await supabase.from('exam_records').insert(recordsToInsert);
+src/components/SittingPlan.jsx:      await supabase.from('sitting_plans').insert(inserts);
+src/components/SittingPlan.jsx:      console.warn('Could not save sitting plan to supabase:', err);
+src/components/SaasFinance.jsx:      const res = await supabase
+src/components/SaasFinance.jsx:      const res = await supabase
+src/components/SaasFinance.jsx:          await supabase
+src/components/SaasFinance.jsx:          const insertRes = await supabase.from('contribution_types').insert(newType).select();
+src/components/SaasFinance.jsx:            await supabase.from('student_ledger').insert(newLedgerEntries);
+src/components/SaasFinance.jsx:        await supabase.from('contribution_types').delete().eq('id', deletingType.id);
+src/components/SaasFinance.jsx:          await supabase
+src/components/SaasFinance.jsx:          await supabase.from('student_ledger').upsert({
+src/lib/dbClient.ts:// Safe local fallback supabase proxy (Supabase backend removed, using Cloud Firestore & LocalStorage)
+src/lib/dbClient.ts:export const supabase: any = {
+src/lib/dbClient.ts:export const supabaseUrl = SUPABASE_URL;
+src/lib/dbClient.ts:export const supabaseKey = SUPABASE_ANON_KEY;
+src/lib/environmentService.ts:import { supabase, resilientUpsert } from './dbClient';
+src/lib/environmentService.ts:    const { data, error } = await supabase
+src/lib/environmentService.ts:    await supabase.from('environment_equipment').delete().eq('id', id);
+src/lib/environmentService.ts:    const { data, error } = await supabase
+src/lib/environmentService.ts:    const { data, error } = await supabase
+src/lib/environmentService.ts:    await supabase.from('environment_orders').delete().eq('id', orderId);
+src/lib/environmentService.ts:    const { data, error } = await supabase
+src/lib/environmentService.ts:    await supabase.from('school_purchased_equipment').delete().eq('id', itemId);
+src/lib/appwrite.ts:export const supabaseUrl = ENDPOINT;
+src/lib/appwrite.ts:export const supabaseKey = PROJECT_ID;
+src/lib/appwrite.ts:export const supabase = appwriteService;
+src/context/AuthContext.tsx:import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
+src/context/AuthContext.tsx:        const { data: byId } = await supabase.from('users').select('*').eq('id', fbUser.id).maybeSingle();
+src/context/AuthContext.tsx:          const { data: byEmail } = await supabase.from('users').select('*').eq('email', normEmail).maybeSingle();
+src/context/AuthContext.tsx:    supabase.auth.getSession().then(({ data: { session } }) => {
+src/context/AuthContext.tsx:    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+src/context/AuthContext.tsx:      const { data: authData, error: authErr } = await supabase.auth.signUp({
+src/context/AuthContext.tsx:      await supabase.from('users').upsert({
+src/context/AuthContext.tsx:        await supabase.from('school_admins').upsert({
+src/context/AuthContext.tsx:    await supabase.auth.signOut();
+src/context/AuthContext.tsx:    const { data: { session } } = await supabase.auth.getSession();
+src/context/SchoolContext.jsx:import { supabase } from "../lib/dbClient";
+src/context/SchoolContext.jsx:    const { data, error: fetchError } = await supabase
+src/context/SchoolContext.jsx:    const { data, error: insertError } = await supabase
+src/App.tsx:  supabase,
+src/App.tsx:  const [supabaseStudentCount, setSupabaseStudentCount] = useState<number | null>(null);
+src/App.tsx:        const [supabaseDataSnapshot, studRes, teachRes, examRes] = await Promise.all([
+src/App.tsx:        const rawSchoolData = (supabaseDataSnapshot || {}) as Record<string, any>;
+src/App.tsx:              await supabase.from('classes').upsert({
+src/App.tsx:                await supabase.from('periods').upsert({
+src/App.tsx:        await supabase.from('exam_records').insert(records.map(rec => ({
+src/App.tsx:      const { data: cls } = await supabase.from('classes').select('id').eq('name', studentWithId.className).maybeSingle();
+src/App.tsx:      await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
+src/App.tsx:      const { data: classesData } = await supabase.from('classes').select('id, name');
+src/App.tsx:        await supabase.from('students').upsert(chunk, { onConflict: 'id' });
+src/App.tsx:      await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
+src/App.tsx:      await supabase.from('students').delete().in('id', ids);
+src/App.tsx:      await supabase.from('teachers').upsert(dbRow, { onConflict: 'id' });
+src/App.tsx:      await supabase.from('teachers').upsert(rows, { onConflict: 'id' });
+src/App.tsx:      await supabase.from('teachers').upsert(dbRow, { onConflict: 'id' });
+src/App.tsx:      await supabase.from('teachers').delete().in('id', ids).eq('school_id', schoolId);
+src/App.tsx:              supabaseStudentCount={supabaseStudentCount}

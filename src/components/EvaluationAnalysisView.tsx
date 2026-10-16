@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/supabaseClient';
-import { getWeeklyAttendance } from '../lib/supabaseService';
+import { DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
+import { getWeeklyAttendance } from '../lib/dataService';
 import { Award, FileText, Printer, Download, Calendar, Filter, CheckCircle, AlertTriangle, Shield, Check, X } from 'lucide-react';
 import { DEFAULT_CLASSES } from '../constants/defaults';
 

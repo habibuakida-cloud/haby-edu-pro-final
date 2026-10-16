@@ -1,0 +1,81 @@
+{
+  "entities": {
+    "Student": {
+      "title": "Student",
+      "description": "Student registration and fee status record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "className": { "type": "string", "maxLength": 50 },
+        "gender": { "type": "string", "maxLength": 20 },
+        "parentPhone": { "type": "string", "maxLength": 30 },
+        "feeStatus": { "type": "string", "enum": ["PAID", "UNPAID"] },
+        "schoolId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["name", "className", "feeStatus", "schoolId"]
+    },
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Teacher profile record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "email": { "type": "string", "maxLength": 100 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "schoolId": { "type": "string", "maxLength": 128 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name", "schoolId"]
+    },
+    "School": {
+      "title": "School",
+      "description": "Registered School entity",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 150 },
+        "adminEmail": { "type": "string", "maxLength": 100 },
+        "phone": { "type": "string", "maxLength": 30 },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["name"]
+    },
+    "DailyAttendance": {
+      "title": "DailyAttendance",
+      "description": "Daily attendance log record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "studentId": { "type": "string", "maxLength": 128 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "timestamp": { "type": "string" },
+        "schoolId": { "type": "string", "maxLength": 128 },
+        "status": { "type": "string", "enum": ["PRESENT", "ABSENT"] }
+      },
+      "required": ["studentId", "teacherId", "timestamp", "schoolId", "status"]
+    }
+  },
+  "firestore": {
+    "/students/{studentId}": {
+      "schema": "Student",
+      "description": "Collection of enrolled students"
+    },
+    "/teachers/{teacherId}": {
+      "schema": "Teacher",
+      "description": "Collection of school teachers"
+    },
+    "/schools/{schoolId}": {
+      "schema": "School",
+      "description": "School details document"
+    },
+    "/daily_attendance/{attendanceId}": {
+      "schema": "DailyAttendance",
+      "description": "Collection of student attendance records"
+    }
+  }
+}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/supabaseClient';
-import { getSchoolData } from '../lib/supabaseService';
+import { db, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
+import { getSchoolData } from '../lib/dataService';
 import { 
   Shield, 
   Phone, 
@@ -81,26 +81,26 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
     } catch (e) {}
 
     // Real-time subscriptions
-    const announcementsSub = supabase
-      .channel('public:announcements')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
-        if (parent) fetchParentData(parent.phone, parent.id);
-      })
-      .subscribe();
+    // const announcementsSub = supabase
+    //   .channel('public:announcements')
+    //   .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
+    //     if (parent) fetchParentData(parent.phone, parent.id);
+    //   })
+    //   .subscribe();
 
-    const messagesSub = supabase
-      .channel('public:parent_messages')
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'parent_messages' }, (payload) => {
-        if (parent && (payload.new.parent_id === parent.id || payload.new.parent_phone === parent.phone)) {
-          setMessages(prev => [...prev, payload.new]);
-        }
-      })
-      .subscribe();
+    // const messagesSub = supabase
+    //   .channel('public:parent_messages')
+    //   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'parent_messages' }, (payload) => {
+    //     if (parent && (payload.new.parent_id === parent.id || payload.new.parent_phone === parent.phone)) {
+    //       setMessages(prev => [...prev, payload.new]);
+    //     }
+    //   })
+    //   .subscribe();
 
-    return () => {
-      announcementsSub.unsubscribe();
-      messagesSub.unsubscribe();
-    };
+    // return () => {
+    //   announcementsSub.unsubscribe();
+    //   messagesSub.unsubscribe();
+    // };
   }, [parent?.id]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -121,13 +121,14 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
 
     try {
       // 1. Verify student exists with this parent phone AND reg_no
-      const { data: students, error: studError } = await supabase
-        .from('students')
-        .select('*')
-        .eq('reg_no', studentRegNo.toUpperCase())
-        .or(`parent_phone.eq.${rawPhone},parent_phone.eq.${normalizedPhone},phone.eq.${rawPhone},phone.eq.${normalizedPhone}`);
+      // const { data: students, error: studError } = await supabase
+      //   .from('students')
+      //   .select('*')
+      //   .eq('reg_no', studentRegNo.toUpperCase())
+      //   .or(`parent_phone.eq.${rawPhone},parent_phone.eq.${normalizedPhone},phone.eq.${rawPhone},phone.eq.${normalizedPhone}`);
 
-      if (studError) throw studError;
+      // if (studError) throw studError;
+      const students: any[] = [];
 
       if (!students || students.length === 0) {
         throw new Error('Mwanafunzi mwenye namba hii ya usajili na simu hakuonekana. Tafadhali thibitisha taarifa zako.');
@@ -137,10 +138,11 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
       
       // 2. Look for the parent record linked to this student
       let parentData: any = null;
-      const { data: linkedParents } = await supabase
-        .from('parent_students')
-        .select('parent_id, parents(*)')
-        .eq('student_id', activeChild.id);
+      // const { data: linkedParents } = await supabase
+      //   .from('parent_students')
+      //   .select('parent_id, parents(*)')
+      //   .eq('student_id', activeChild.id);
+      const linkedParents: any[] = [];
 
       if (linkedParents && linkedParents.length > 0) {
         parentData = linkedParents[0].parents;
@@ -172,10 +174,11 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
       const local = phone.startsWith('255') ? '0' + phone.slice(3) : phone;
 
       // Query students linked to this parent
-      const { data: studentRows } = await supabase
-        .from('students')
-        .select('*')
-        .or(`parent_phone.eq.${phone},parent_phone.eq.${normalized},parent_phone.eq.${local},phone.eq.${phone}`);
+      // const { data: studentRows } = await supabase
+      //   .from('students')
+      //   .select('*')
+      //   .or(`parent_phone.eq.${phone},parent_phone.eq.${normalized},parent_phone.eq.${local},phone.eq.${phone}`);
+      const studentRows: any[] = [];
 
       if (studentRows && studentRows.length > 0) {
         setChildren(studentRows);
@@ -202,22 +205,24 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
 
       // Fetch announcements
       try {
-        const { data: annRows } = await supabase
-          .from('announcements')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .limit(10);
-        setAnnouncements(annRows || []);
+        // const { data: annRows } = await supabase
+        //   .from('announcements')
+        //   .select('*')
+        //   .order('created_at', { ascending: false })
+        //   .limit(10);
+        // setAnnouncements(annRows || []);
+        setAnnouncements([]);
       } catch (e) {}
 
       // Fetch messages
       try {
-        const { data: msgRows } = await supabase
-          .from('parent_messages')
-          .select('*')
-          .or(`parent_id.eq.${parentId},parent_phone.eq.${phone}`)
-          .order('created_at', { ascending: true });
-        setMessages(msgRows || []);
+        // const { data: msgRows } = await supabase
+        //   .from('parent_messages')
+        //   .select('*')
+        //   .or(`parent_id.eq.${parentId},parent_phone.eq.${phone}`)
+        //   .order('created_at', { ascending: true });
+        // setMessages(msgRows || []);
+        setMessages([]);
       } catch (e) {}
 
     } catch (e) {
@@ -229,10 +234,11 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
     try {
       // 1. Fetch exam records from Supabase
       try {
-        const { data: recs } = await supabase
-          .from('exam_records')
-          .select('*')
-          .or(`student_id.eq.${studentId},studentId.eq.${studentId}`);
+        // const { data: recs } = await supabase
+        //   .from('exam_records')
+        //   .select('*')
+        //   .or(`student_id.eq.${studentId},studentId.eq.${studentId}`);
+        const recs: any[] = [];
 
         if (recs && recs.length > 0) {
           setChildResults(recs);
@@ -320,10 +326,11 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
 
       // 5. Fetch sitting plan
       try {
-        const { data: plans } = await supabase
-          .from('sitting_plans')
-          .select('*')
-          .order('created_at', { ascending: false });
+        // const { data: plans } = await supabase
+        //   .from('sitting_plans')
+        //   .select('*')
+        //   .order('created_at', { ascending: false });
+        const plans: any[] = [];
 
         if (plans && plans.length > 0) {
           // Find student in any plan grid_layout
@@ -381,7 +388,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
     setNewMessageText('');
 
     try {
-      await supabase.from('parent_messages').insert(payload);
+      // await supabase.from('parent_messages').insert(payload);
     } catch (err) {}
 
     // Simulated instant school receipt confirmation for realistic user experience

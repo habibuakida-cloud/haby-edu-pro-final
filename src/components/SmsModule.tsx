@@ -26,7 +26,8 @@ import {
   Bell,
   Inbox
 } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { db } from '../lib/firebaseClient';
+import { supabase } from '../lib/dbClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { downloadFile } from '../utils/export';
 import { SchoolInfo } from '../types';

@@ -1,0 +1,5 @@
+{
+  "summary": "Corrected database schema script for Supabase to be run in the SQL Editor. Added missing UUID type for school_id in announcements table.",
+  "updatedAt": "2026-10-13T10:51:23.946070290Z",
+  "userFacing": true
+}

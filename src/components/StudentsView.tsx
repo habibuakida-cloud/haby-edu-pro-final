@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { Student, SchoolInfo, EducationLevel, StreamSetting, ExaminationRecord } from '../types';
 import { useConfirmDelete } from '../context/ConfirmDeleteContext';
+import { supabase } from '../lib/dbClient';
 import { CameraCaptureModal } from './common/CameraCaptureModal';
 import { 
   SUBJECT_LIST, 
@@ -49,7 +50,7 @@ import { downloadFile, escapeCSV, printFormattedSection } from '../utils/export'
 import { formatStudentRegNo, getNextStudentRegNo } from '../utils/studentRegUtils';
 import { GenderSummary } from './common/GenderSummary';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
-import { supabase } from '../lib/supabaseClient';
+import { db } from '../lib/firebaseClient';
 import { PhoneInputPlugin } from './common/PhoneInputPlugin';
 import { StudentPhoneBadge } from './common/StudentPhoneBadge';
 import { StudentBulkImportModal } from './Students/StudentBulkImportModal';
@@ -118,6 +119,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [dob, setDob] = useState('2010-01-01');
   const [parentPhone, setParentPhone] = useState('');
   const [parentName, setParentName] = useState('');
+  const [feeStatus, setFeeStatus] = useState<'PAID' | 'UNPAID'>('UNPAID');
   const [passportPhoto, setPassportPhoto] = useState<string>('');
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([
     'English Language', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics'
@@ -699,6 +701,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       parentName: parentName.trim() || undefined,
       parentPhone: parentPhone.trim() || undefined,
       phone: parentPhone.trim() || undefined,
+      feeStatus: feeStatus,
       passportPhoto: passportPhoto || undefined,
       subjects: selectedSubjects,
       marks: {},
@@ -1013,7 +1016,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     } else {
       updated.filter(s => targetSet.has(s.id)).forEach(s => onUpdateStudent(s));
     }
-    setStudentCreatedNotice(`Successfully enrolled ${selectedStudentIds.length} students into: ${bulkEnrollSubjects.join(', ')}`);
+    setStudentCreatedNotice(`Successfully enrolled ${selectedStudentIds.length} students into: ${(bulkEnrollSubjects || []).join(', ')}`);
     setTimeout(() => setStudentCreatedNotice(null), 5000);
     setBulkEnrollSubjects([]);
     setSelectedStudentIds([]);
@@ -1040,7 +1043,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     } else {
       updated.filter(s => targetSet.has(s.id)).forEach(s => onUpdateStudent(s));
     }
-    setStudentCreatedNotice(`Successfully removed ${bulkRemoveSubjects.join(', ')} from ${selectedStudentIds.length} students.`);
+    setStudentCreatedNotice(`Successfully removed ${(bulkRemoveSubjects || []).join(', ')} from ${selectedStudentIds.length} students.`);
     setTimeout(() => setStudentCreatedNotice(null), 5000);
     setBulkRemoveSubjects([]);
     setSelectedStudentIds([]);
@@ -1492,6 +1495,39 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   required
                   studentName={name}
                 />
+
+                {/* Hali ya Ada / Fee Status */}
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-600 uppercase flex items-center justify-between">
+                    <span>Hali ya Ada (Fee Status)</span>
+                    <span className="text-[10px] text-blue-600 font-semibold">Inahifadhiwa Firestore</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setFeeStatus('UNPAID')}
+                      className={`px-3 py-2 rounded-lg text-xs font-bold border flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                        feeStatus === 'UNPAID'
+                          ? 'bg-amber-500 text-white border-amber-600 shadow-sm'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <span>Hajalipa (UNPAID)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFeeStatus('PAID')}
+                      className={`px-3 py-2 rounded-lg text-xs font-bold border flex items-center justify-center gap-1.5 transition cursor-pointer ${
+                        feeStatus === 'PAID'
+                          ? 'bg-emerald-600 text-white border-emerald-700 shadow-sm'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>Ameshalipa (PAID)</span>
+                    </button>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -2155,6 +2191,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                 <th className="p-2.5 border-r border-slate-200 text-center">Gender</th>
                 <th className="p-2.5 border-r border-slate-200">Class & Stream</th>
                 <th className="p-2.5 border-r border-slate-200">Parent Phone</th>
+                <th className="p-2.5 border-r border-slate-200 text-center">Hali ya Ada</th>
                 <th className="p-2.5 border-r border-slate-200">Level</th>
                 <th className="p-2.5 border-r border-slate-200">Subjects Enrolled</th>
                 <th className="p-2.5 text-center no-print">Actions</th>
@@ -2163,7 +2200,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             <tbody>
               {sortedFilteredStudents.length === 0 ? (
                 <tr>
-                  <td colSpan={11} className="p-8 text-center text-slate-400">
+                  <td colSpan={12} className="p-8 text-center text-slate-400">
                     No registered students found matching your criteria.
                   </td>
                 </tr>
@@ -2215,6 +2252,33 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           onUpdatePhone={newPhone => onUpdateStudent({ ...s, parentPhone: newPhone, phone: newPhone })}
                         />
                       </td>
+                      <td className="p-2.5 border-r border-slate-200 text-center">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const nextStatus = s.feeStatus === 'PAID' ? 'UNPAID' : 'PAID';
+                            onUpdateStudent({ ...s, feeStatus: nextStatus });
+                          }}
+                          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider border cursor-pointer transition shadow-2xs ${
+                            s.feeStatus === 'PAID'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                              : 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
+                          }`}
+                          title="Bofya kubadilisha hali ya ada Firestore: Ameshalipa / Hajalipa"
+                        >
+                          {s.feeStatus === 'PAID' ? (
+                            <>
+                              <Check className="w-3 h-3 text-emerald-600" />
+                              <span>Ameshalipa</span>
+                            </>
+                          ) : (
+                            <>
+                              <AlertTriangle className="w-3 h-3 text-amber-600" />
+                              <span>Hajalipa</span>
+                            </>
+                          )}
+                        </button>
+                      </td>
                       <td className="p-2.5 border-r border-slate-200">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
                           s.level === 'ACSEE' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
@@ -2222,8 +2286,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                           {s.level}
                         </span>
                       </td>
-                      <td className="p-2.5 border-r border-slate-200 max-w-xs truncate" title={s.subjects.join(', ')}>
-                        <span className="font-bold text-slate-800">({s.subjects.length})</span> {s.subjects.slice(0, 4).join(', ')}{s.subjects.length > 4 ? '...' : ''}
+                      <td className="p-2.5 border-r border-slate-200 max-w-xs truncate" title={(s.subjects || []).join(', ')}>
+                        <span className="font-bold text-slate-800">({(s.subjects || []).length})</span> {(s.subjects || []).slice(0, 4).join(', ')}{(s.subjects || []).length > 4 ? '...' : ''}
                       </td>
                       <td className="p-2.5 text-center no-print">
                         <div className="flex items-center justify-center gap-1">
@@ -2757,20 +2821,20 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       <td className="p-3 border-r border-slate-200 font-bold text-slate-900">{p.parentName}</td>
                       <td className="p-3 border-r border-slate-200 font-mono font-bold text-blue-600">{p.phone}</td>
                       <td className="p-3 border-r border-slate-200 font-semibold text-slate-800">
-                        {p.students.length > 0 ? p.students.map(s => s.name).join(', ') : 'Hakuna mwanafunzi aliyeunganishwa'}
+                        {p.students?.length > 0 ? p.students.map(s => s.name).join(', ') : 'Hakuna mwanafunzi aliyeunganishwa'}
                       </td>
                       <td className="p-3 border-r border-slate-200 font-mono text-slate-600">
-                        {p.students.length > 0 ? p.students.map(s => s.regNo || '-').join(', ') : '-'}
+                        {p.students?.length > 0 ? p.students.map(s => s.regNo || '-').join(', ') : '-'}
                       </td>
                       <td className="p-3 border-r border-slate-200 font-bold text-slate-700">
-                        {p.students.length > 0 ? p.students.map(s => `${s.className} (${s.stream || '-'})`).join('; ') : '-'}
+                        {p.students?.length > 0 ? p.students.map(s => `${s.className} (${s.stream || '-'})`).join('; ') : '-'}
                       </td>
                       <td className="p-3 text-center">
                         <button
                           type="button"
                           onClick={() => {
                             navigator.clipboard.writeText(p.phone);
-                            alert(`Namba ya simu ya mzazi ${p.phone} imekopiwa! Wanafunzi: ${p.students.map(s => s.name).join(', ')}`);
+                            alert(`Namba ya simu ya mzazi ${p.phone} imekopiwa! Wanafunzi: ${p.students?.map(s => s.name).join(', ') || 'Hakuna'}`);
                           }}
                           className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-[11px] font-bold transition-colors cursor-pointer"
                         >
@@ -2929,6 +2993,17 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     onChange={e => setEditingStudent({ ...editingStudent, dob: e.target.value })}
                     className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
                   />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1">Hali ya Ada (Fee Status)</label>
+                  <select
+                    value={editingStudent.feeStatus || 'UNPAID'}
+                    onChange={e => setEditingStudent({ ...editingStudent, feeStatus: e.target.value as any })}
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-bold"
+                  >
+                    <option value="UNPAID">Hajalipa (UNPAID)</option>
+                    <option value="PAID">Ameshalipa (PAID)</option>
+                  </select>
                 </div>
               </div>
             </div>

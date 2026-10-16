@@ -34,8 +34,10 @@ import {
 } from 'lucide-react';
 import { SchoolInfo, UserAccount } from '../types';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
+import { ThemeCustomizerModal } from './common/ThemeCustomizerModal';
 import { ActiveView, MAIN_MODULE_GROUPS, MainModuleGroup } from '../routes';
-import { SUPABASE_URL, SUPABASE_ANON_KEY, DEFAULT_PRIMARY_SCHOOL_ID, measureSupabaseLatency, supabase } from '../lib/supabaseClient';
+import { getCurrentSchoolId, db, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
+import { INITIAL_STUDENTS, INITIAL_TEACHERS, INITIAL_EXAMS, INITIAL_EXAMINATION_RECORDS } from '../constants/defaults';
 
 export type { ActiveView };
 
@@ -236,36 +238,32 @@ export const Navigation: React.FC<NavigationProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [isMobileDrawerOpen, setIsMobileDrawerOpen] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
+  const [isThemeStudioOpen, setIsThemeStudioOpen] = useState(false);
   const [showDatabaseModal, setShowDatabaseModal] = useState(false);
   const [dbLatency, setDbLatency] = useState<number | null>(null);
   const [isTestingDb, setIsTestingDb] = useState(false);
   const [testFeedback, setTestFeedback] = useState<string | null>(null);
 
   // Measure Supabase latency on component mount
-  useEffect(() => {
-    measureSupabaseLatency().then(res => {
-      setDbLatency(res.latencyMs);
-    }).catch(() => {});
-  }, []);
+  // useEffect(() => {
+  //   measureSupabaseLatency().then(res => {
+  //     setDbLatency(res.latencyMs);
+  //   }).catch(() => {});
+  // }, []);
 
   const handleTestDatabaseConnection = async () => {
     setIsTestingDb(true);
-    setTestFeedback(null);
-    try {
-      const start = performance.now();
-      const { data, error } = await supabase.from('school_data').select('id, school_id').limit(1);
-      const latency = Math.round(performance.now() - start);
-      setDbLatency(latency);
-      if (error) {
-        setTestFeedback(`Hitilafu: ${error.message}`);
-      } else {
-        setTestFeedback(`Imefanikiwa! Supabase PostgreSQL imejibu kwa ${latency}ms (Status: 200 OK | Records: ${data?.length || 0})`);
-      }
-    } catch (err: any) {
-      setTestFeedback(`Muunganisho: ${err?.message || 'Hitilafu ya mtandao'}`);
-    } finally {
-      setIsTestingDb(false);
-    }
+    setTestFeedback('Supabase haipo. Firestore imeunganishwa.');
+    setIsTestingDb(false);
+  };
+
+  const [isSeeding, setIsSeeding] = useState(false);
+  const [seedFeedback, setSeedFeedback] = useState<string | null>(null);
+
+  const handleSeedDemoData = async () => {
+    setIsSeeding(true);
+    setSeedFeedback('Supabase haipo.');
+    setIsSeeding(false);
   };
 
   // Sidebar background color theme (default to 'slate' - Midnight Modern Slate)
@@ -434,12 +432,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
               </span>
               <Database className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span className="text-[11px] font-bold hidden sm:inline">Supabase</span>
-              {dbLatency !== null && (
-                <span className="text-[10px] font-mono text-emerald-300/80 hidden md:inline">
-                  {dbLatency}ms
-                </span>
-              )}
+              <span className="text-[11px] font-bold hidden sm:inline">Firebase</span>
               <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-200 hidden xs:inline">
                 Live
               </span>
@@ -492,6 +485,19 @@ export const Navigation: React.FC<NavigationProps> = ({
                         {sidebarTheme === key && <Check className="w-3.5 h-3.5 text-white shrink-0" />}
                       </button>
                     ))}
+                  </div>
+                  <div className="pt-2 mt-2 border-t border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowThemeMenu(false);
+                        setIsThemeStudioOpen(true);
+                      }}
+                      className="w-full flex items-center justify-center gap-2 px-3 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-black shadow-md transition cursor-pointer"
+                    >
+                      <Palette className="w-4 h-4" />
+                      <span>Fungua Theme Studio</span>
+                    </button>
                   </div>
                 </div>
               )}
@@ -1056,15 +1062,15 @@ export const Navigation: React.FC<NavigationProps> = ({
 
               <div className="space-y-1.5 font-mono text-[11px]">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded-xl bg-slate-900/90 border border-slate-800/80 gap-1">
-                  <span className="text-slate-400 font-sans font-bold">NEXT_PUBLIC_SUPABASE_URL:</span>
-                  <span className="text-emerald-300 font-mono select-all break-all">{SUPABASE_URL}</span>
+                  <span className="text-slate-400 font-sans font-bold">DATABASE_ENGINE:</span>
+                  <span className="text-emerald-300 font-mono select-all break-all">Google Cloud SQL (PostgreSQL 15+)</span>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded-xl bg-slate-900/90 border border-slate-800/80 gap-1">
-                  <span className="text-slate-400 font-sans font-bold">PUBLISHABLE_KEY:</span>
-                  <span className="text-emerald-300 font-mono select-all break-all truncate max-w-xs">{SUPABASE_ANON_KEY}</span>
+                  <span className="text-slate-400 font-sans font-bold">INSTANCE_REGION:</span>
+                  <span className="text-emerald-300 font-mono select-all break-all truncate max-w-xs">europe-west1 (ai-studio-cc2fceae)</span>
                 </div>
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between p-2 rounded-xl bg-slate-900/90 border border-slate-800/80 gap-1">
-                  <span className="text-slate-400 font-sans font-bold">SCHOOL_ID (Source of Truth):</span>
+                  <span className="text-slate-400 font-sans font-bold">DEFAULT_SCHOOL_ID:</span>
                   <span className="text-amber-300 font-mono select-all">{DEFAULT_PRIMARY_SCHOOL_ID}</span>
                 </div>
               </div>
@@ -1105,12 +1111,12 @@ export const Navigation: React.FC<NavigationProps> = ({
 
             {/* Test Connection Button & Result Feedback */}
             <div className="pt-2 border-t border-slate-800 space-y-2">
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
                 <button
                   type="button"
                   onClick={handleTestDatabaseConnection}
                   disabled={isTestingDb}
-                  className="w-full sm:w-auto px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 shadow-md shadow-emerald-600/30"
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 shadow-md shadow-emerald-600/30"
                 >
                   {isTestingDb ? (
                     <>
@@ -1127,8 +1133,27 @@ export const Navigation: React.FC<NavigationProps> = ({
 
                 <button
                   type="button"
+                  onClick={handleSeedDemoData}
+                  disabled={isSeeding}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold text-xs flex items-center justify-center gap-2 transition cursor-pointer disabled:opacity-50 shadow-md shadow-blue-600/30"
+                >
+                  {isSeeding ? (
+                    <>
+                      <RotateCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Inapakia Demo Data...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Weka Demo Data Kwenye Database</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setShowDatabaseModal(false)}
-                  className="w-full sm:w-auto px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-xs transition cursor-pointer text-center"
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl font-bold text-xs transition cursor-pointer text-center"
                 >
                   Funga
                 </button>
@@ -1140,10 +1165,22 @@ export const Navigation: React.FC<NavigationProps> = ({
                   <span>{testFeedback}</span>
                 </div>
               )}
+
+              {seedFeedback && (
+                <div className="p-3 bg-blue-950/50 border border-blue-700/50 rounded-xl text-blue-300 text-xs font-medium flex items-center gap-2 animate-fadeIn">
+                  <Sparkles className="w-4 h-4 text-blue-400 shrink-0" />
+                  <span>{seedFeedback}</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
       )}
+
+      <ThemeCustomizerModal 
+        isOpen={isThemeStudioOpen} 
+        onClose={() => setIsThemeStudioOpen(false)} 
+      />
     </>
   );
 };

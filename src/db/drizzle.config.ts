@@ -1,4 +1,12 @@
 import { defineConfig } from "drizzle-kit";
+import * as dotenv from "dotenv";
+
+dotenv.config();
+
+const sqlHost = process.env.SQL_HOST;
+const sqlDbName = process.env.SQL_DB_NAME;
+const user = process.env.SQL_ADMIN_USER;
+const password = process.env.SQL_ADMIN_PASSWORD;
 
 export default defineConfig({
   schema: "./src/db/schema.ts",
@@ -6,11 +14,12 @@ export default defineConfig({
   dialect: "postgresql",
   schemaFilter: ["public"],
   dbCredentials: {
-    host: process.env.SQL_HOST!,
-    user: process.env.SQL_ADMIN_USER!,
-    password: process.env.SQL_ADMIN_PASSWORD!,
-    database: process.env.SQL_DB_NAME!,
+    host: sqlHost || '',
+    user: user || '',
+    password: password || '',
+    database: sqlDbName || '',
     ssl: false,
   },
   verbose: true,
 });
+

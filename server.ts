@@ -14,8 +14,11 @@ import {
   queryTimetable,
   saveTimetable,
   deleteTimetableAssignment,
-  ServerTimetableAssignment
+  type ServerTimetableAssignment
 } from './src/server/timetableStore.ts';
+import { db } from './src/db/index.ts';
+import * as schema from './src/db/schema.ts';
+import { eq } from 'drizzle-orm';
 
 dotenv.config();
 
@@ -27,7 +30,416 @@ const port = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '10mb' }));
 
-// Health / Status endpoint
+// DB API
+app.get('/api/db/school-data', async (req, res) => {
+  const { schoolId } = req.query as { schoolId: string };
+  try {
+    const data = await db.query.schoolData.findFirst({
+      where: eq(schema.schoolData.schoolId, schoolId),
+    });
+    res.json(data || {});
+  } catch (err: any) {
+    console.error('Error fetching school-data:', err?.message || err);
+    res.status(500).json({ error: 'Failed to fetch school data' });
+  }
+});
+
+app.post('/api/db/school-data', async (req, res) => {
+  const { schoolId, payload } = req.body;
+  if (!schoolId) {
+    return res.status(400).json({ error: 'schoolId is required' });
+  }
+  try {
+    const raw = payload || {};
+    const normalizedData = {
+      id: raw.id || schoolId,
+      schoolId: schoolId,
+      schoolInfo: raw.schoolInfo || raw.school_info || {},
+      timetableAssignments: raw.timetableAssignments || raw.timetable_assignments || [],
+      periodSettings: raw.periodSettings || raw.period_settings || [],
+      streamSettings: raw.streamSettings || raw.stream_settings || [],
+      institutionalPolicy: raw.institutionalPolicy || raw.institutional_policy || {},
+      sessions: raw.sessions || [],
+      supervisors: raw.supervisors || [],
+      selectedInvigilators: raw.selectedInvigilators || raw.selected_invigilators || [],
+      invigilationAssignments: raw.invigilationAssignments || raw.invigilation_assignments || {},
+      dailyAttendance: raw.dailyAttendance || raw.daily_attendance || {},
+      journalRecords: raw.journalRecords || raw.journal_records || {},
+      schemesOfWork: raw.schemesOfWork || raw.schemes_of_work || [],
+      lessonPlans: raw.lessonPlans || raw.lesson_plans || [],
+      teacherEvaluations: raw.teacherEvaluations || raw.teacher_evaluations || [],
+      savedTimetableRecords: raw.savedTimetableRecords || raw.saved_timetable_records || [],
+      savedInvigilationRecords: raw.savedInvigilationRecords || raw.saved_invigilation_records || [],
+      gradeCutoffs: raw.gradeCutoffs || raw.grade_cutoffs || {},
+      ledgerSubjectKeys: raw.ledgerSubjectKeys || raw.ledger_subject_keys || {},
+      subjectPeriodAllocations: raw.subjectPeriodAllocations || raw.subject_period_allocations || [],
+      teacherAssignments: raw.teacherAssignments || raw.teacher_assignments || [],
+      subjectPaperConfigs: raw.subjectPaperConfigs || raw.subject_paper_configs || {},
+      bubbleSettings: raw.bubbleSettings || raw.bubble_settings || {},
+      students: raw.students || [],
+      teachers: raw.teachers || [],
+      exams: raw.exams || [],
+      examinationRecords: raw.examinationRecords || raw.examination_records || [],
+      updatedAt: new Date(),
+    };
+
+    await db.insert(schema.schoolData).values(normalizedData).onConflictDoUpdate({
+      target: schema.schoolData.schoolId,
+      set: normalizedData,
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error saving school-data:', err?.message || err);
+    res.status(500).json({ error: 'Failed to save school data', details: err?.message });
+  }
+});
+
+app.get('/api/db/school-subscriptions', async (req, res) => {
+  const { schoolId } = req.query as { schoolId: string };
+  try {
+    const data = await db.query.schoolSubscriptions.findFirst({
+      where: eq(schema.schoolSubscriptions.schoolId, schoolId),
+    });
+    res.json(data || {});
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch subscriptions' });
+  }
+});
+
+app.post('/api/db/school-subscriptions', async (req, res) => {
+  const { schoolId, payload } = req.body;
+  try {
+    await db.insert(schema.schoolSubscriptions).values(payload).onConflictDoUpdate({
+      target: schema.schoolSubscriptions.schoolId,
+      set: payload
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to save subscription' });
+  }
+});
+
+// Schools API
+app.get('/api/db/schools', async (_req, res) => {
+  try {
+    const data = await db.select().from(schema.schools);
+    res.json(data);
+  } catch (err: any) {
+    console.error('Error fetching schools:', err);
+    res.status(500).json({ error: 'Failed to fetch schools' });
+  }
+});
+
+app.post('/api/db/schools', async (req, res) => {
+  try {
+    const payload = req.body;
+    await db.insert(schema.schools).values(payload).onConflictDoUpdate({
+      target: schema.schools.id,
+      set: payload
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Error saving school:', err);
+    res.status(500).json({ error: 'Failed to save school' });
+  }
+});
+
+app.delete('/api/db/schools/:id', async (req, res) => {
+  try {
+    await db.delete(schema.schools).where(eq(schema.schools.id, req.params.id as any));
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to delete school' });
+  }
+});
+
+// School Admins API
+app.get('/api/db/school-admins', async (req, res) => {
+  try {
+    const { schoolId } = req.query as { schoolId?: string };
+    if (schoolId) {
+      const data = await db.select().from(schema.schoolAdmins).where(eq(schema.schoolAdmins.schoolId, schoolId as any));
+      return res.json(data);
+    }
+    const data = await db.select().from(schema.schoolAdmins);
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch school admins' });
+  }
+});
+
+app.post('/api/db/school-admins', async (req, res) => {
+  try {
+    const payload = req.body;
+    await db.insert(schema.schoolAdmins).values(payload).onConflictDoUpdate({
+      target: schema.schoolAdmins.id,
+      set: payload
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to save school admin' });
+  }
+});
+
+// Students API
+app.get('/api/db/students', async (req, res) => {
+  try {
+    const { schoolId } = req.query as { schoolId: string };
+    if (schoolId) {
+      const data = await db.select().from(schema.students).where(eq(schema.students.schoolId, schoolId as any));
+      return res.json(data);
+    }
+    const data = await db.select().from(schema.students);
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch students' });
+  }
+});
+
+app.post('/api/db/students', async (req, res) => {
+  try {
+    const { schoolId, payload } = req.body;
+    const records = Array.isArray(payload) ? payload : [payload];
+    await db.insert(schema.students).values(records.map((s: any) => ({ ...s, schoolId }))).onConflictDoNothing();
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to save students' });
+  }
+});
+
+// Teachers API
+app.get('/api/db/teachers', async (req, res) => {
+  try {
+    const { schoolId } = req.query as { schoolId: string };
+    if (schoolId) {
+      const data = await db.select().from(schema.teachers).where(eq(schema.teachers.schoolId, schoolId as any));
+      return res.json(data);
+    }
+    const data = await db.select().from(schema.teachers);
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch teachers' });
+  }
+});
+
+app.post('/api/db/teachers', async (req, res) => {
+  try {
+    const { schoolId, payload } = req.body;
+    const records = Array.isArray(payload) ? payload : [payload];
+    await db.insert(schema.teachers).values(records.map((t: any) => ({ ...t, schoolId }))).onConflictDoNothing();
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to save teachers' });
+  }
+});
+
+// Exams API
+app.get('/api/db/exams', async (req, res) => {
+  try {
+    const { schoolId } = req.query as { schoolId: string };
+    if (schoolId) {
+      const data = await db.select().from(schema.exams).where(eq(schema.exams.schoolId, schoolId as any));
+      return res.json(data);
+    }
+    const data = await db.select().from(schema.exams);
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch exams' });
+  }
+});
+
+app.post('/api/db/exams', async (req, res) => {
+  try {
+    const { schoolId, payload } = req.body;
+    const records = Array.isArray(payload) ? payload : [payload];
+    await db.insert(schema.exams).values(records.map((e: any) => ({ ...e, schoolId }))).onConflictDoNothing();
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to save exams' });
+  }
+});
+
+// Users API
+app.get('/api/db/users', async (req, res) => {
+  try {
+    const { schoolId } = req.query as { schoolId: string };
+    if (schoolId) {
+      const data = await db.select().from(schema.users).where(eq(schema.users.schoolId, schoolId as any));
+      return res.json(data);
+    }
+    const data = await db.select().from(schema.users);
+    res.json(data);
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to fetch users' });
+  }
+});
+
+// Universal Query Endpoint for Cloud SQL
+app.post('/api/db/query', async (req, res) => {
+  const { table, action, filters, data } = req.body;
+  const tableKeyMap: Record<string, any> = {
+    schools: schema.schools,
+    users: schema.users,
+    students: schema.students,
+    teachers: schema.teachers,
+    classes: schema.classes,
+    exams: schema.exams,
+    school_data: schema.schoolData,
+    school_admins: schema.schoolAdmins,
+    school_subscriptions: schema.schoolSubscriptions,
+    period_attendance: schema.periodAttendance,
+    remedial_timetable: schema.remedialTimetable,
+    remedial_attendance: schema.remedialAttendance,
+    timetables: schema.timetables,
+    parents: schema.parents,
+    discipline_records: schema.disciplineRecords,
+    parent_messages: schema.parentMessages,
+    announcements: schema.announcements,
+    exam_records: schema.examRecords,
+    sitting_plans: schema.sittingPlans,
+    ream_paper_records: schema.reamPaperRecords,
+    periods: schema.periods,
+    period_settings: schema.periodSettings,
+    stream_settings: schema.streamSettings,
+    timetable_assignments: schema.timetableAssignments,
+    subject_period_allocations: schema.subjectPeriodAllocations,
+    teacher_assignments: schema.teacherAssignments,
+  };
+
+  const selectedTable = tableKeyMap[table];
+  if (!selectedTable) {
+    return res.status(400).json({ error: `Table '${table}' is not supported in Cloud SQL schema` });
+  }
+
+  try {
+    if (action === 'select') {
+      let query = db.select().from(selectedTable);
+      if (filters && typeof filters === 'object') {
+        const filterEntries = Object.entries(filters);
+        if (filterEntries.length > 0) {
+          const [col, val] = filterEntries[0];
+          if (selectedTable[col]) {
+            query = query.where(eq(selectedTable[col], val)) as any;
+          }
+        }
+      }
+      const results = await query;
+      return res.json({ success: true, data: results });
+    }
+
+    if (action === 'insert') {
+      const records = Array.isArray(data) ? data : [data];
+      await db.insert(selectedTable).values(records).onConflictDoNothing();
+      return res.json({ success: true });
+    }
+
+    if (action === 'upsert') {
+      const records = Array.isArray(data) ? data : [data];
+      if (records.length > 0) {
+        await db.insert(selectedTable).values(records).onConflictDoNothing();
+      }
+      return res.json({ success: true });
+    }
+
+    if (action === 'delete') {
+      if (filters && typeof filters === 'object') {
+        const filterEntries = Object.entries(filters);
+        if (filterEntries.length > 0) {
+          const [col, val] = filterEntries[0];
+          if (selectedTable[col]) {
+            await db.delete(selectedTable).where(eq(selectedTable[col], val));
+          }
+        }
+      }
+      return res.json({ success: true });
+    }
+
+    return res.status(400).json({ error: `Action '${action}' not supported` });
+  } catch (err: any) {
+    console.error(`Error in /api/db/query for ${table}:`, err?.message || err);
+    return res.status(500).json({ error: err?.message || 'Database query error' });
+  }
+});
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body || {};
+  if (!email) {
+    return res.status(400).json({ success: false, error: 'Email is required' });
+  }
+  const normEmail = String(email).trim().toLowerCase();
+
+  try {
+    // 1. Check SuperAdmin email
+    if (normEmail === 'habibuakida@gmail.com' || normEmail === 'admin@haby.com') {
+      return res.json({
+        success: true,
+        user: {
+          id: 'efbbc146-b15b-49ee-a7ed-931ade8ccd0d',
+          email: normEmail,
+          fullName: 'Mwl. Habibu Akida (Super Admin)',
+          role: 'SUPER_ADMIN',
+          schoolId: '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
+          isSuperAdmin: true
+        }
+      });
+    }
+
+    // 2. Check school_admins in Cloud SQL
+    const admin = await db.query.schoolAdmins.findFirst({
+      where: eq(schema.schoolAdmins.email, normEmail)
+    });
+    if (admin) {
+      return res.json({
+        success: true,
+        user: {
+          id: admin.id,
+          email: admin.email,
+          fullName: admin.fullName || 'School Administrator',
+          role: admin.role === 'super_admin' ? 'SUPER_ADMIN' : 'HEADMASTER',
+          schoolId: admin.schoolId || '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
+          isSuperAdmin: admin.role === 'super_admin'
+        }
+      });
+    }
+
+    // 3. Check users in Cloud SQL
+    const user = await db.query.users.findFirst({
+      where: eq(schema.users.email, normEmail)
+    });
+    if (user) {
+      return res.json({
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          fullName: user.fullName || 'Staff Member',
+          role: user.role || 'TEACHER',
+          schoolId: user.schoolId || '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
+          isSuperAdmin: !!user.isSuperAdmin
+        }
+      });
+    }
+
+    return res.status(401).json({ success: false, error: 'User not found in system.' });
+  } catch (err: any) {
+    console.error('Error in /api/auth/login:', err);
+    // Graceful fallback for Habibu Akida
+    if (normEmail === 'habibuakida@gmail.com' || normEmail === 'admin@haby.com') {
+      return res.json({
+        success: true,
+        user: {
+          id: 'efbbc146-b15b-49ee-a7ed-931ade8ccd0d',
+          email: normEmail,
+          fullName: 'Mwl. Habibu Akida (Super Admin)',
+          role: 'SUPER_ADMIN',
+          schoolId: '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
+          isSuperAdmin: true
+        }
+      });
+    }
+    return res.status(500).json({ success: false, error: 'Database authentication error' });
+  }
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'healthy',
@@ -524,28 +936,75 @@ app.get('/api/project/zip', (req, res) => {
   }
 });
 
+// Attendance API
+app.post('/api/db/attendance', async (req, res) => {
+  const { schoolId, payload } = req.body;
+  await db.insert(schema.periodAttendance).values({...payload, schoolId}).onConflictDoUpdate({
+      target: schema.periodAttendance.id,
+      set: payload
+  });
+  res.json({ success: true });
+});
+
+app.get('/api/db/attendance', async (req, res) => {
+  const { schoolId } = req.query as any;
+  const data = await db.select().from(schema.periodAttendance).where(eq(schema.periodAttendance.schoolId, schoolId));
+  res.json(data);
+});
+
+app.get('/api/db/attendance/weekly', async (req, res) => {
+  const { schoolId } = req.query as any;
+  const data = await db.select().from(schema.periodAttendance).where(eq(schema.periodAttendance.schoolId, schoolId));
+  res.json(data);
+});
+
 // In dev mode, mount Vite middleware; in production or when built, serve dist files
 async function startServer() {
+  const isProduction = process.env.NODE_ENV === 'production';
   const distDir = path.resolve(__dirname, 'dist');
-  const hasDist = fs.existsSync(path.join(distDir, 'index.html'));
-  const isProduction = process.env.NODE_ENV === 'production' && hasDist;
+  const indexPath = path.join(distDir, 'index.html');
+  const hasDist = fs.existsSync(indexPath);
 
   if (isProduction && hasDist) {
     app.use(express.static(distDir));
     app.get('*', (_req, res) => {
-      res.sendFile(path.join(distDir, 'index.html'));
+      if (fs.existsSync(indexPath)) {
+        res.sendFile(indexPath, (err) => {
+          if (err && !res.headersSent) {
+            res.status(500).send('Error loading application');
+          }
+        });
+      } else {
+        res.status(503).send('Application is rebuilding. Please refresh in a moment.');
+      }
     });
   } else {
+    // Development or fallback: mount Vite middleware
     const { createServer } = await import('vite');
     const vite = await createServer({
-      server: { middlewareMode: true },
+      server: { middlewareMode: true, hmr: false },
       appType: 'spa',
     });
     app.use(vite.middlewares);
+    app.get('*', async (req, res, next) => {
+      try {
+        const url = req.originalUrl;
+        const templatePath = path.resolve(__dirname, 'index.html');
+        if (!fs.existsSync(templatePath)) {
+          return next();
+        }
+        let template = fs.readFileSync(templatePath, 'utf-8');
+        template = await vite.transformIndexHtml(url, template);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(template);
+      } catch (e: any) {
+        vite.ssrFixStacktrace(e);
+        next(e);
+      }
+    });
   }
 
   app.listen(port, '0.0.0.0', () => {
-    console.log(`HABY EDU PRO server listening on http://0.0.0.0:${port} (production: ${isProduction})`);
+    console.log(`HABY EDU PRO server listening on http://0.0.0.0:${port} (mode: ${isProduction ? 'production' : 'development'})`);
   });
 }
 

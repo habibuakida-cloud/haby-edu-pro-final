@@ -21,7 +21,7 @@ import {
   ExternalLink,
   ArrowRight
 } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { db } from '../lib/firebaseClient';
 
 // Common NECTA Exam Types
 const EXAM_TYPES = ['STNA', 'SFNA', 'PSLE', 'FTNA', 'CSEE', 'ACSEE'];

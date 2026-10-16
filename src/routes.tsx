@@ -59,6 +59,8 @@ export type ActiveView =
   | 'remedialtimetable'
   | 'remedialanalyzer'
   | 'reampapers'
+  | 'nectaregs'
+  | 'laboratory'
   | 'settings';
 
 export interface SubModuleRoute {
@@ -103,7 +105,8 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
       { id: 'teacherportal', label: 'Sehemu ya Mwalimu (Teacher Hub)', description: 'Kuita majina, kuingiza marks, lesson plan, scheme of work & ripoti za darasa', badge: 'MWALIMU' },
       { id: 'classjournal', label: 'Class Journal', description: 'Classroom period log & daily monitoring book' },
       { id: 'lessonplans', label: 'Lesson Plan', description: 'Prepare, generate & track daily teaching lesson plans' },
-      { id: 'schemes', label: 'Scheme of Work', description: 'Curriculum schemes & weekly topic completion' }
+      { id: 'schemes', label: 'Scheme of Work', description: 'Curriculum schemes & weekly topic completion' },
+      { id: 'laboratory', label: 'Laboratory Inventory', description: 'Physics, Chemistry & Biology lab apparatus, chemicals and equipment tracking', badge: 'LAB' }
     ]
   },
 
@@ -123,7 +126,8 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
       { id: 'sittingplan', label: 'Sitting Plan', description: 'Automated exam hall seating arrangement & desk labels' },
       { id: 'evaluationanalysis', label: 'Evaluation Analysis', description: 'Subject teacher evaluation & class performance audit' },
       { id: 'dailytracker', label: 'Daily Ticker', description: 'Real-time academic activity ticker & lesson log' },
-      { id: 'reampapers', label: 'Ream Paper Records', description: 'Usimamizi wa ream papers zilizoletwa na wanafunzi', badge: 'REAMS' }
+      { id: 'reampapers', label: 'Ream Paper Records', description: 'Usimamizi wa ream papers zilizoletwa na wanafunzi', badge: 'REAMS' },
+      { id: 'nectaregs', label: 'NECTA Reg. Numbers Studio', description: 'Jenereta ya namba za usajili za NECTA zenye boda na mitindo maridadi', badge: 'NECTA' }
     ]
   },
 

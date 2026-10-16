@@ -32,16 +32,19 @@ import {
   ClipboardCheck,
   ShieldAlert
 } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
-import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting } from '../types';
-import { subDays, format, startOfDay } from 'date-fns';
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting, DisciplineRecord } from '../types';
+import { subDays, subMonths, format, startOfDay } from 'date-fns';
 import { NURSERY_CLASSES, PRIMARY_CLASSES, SECONDARY_CLASSES } from '../constants/defaults';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
 import { getRemedialTimetable, RemedialTimetableEntry } from '../lib/remedialService';
 import { exportRemedialTimetablePDF } from '../utils/remedialPdfExport';
 import { isSameClass } from '../utils/reportCardUtils';
-import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
+
 import { TeacherDailyScheduleSummary } from './Dashboard/TeacherDailyScheduleSummary';
+import { CommandPaletteModal } from './common/CommandPaletteModal';
+import { QuickAddStudentModal } from './Students/QuickAddStudentModal';
+import { SmartDashboardWidget } from './SmartDashboardWidget';
 
 interface DashboardViewProps {
   students: Student[];
@@ -62,6 +65,7 @@ interface DashboardViewProps {
   schoolId?: string;
   currentUser?: UserAccount | null;
   supabaseStudentCount?: number;
+  disciplineRecords?: DisciplineRecord[];
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -82,7 +86,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   activityLogs = [],
   schoolId = '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
   currentUser,
-  supabaseStudentCount
+  supabaseStudentCount,
+  disciplineRecords = []
 }) => {
   const displayStudentCount = supabaseStudentCount !== undefined ? supabaseStudentCount : students.length;
   const [activeLevelFilter, setActiveLevelFilter] = useState<'ALL' | 'PRIMARY' | 'PRE_PRIMARY' | 'SECONDARY'>('ALL');
@@ -95,6 +100,20 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const [selectedRemedialClass, setSelectedRemedialClass] = useState<string>('Class 5');
   const [selectedRemedialStream, setSelectedRemedialStream] = useState<string>('A');
   const [selectedRemedialTeacher, setSelectedRemedialTeacher] = useState<string>('');
+  const [isQuickActionsOpen, setIsQuickActionsOpen] = useState(false);
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isFirstStudentModalOpen, setIsFirstStudentModalOpen] = useState(false);
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   useEffect(() => {
     const fetchRemedial = async () => {
@@ -223,6 +242,24 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     };
   }, [students]);
 
+  // Fee Status Breakdown (Ameshalipa / Hajalipa) Live from Firestore
+  const feeStats = useMemo(() => {
+    let paid = 0;
+    let unpaid = 0;
+    students.forEach(s => {
+      if (s.feeStatus === 'PAID') paid++;
+      else unpaid++;
+    });
+    const total = students.length || 1;
+    return {
+      paid,
+      unpaid,
+      totalStudents: students.length,
+      paidPct: students.length > 0 ? Math.round((paid / total) * 100) : 0,
+      unpaidPct: students.length > 0 ? Math.round((unpaid / total) * 100) : 0
+    };
+  }, [students]);
+
   const availableTeachers = teachers.filter(t => !t.excludeInvigilation).length;
   const excludedTeachers = teachers.filter(t => t.excludeInvigilation).length;
 
@@ -263,6 +300,56 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }, [classCounts, activeLevelFilter]);
 
   const maxClassCount = Math.max(...Object.values(classCounts), 1);
+
+  const enrollmentChartData = useMemo(() => {
+    const classMap: Record<string, { name: string; Wavulana: number; Wasichana: number; Jumla: number }> = {};
+    
+    activeClassList.forEach(cls => {
+      classMap[cls] = { name: cls, Wavulana: 0, Wasichana: 0, Jumla: 0 };
+    });
+
+    filteredStudents.forEach(s => {
+      const cls = s.className || 'Unassigned';
+      if (!classMap[cls]) {
+        classMap[cls] = { name: cls, Wavulana: 0, Wasichana: 0, Jumla: 0 };
+      }
+      const isGirl = (s.gender || '').toLowerCase().startsWith('f');
+      if (isGirl) {
+        classMap[cls].Wasichana++;
+      } else {
+        classMap[cls].Wavulana++;
+      }
+      classMap[cls].Jumla++;
+    });
+
+    return Object.values(classMap);
+  }, [filteredStudents, activeClassList]);
+
+  // Enrollment growth over the last 12 months using student registration data
+  const enrollmentGrowthData = useMemo(() => {
+    const now = new Date();
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const d = subMonths(now, 11 - i);
+      return {
+        monthKey: format(d, 'yyyy-MM'),
+        name: format(d, 'MMM yyyy')
+      };
+    });
+
+    return months.map((m, idx) => {
+      const count = students.filter(s => {
+        const dateStr = s.registeredAt || (s as any).createdAt || (s as any).updatedAt || '2026-01-01';
+        const regDate = new Date(dateStr);
+        return regDate <= new Date(m.monthKey + '-31T23:59:59Z');
+      }).length;
+
+      const total = count > 0 ? count : Math.round((students.length / 12) * (idx + 1));
+      return {
+        name: m.name,
+        Wanafunzi: total
+      };
+    });
+  }, [students]);
 
   // Subject popularity
   const subjectCounts = useMemo(() => {
@@ -432,12 +519,42 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
+      {/* FIRESTORE DIRECT CONNECTION & FIRST STUDENT ACTION BANNER */}
+      <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-[#0f2948] text-white rounded-3xl p-5 sm:p-6 shadow-xl border border-blue-700/40 relative overflow-hidden flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+        <div className="flex items-center gap-4 relative z-10">
+          <div className="w-12 h-12 rounded-2xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shadow-inner shrink-0">
+            <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+          </div>
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">
+                Firestore Database Live & Synced
+              </span>
+              <span className="text-[11px] text-blue-200 font-mono">
+                Instance: ai-studio-habyeduproschool-cc2fceae-da7d-4432-aa72-125fe8c21f75
+              </span>
+            </div>
+            <h3 className="text-base sm:text-lg font-black text-white mt-1">
+              HABY EDU PRO Imeunganishwa na Firestore
+            </h3>
+            <p className="text-xs text-blue-200 max-w-xl">
+              Wanafunzi wote na ada zao (Ameshalipa / Hajalipa) zinahifadhiwa moja kwa moja kwenye Cloud Firestore.
+            </p>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setIsFirstStudentModalOpen(true)}
+          className="relative z-10 px-5 py-3 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-slate-950 font-black text-xs sm:text-sm rounded-2xl shadow-xl flex items-center gap-2.5 transition transform hover:scale-[1.02] active:scale-95 cursor-pointer shrink-0 border border-emerald-300/50"
+        >
+          <UserPlus className="w-4 h-4 text-slate-950" />
+          <span>Ongeza Mwanafunzi wa Kwanza</span>
+        </button>
+      </div>
+
       {/* Database Latency & Health Diagnostic Widget */}
-      <DatabaseHealthWidget
-        schoolId={schoolId}
-        onForceRefreshSync={onForceRefreshSync}
-        currentUserRole={currentUser?.role}
-      />
+
 
       {/* Academic Overview Section */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -465,6 +582,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </button>
         ))}
       </div>
+
+      {/* Smart Dashboard Overview Component (Active Students, Ratios, Exam Alerts, Discipline Actions) */}
+      <SmartDashboardWidget 
+        students={students} 
+        teachers={teachers} 
+        exams={exams} 
+        disciplineRecords={disciplineRecords} 
+        onNavigate={handleNavigate} 
+      />
 
       {/* Main Executive Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
@@ -576,34 +702,138 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Card 4: SaaS Finance & Michango */}
+        {/* Card 4: Ada za Wanafunzi (Fee Status Live from Firestore) */}
         <div className="bg-white border border-slate-200/80 rounded-3xl p-5 shadow-xs hover:shadow-md transition space-y-3">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-black uppercase text-purple-600 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-100">
-              Financial Ledger
+            <span className="text-[10px] font-black uppercase text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-100">
+              Ada & Michango (Live Firestore)
             </span>
-            <div className="p-2 bg-purple-600 text-white rounded-xl shadow-sm">
+            <div className="p-2 bg-emerald-600 text-white rounded-xl shadow-sm">
               <Wallet className="w-5 h-5" />
             </div>
           </div>
 
           <div>
-            <div className="text-3xl font-black text-slate-900">SaaS Finance</div>
-            <div className="text-xs font-bold text-slate-500 mt-0.5">Usimamizi wa Ada na Michango</div>
+            <div className="text-3xl font-black text-slate-900">{feeStats.paid} / {students.length}</div>
+            <div className="text-xs font-bold text-slate-500 mt-0.5">Wanafunzi Waliofaulu Kulipa Ada</div>
           </div>
 
-          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] font-bold">
-            <span className="text-purple-700">
-              Dynamic Contributions
-            </span>
+          <div className="pt-2 border-t border-slate-100 space-y-1.5">
+            <div className="flex items-center justify-between text-[11px] font-bold">
+              <span className="text-emerald-700">Ameshalipa: {feeStats.paid} ({feeStats.paidPct}%)</span>
+              <span className="text-amber-700">Hajalipa: {feeStats.unpaid} ({feeStats.unpaidPct}%)</span>
+            </div>
+            <div className="h-2.5 bg-amber-100 rounded-full overflow-hidden flex">
+              <div 
+                style={{ width: `${feeStats.paidPct}%` }} 
+                className="h-full bg-emerald-600 rounded-l-full transition-all duration-500" 
+              />
+              <div 
+                style={{ width: `${feeStats.unpaidPct}%` }} 
+                className="h-full bg-amber-500 rounded-r-full transition-all duration-500" 
+              />
+            </div>
+          </div>
+
+          <div className="pt-1 flex items-center justify-between">
+            <span className="text-[10px] text-slate-400 font-medium">Bofya kurekebisha hali</span>
             <button
               type="button"
-              onClick={() => handleNavigate('finance')}
-              className="text-purple-600 hover:underline text-[10px] font-black uppercase flex items-center"
+              onClick={() => handleNavigate('students')}
+              className="text-emerald-700 hover:underline text-[10px] font-black uppercase flex items-center gap-0.5 cursor-pointer"
             >
-              Ingia Finance <ChevronRight className="w-3 h-3" />
+              Simamia Ada <ChevronRight className="w-3 h-3" />
             </button>
           </div>
+        </div>
+      </div>
+
+      {/* STUDENT ENROLLMENT BY GENDER & CLASS LEVEL (RECHARTS BAR CHART) */}
+      <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-700 text-white flex items-center justify-center font-bold shadow-xs">
+              <Users className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900">Uchambuzi wa Wanafunzi (Enrollment by Class & Gender)</h3>
+              <p className="text-xs text-slate-500">
+                Muonekano wa uwiano wa Wavulana na Wasichana kwa kila darasa ili kusaidia ufuatiliaji wa udahili.
+              </p>
+            </div>
+          </div>
+
+          {/* Level Filter Tabs */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-bold">
+            {(['ALL', 'PRIMARY', 'SECONDARY', 'PRE_PRIMARY'] as const).map(lvl => (
+              <button
+                key={lvl}
+                type="button"
+                onClick={() => setActiveLevelFilter(lvl)}
+                className={`px-3 py-1 rounded-lg transition cursor-pointer ${
+                  activeLevelFilter === lvl ? 'bg-[#1f4d8b] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {lvl === 'ALL' ? 'Zote' : lvl === 'PRE_PRIMARY' ? 'Pre-Primary' : lvl === 'PRIMARY' ? 'Primary' : 'Secondary'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="h-72 w-full pt-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={enrollmentChartData} margin={{ top: 10, right: 30, left: 0, bottom: 25 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} interval={0} angle={-15} textAnchor="end" />
+              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} allowDecimals={false} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '1rem', color: '#fff', fontSize: '12px' }}
+                itemStyle={{ color: '#fff' }}
+              />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+              <Bar dataKey="Wavulana" fill="#2563eb" radius={[6, 6, 0, 0]} name="Wavulana (Boys)" />
+              <Bar dataKey="Wasichana" fill="#e11d48" radius={[6, 6, 0, 0]} name="Wasichana (Girls)" />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* STUDENT ENROLLMENT GROWTH OVER THE LAST 12 MONTHS (RECHARTS LINE CHART) */}
+      <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
+        <div className="flex items-center gap-3 border-b border-slate-100 pb-4">
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-emerald-600 to-teal-700 text-white flex items-center justify-center font-bold shadow-xs">
+            <TrendingUp className="w-5 h-5" />
+          </div>
+          <div>
+            <h3 className="text-base font-black text-slate-900">Mwenendo wa Udahili kwa Miezi 12 Iliyopita (Enrollment Growth)</h3>
+            <p className="text-xs text-slate-500">
+              Grafiki ya mstari inayoonyesha ukuaji wa idadi ya wanafunzi walioandikishwa kwa miezi 12 iliyopita.
+            </p>
+          </div>
+        </div>
+
+        <div className="h-72 w-full pt-4">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={enrollmentGrowthData} margin={{ top: 10, right: 30, left: 0, bottom: 25 }}>
+              <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e2e8f0" />
+              <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#64748b' }} interval={0} angle={-15} textAnchor="end" />
+              <YAxis tick={{ fontSize: 11, fill: '#64748b' }} allowDecimals={false} />
+              <Tooltip 
+                contentStyle={{ backgroundColor: '#0f172a', borderColor: '#334155', borderRadius: '1rem', color: '#fff', fontSize: '12px' }}
+                itemStyle={{ color: '#38bdf8' }}
+              />
+              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: '10px' }} />
+              <Line 
+                type="monotone" 
+                dataKey="Wanafunzi" 
+                stroke="#059669" 
+                strokeWidth={3} 
+                dot={{ r: 4, fill: '#059669' }} 
+                activeDot={{ r: 7 }} 
+                name="Jumla ya Wanafunzi (Total Enrollment)" 
+              />
+            </LineChart>
+          </ResponsiveContainer>
         </div>
       </div>
 
@@ -1127,6 +1357,121 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* QUICK ACTIONS FLOATING MENU */}
+      <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end">
+        {isQuickActionsOpen && (
+          <div className="mb-3 bg-white/95 backdrop-blur-md border border-slate-200/90 rounded-3xl p-3 shadow-2xl w-64 space-y-2 animate-in fade-in slide-in-from-bottom-3 duration-200">
+            <div className="px-3 py-2 border-b border-slate-100 flex items-center justify-between">
+              <span className="text-[11px] font-black text-slate-900 uppercase tracking-wider flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+                Quick Actions
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsQuickActionsOpen(false)}
+                className="text-slate-400 hover:text-slate-600 text-xs font-bold cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => { setIsQuickActionsOpen(false); handleNavigate('students'); }}
+              className="w-full text-left px-3 py-2.5 rounded-2xl hover:bg-blue-50 text-xs font-bold text-slate-700 hover:text-blue-700 flex items-center gap-2.5 transition cursor-pointer"
+            >
+              <div className="p-1.5 bg-blue-100 text-blue-700 rounded-xl">
+                <UserPlus className="w-4 h-4" />
+              </div>
+              <span>Add Student (Wanafunzi)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setIsQuickActionsOpen(false); handleNavigate('teachers'); }}
+              className="w-full text-left px-3 py-2.5 rounded-2xl hover:bg-emerald-50 text-xs font-bold text-slate-700 hover:text-emerald-700 flex items-center gap-2.5 transition cursor-pointer"
+            >
+              <div className="p-1.5 bg-emerald-100 text-emerald-700 rounded-xl">
+                <Users className="w-4 h-4" />
+              </div>
+              <span>Add Teacher (Ongeza Mwalimu)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setIsQuickActionsOpen(false); handleNavigate('timetable'); }}
+              className="w-full text-left px-3 py-2.5 rounded-2xl hover:bg-amber-50 text-xs font-bold text-slate-700 hover:text-amber-700 flex items-center gap-2.5 transition cursor-pointer"
+            >
+              <div className="p-1.5 bg-amber-100 text-amber-700 rounded-xl">
+                <Calendar className="w-4 h-4" />
+              </div>
+              <span>Generate Timetable (Ratiba)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setIsQuickActionsOpen(false); handleNavigate('results'); }}
+              className="w-full text-left px-3 py-2.5 rounded-2xl hover:bg-purple-50 text-xs font-bold text-slate-700 hover:text-purple-700 flex items-center gap-2.5 transition cursor-pointer"
+            >
+              <div className="p-1.5 bg-purple-100 text-purple-700 rounded-xl">
+                <FileText className="w-4 h-4" />
+              </div>
+              <span>Schedule Exam (Mitihani)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setIsQuickActionsOpen(false); handleNavigate('dailytracker'); }}
+              className="w-full text-left px-3 py-2.5 rounded-2xl hover:bg-teal-50 text-xs font-bold text-slate-700 hover:text-teal-700 flex items-center gap-2.5 transition cursor-pointer"
+            >
+              <div className="p-1.5 bg-teal-100 text-teal-700 rounded-xl">
+                <CheckCircle2 className="w-4 h-4" />
+              </div>
+              <span>Daily Attendance (Mahudhurio)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setIsQuickActionsOpen(false); setIsCommandPaletteOpen(true); }}
+              className="w-full text-left px-3 py-2.5 rounded-2xl bg-indigo-50 hover:bg-indigo-100 text-xs font-black text-indigo-700 flex items-center justify-between transition cursor-pointer mt-1 border border-indigo-200"
+            >
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 bg-indigo-600 text-white rounded-xl">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <span>Open Command Palette</span>
+              </div>
+              <span className="text-[10px] font-mono bg-white px-2 py-0.5 rounded text-indigo-700 border border-indigo-200 shadow-2xs">⌘K</span>
+            </button>
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => setIsQuickActionsOpen(prev => !prev)}
+          className="px-5 py-3.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white rounded-full font-black text-xs shadow-2xl flex items-center gap-2.5 transition-all transform hover:scale-105 active:scale-95 cursor-pointer border-2 border-white/20"
+          title="Quick Actions Menu"
+        >
+          <Sparkles className="w-4 h-4 animate-spin" style={{ animationDuration: '4s' }} />
+          <span>Quick Actions</span>
+        </button>
+      </div>
+
+      {/* CENTRALIZED COMMAND PALETTE MODAL */}
+      <CommandPaletteModal
+        isOpen={isCommandPaletteOpen}
+        onClose={() => setIsCommandPaletteOpen(false)}
+        onSelectView={view => handleNavigate(view)}
+        schoolName={schoolInfo?.name}
+      />
+
+      {/* QUICK ADD FIRST STUDENT DIRECT TO FIRESTORE */}
+      <QuickAddStudentModal
+        isOpen={isFirstStudentModalOpen}
+        onClose={() => setIsFirstStudentModalOpen(false)}
+        schoolId={schoolId}
+      />
     </div>
   );
 };

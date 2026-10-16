@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/supabaseClient';
+import { db, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
+import { collection, query, where, getDocs, doc, setDoc, getDoc, orderBy } from 'firebase/firestore';
 import { 
   Calendar, CheckSquare, Square, FileText, Printer, Download, Award, 
   CheckCircle, AlertTriangle, UserCheck, BookOpen, Clock, GraduationCap, 
@@ -44,26 +45,22 @@ export const TeachingPeriodTrackingView: React.FC<TeachingPeriodTrackingViewProp
     setLoading(true);
     const schoolId = currentUser?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID;
     try {
-      // 1. Fetch timetables for class & stream
-      const { data: tData } = await supabase
-        .from('timetables')
-        .select('*')
-        .eq('school_id', schoolId)
-        .eq('class_id', selectedClass);
+      const timetablesRef = collection(db, 'timetables');
+      const q = query(timetablesRef, where('school_id', '==', schoolId), where('class_id', '==', selectedClass));
+      const tSnapshot = await getDocs(q);
+      const tData = tSnapshot.docs.map(doc => doc.data());
       
-      setTimetables(tData || [
-        // Demo default timetable slots if empty
+      setTimetables(tData.length > 0 ? tData : [
         { id: 't1', class_id: selectedClass, stream: selectedStream, day_of_week: 'Monday', period_number: 1, subject_id: 'Mathematics', teacher_id: teachers[0]?.id || 1, time_start: '08:00', time_end: '08:40' },
         { id: 't2', class_id: selectedClass, stream: selectedStream, day_of_week: 'Monday', period_number: 2, subject_id: 'English', teacher_id: teachers[1]?.id || 2, time_start: '08:40', time_end: '09:20' },
         { id: 't3', class_id: selectedClass, stream: selectedStream, day_of_week: 'Tuesday', period_number: 1, subject_id: 'Physics', teacher_id: teachers[2]?.id || 3, time_start: '08:00', time_end: '08:40' }
       ]);
 
-      // 2. Fetch teaching logs
-      const { data: lData } = await supabase
-        .from('teaching_logs')
-        .select('*')
-        .gte('date', dateFrom)
-        .lte('date', dateTo);
+      const logsRef = collection(db, 'teaching_logs');
+      const lQuery = query(logsRef, where('date', '>=', dateFrom), where('date', '<=', dateTo));
+      const lSnapshot = await getDocs(lQuery);
+      const lData = lSnapshot.docs.map(doc => doc.data());
+      
       setTeachingLogs(lData || []);
 
     } catch (e) {
@@ -88,7 +85,8 @@ export const TeachingPeriodTrackingView: React.FC<TeachingPeriodTrackingViewProp
     };
 
     try {
-      await supabase.from('teaching_logs').upsert(updatedLog, { onConflict: 'id' });
+      await setDoc(doc(db, 'teaching_logs', logId), updatedLog);
+      
       setTeachingLogs(prev => {
         if (existingIndex >= 0) {
           const next = [...prev];

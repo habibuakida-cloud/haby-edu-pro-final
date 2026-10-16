@@ -1,4 +1,5 @@
-import { supabase, resilientUpsert } from './supabaseClient';
+import { db } from './dbClient';
+import { collection, query, where, getDocs, doc, setDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import { EnvironmentEquipment, EquipmentUsageLog, EnvironmentOrder, SchoolPurchasedEquipment } from '../types';
 
 const LOCAL_STORAGE_EQUIPMENT_KEY = 'haby_environment_equipment_';
@@ -139,28 +140,29 @@ export async function fetchEquipmentList(schoolId: string): Promise<EnvironmentE
   const localList = getLocalEquipment(schoolId);
 
   try {
-    const { data, error } = await supabase
-      .from('environment_equipment')
-      .select('*')
-      .eq('school_id', schoolId)
-      .order('created_at', { ascending: false });
-
-    if (error) return localList;
-
-    if (data && data.length > 0) {
-      const formatted: EnvironmentEquipment[] = data.map((d: any) => ({
-        id: String(d.id),
-        name: d.name || 'Kifaa Kisichojulikana',
-        category: d.category || 'Vinginevyo',
-        quantity: Number(d.quantity || 0),
-        condition: (d.condition || 'Nzuri') as any,
-        location: d.location || 'Stoo ya Mazingira',
-        purchase_date: d.purchase_date || '',
-        added_by: d.added_by || '',
-        school_id: d.school_id || schoolId,
-        created_at: d.created_at || new Date().toISOString(),
-        updated_at: d.updated_at || d.created_at || new Date().toISOString()
-      }));
+    const q = query(
+      collection(db, 'environment_equipment'),
+      where('school_id', '==', schoolId),
+      orderBy('created_at', 'desc')
+    );
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const formatted: EnvironmentEquipment[] = querySnapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: String(d.id),
+          name: data.name || 'Kifaa Kisichojulikana',
+          category: data.category || 'Vinginevyo',
+          quantity: Number(data.quantity || 0),
+          condition: (data.condition || 'Nzuri') as any,
+          location: data.location || 'Stoo ya Mazingira',
+          purchase_date: data.purchase_date || '',
+          added_by: data.added_by || '',
+          school_id: data.school_id || schoolId,
+          created_at: data.created_at || new Date().toISOString(),
+          updated_at: data.updated_at || data.created_at || new Date().toISOString()
+        };
+      });
       setLocalEquipment(schoolId, formatted);
       return formatted;
     }
@@ -217,8 +219,8 @@ export async function saveEquipmentItem(
       updated_at: now
     };
 
-    const res = await resilientUpsert('environment_equipment', payload, { onConflict: 'id' });
-    return { data: fullItem, error: res.error };
+    await setDoc(doc(db, 'environment_equipment', itemId), payload, { merge: true });
+    return { data: fullItem, error: null };
   } catch (err: any) {
     return { data: fullItem, error: err };
   }
@@ -230,7 +232,7 @@ export async function deleteEquipmentItem(schoolId: string, id: string): Promise
   setLocalEquipment(schoolId, filtered);
 
   try {
-    await supabase.from('environment_equipment').delete().eq('id', id);
+    await deleteDoc(doc(db, 'environment_equipment', id));
   } catch (err) {}
   return true;
 }
@@ -240,29 +242,30 @@ export async function fetchUsageLogs(schoolId: string): Promise<EquipmentUsageLo
   const localLogs = getLocalUsageLogs(schoolId);
 
   try {
-    const { data, error } = await supabase
-      .from('equipment_usage_log')
-      .select('*')
-      .eq('school_id', schoolId)
-      .order('created_at', { ascending: false });
-
-    if (error) return localLogs;
-
-    if (data && data.length > 0) {
-      const formatted: EquipmentUsageLog[] = data.map((d: any) => ({
-        id: String(d.id),
-        equipment_id: String(d.equipment_id || ''),
-        equipment_name: d.equipment_name || '',
-        used_by: d.used_by || 'Haijabainishwa',
-        quantity_used: Number(d.quantity_used || 1),
-        purpose: d.purpose || 'Usafi wa Mazingira',
-        date_used: d.date_used || new Date().toISOString().split('T')[0],
-        returned_date: d.returned_date || null,
-        status: (d.status || 'Imetumika') as any,
-        notes: d.notes || '',
-        school_id: d.school_id || schoolId,
-        created_at: d.created_at || new Date().toISOString()
-      }));
+    const q = query(
+      collection(db, 'equipment_usage_log'),
+      where('school_id', '==', schoolId),
+      orderBy('created_at', 'desc')
+    );
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const formatted: EquipmentUsageLog[] = querySnapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: String(d.id),
+          equipment_id: String(data.equipment_id || ''),
+          equipment_name: data.equipment_name || '',
+          used_by: data.used_by || 'Haijabainishwa',
+          quantity_used: Number(data.quantity_used || 1),
+          purpose: data.purpose || 'Usafi wa Mazingira',
+          date_used: data.date_used || new Date().toISOString().split('T')[0],
+          returned_date: data.returned_date || null,
+          status: (data.status || 'Imetumika') as any,
+          notes: data.notes || '',
+          school_id: data.school_id || schoolId,
+          created_at: data.created_at || new Date().toISOString()
+        };
+      });
       setLocalUsageLogs(schoolId, formatted);
       return formatted;
     }
@@ -324,8 +327,8 @@ export async function logUsageEntry(
       school_id: schoolId
     };
 
-    const res = await resilientUpsert('equipment_usage_log', payload, { onConflict: 'id' });
-    return { data: fullLog, error: res.error };
+    await setDoc(doc(db, 'equipment_usage_log', logId), payload, { merge: true });
+    return { data: fullLog, error: null };
   } catch (err: any) {
     return { data: fullLog, error: err };
   }
@@ -370,7 +373,7 @@ export async function returnEquipmentItem(
         notes: currentLogs[logIndex].notes,
         school_id: schoolId
       };
-      await resilientUpsert('equipment_usage_log', payload, { onConflict: 'id' });
+      await setDoc(doc(db, 'equipment_usage_log', logId), payload, { merge: true });
     } catch (e) {}
 
     return true;
@@ -398,30 +401,31 @@ export async function fetchEnvironmentOrders(schoolId: string): Promise<Environm
   if (!schoolId) return [];
   const local = getLocalOrders(schoolId);
   try {
-    const { data, error } = await supabase
-      .from('environment_orders')
-      .select('*')
-      .eq('school_id', schoolId)
-      .order('created_at', { ascending: false });
-
-    if (error) return local;
-
-    if (data && data.length > 0) {
-      const formatted: EnvironmentOrder[] = data.map((d: any) => ({
-        id: String(d.id),
-        student_id: d.student_id || '',
-        student_name: d.student_name || '',
-        class: d.class || '',
-        stream: d.stream || '',
-        equipment_name: d.equipment_name || '',
-        quantity_ordered: Number(d.quantity_ordered || 1),
-        order_date: d.order_date || new Date().toISOString().split('T')[0],
-        status: (d.status || 'Imeagizwa') as any,
-        notes: d.notes || '',
-        ordered_by: d.ordered_by || '',
-        school_id: d.school_id || schoolId,
-        created_at: d.created_at || new Date().toISOString()
-      }));
+    const q = query(
+      collection(db, 'environment_orders'),
+      where('school_id', '==', schoolId),
+      orderBy('created_at', 'desc')
+    );
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const formatted: EnvironmentOrder[] = querySnapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: String(d.id),
+          student_id: data.student_id || '',
+          student_name: data.student_name || '',
+          class: data.class || '',
+          stream: data.stream || '',
+          equipment_name: data.equipment_name || '',
+          quantity_ordered: Number(data.quantity_ordered || 1),
+          order_date: data.order_date || new Date().toISOString().split('T')[0],
+          status: (data.status || 'Imeagizwa') as any,
+          notes: data.notes || '',
+          ordered_by: data.ordered_by || '',
+          school_id: data.school_id || schoolId,
+          created_at: data.created_at || new Date().toISOString()
+        };
+      });
       setLocalOrders(schoolId, formatted);
       return formatted;
     }
@@ -481,8 +485,8 @@ export async function saveEnvironmentOrder(
       school_id: schoolId
     };
 
-    const res = await resilientUpsert('environment_orders', payload, { onConflict: 'id' });
-    return { data: fullOrder, error: res.error };
+    await setDoc(doc(db, 'environment_orders', id), payload, { merge: true });
+    return { data: fullOrder, error: null };
   } catch (err) {
     return { data: fullOrder, error: err };
   }
@@ -494,7 +498,7 @@ export async function deleteEnvironmentOrder(schoolId: string, orderId: string):
   setLocalOrders(schoolId, updated);
 
   try {
-    await supabase.from('environment_orders').delete().eq('id', orderId);
+    await deleteDoc(doc(db, 'environment_orders', orderId));
   } catch (e) {}
 
   return true;
@@ -521,31 +525,32 @@ export async function fetchSchoolPurchasedEquipment(schoolId: string): Promise<S
   if (!schoolId) return [];
   const local = getLocalPurchases(schoolId);
   try {
-    const { data, error } = await supabase
-      .from('school_purchased_equipment')
-      .select('*')
-      .eq('school_id', schoolId)
-      .order('created_at', { ascending: false });
-
-    if (error) return local;
-
-    if (data && data.length > 0) {
-      const formatted: SchoolPurchasedEquipment[] = data.map((d: any) => ({
-        id: String(d.id),
-        equipment_name: d.equipment_name || '',
-        category: d.category || 'Kilimo',
-        quantity_bought: Number(d.quantity_bought || 1),
-        unit_price: Number(d.unit_price || 0),
-        total_cost: Number(d.total_cost || (Number(d.quantity_bought || 1) * Number(d.unit_price || 0))),
-        supplier: d.supplier || '',
-        purchase_date: d.purchase_date || new Date().toISOString().split('T')[0],
-        receipt_number: d.receipt_number || '',
-        condition: (d.condition || 'Nzuri') as any,
-        storage_location: d.storage_location || '',
-        school_id: d.school_id || schoolId,
-        added_by: d.added_by || '',
-        created_at: d.created_at || new Date().toISOString()
-      }));
+    const q = query(
+      collection(db, 'school_purchased_equipment'),
+      where('school_id', '==', schoolId),
+      orderBy('created_at', 'desc')
+    );
+    const querySnapshot = await getDocs(q);
+    if (!querySnapshot.empty) {
+      const formatted: SchoolPurchasedEquipment[] = querySnapshot.docs.map(d => {
+        const data = d.data();
+        return {
+          id: String(d.id),
+          equipment_name: data.equipment_name || '',
+          category: data.category || 'Kilimo',
+          quantity_bought: Number(data.quantity_bought || 1),
+          unit_price: Number(data.unit_price || 0),
+          total_cost: Number(data.total_cost || (Number(data.quantity_bought || 1) * Number(data.unit_price || 0))),
+          supplier: data.supplier || '',
+          purchase_date: data.purchase_date || new Date().toISOString().split('T')[0],
+          receipt_number: data.receipt_number || '',
+          condition: (data.condition || 'Nzuri') as any,
+          storage_location: data.storage_location || '',
+          school_id: data.school_id || schoolId,
+          added_by: data.added_by || '',
+          created_at: data.created_at || new Date().toISOString()
+        };
+      });
       setLocalPurchases(schoolId, formatted);
       return formatted;
     }
@@ -611,8 +616,8 @@ export async function saveSchoolPurchasedItem(
       added_by: fullItem.added_by
     };
 
-    const res = await resilientUpsert('school_purchased_equipment', payload, { onConflict: 'id' });
-    return { data: fullItem, error: res.error };
+    await setDoc(doc(db, 'school_purchased_equipment', id), payload, { merge: true });
+    return { data: fullItem, error: null };
   } catch (err) {
     return { data: fullItem, error: err };
   }
@@ -624,7 +629,7 @@ export async function deleteSchoolPurchasedItem(schoolId: string, itemId: string
   setLocalPurchases(schoolId, updated);
 
   try {
-    await supabase.from('school_purchased_equipment').delete().eq('id', itemId);
+    await deleteDoc(doc(db, 'school_purchased_equipment', itemId));
   } catch (e) {}
 
   return true;

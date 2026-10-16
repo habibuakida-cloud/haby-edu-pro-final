@@ -1109,6 +1109,7 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
                   <tr>
                     <th className="p-2 w-10 text-center font-bold border border-slate-300 print:border-black">Pos</th>
                     <th className="p-2 font-bold min-w-[140px] border border-slate-300 print:border-black">Candidate Name</th>
+                    <th className="p-2 text-center w-20 font-bold border border-slate-300 print:border-black">Reg No</th>
                     <th className="p-2 text-center w-8 font-bold border border-slate-300 print:border-black">Sex</th>
                     <th className="p-2 text-center w-16 font-bold border border-slate-300 print:border-black">Class</th>
                     
@@ -1174,6 +1175,11 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
                         <td className="p-1.5 font-bold border border-slate-200 print:border-black">
                           <div className="font-bold text-slate-950 text-xs print:text-[8px]">{rec.studentName}</div>
                           <div className="text-[10px] text-slate-400 font-mono no-print">ID: {rec.studentId}</div>
+                        </td>
+
+                        {/* Reg No */}
+                        <td className="p-1.5 text-center font-mono text-xs print:text-[8px] border border-slate-200 print:border-black">
+                          {rec.regNo || matchingStudent.regNo || '-'}
                         </td>
 
                         {/* Sex */}

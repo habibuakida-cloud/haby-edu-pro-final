@@ -415,3 +415,216 @@ export const savedInvigilationRecords = pgTable('saved_invigilation_records', {
   dutyRoster: jsonb('duty_roster').default([]),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+export const parents = pgTable('parents', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  phone: text('phone').notNull().unique(),
+  passwordHash: text('password_hash').notNull(),
+  fullName: text('full_name').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const parentStudents = pgTable('parent_students', {
+  parentId: uuid('parent_id').references(() => parents.id, { onDelete: 'cascade' }).notNull(),
+  studentId: uuid('student_id').references(() => students.id, { onDelete: 'cascade' }).notNull(),
+}, (t) => ({
+  pk: primaryKey({ columns: [t.parentId, t.studentId] }),
+}));
+
+export const announcements = pgTable('announcements', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const parentMessages = pgTable('parent_messages', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  parentId: uuid('parent_id').references(() => parents.id, { onDelete: 'cascade' }),
+  parentPhone: text('parent_phone'),
+  parentName: text('parent_name'),
+  studentId: uuid('student_id'),
+  studentName: text('student_name'),
+  message: text('message').notNull(),
+  sender: text('sender').default('parent'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const schoolSubscriptions = pgTable('school_subscriptions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  trialStartedAt: timestamp('trial_started_at'),
+  subscriptionExpiry: timestamp('subscription_expiry').defaultNow(),
+  subscriptionType: text('subscription_type').default('TRIAL'),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const schoolAdmins = pgTable('school_admins', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  email: text('email').notNull(),
+  fullName: text('full_name'),
+  role: text('role').default('HEADMASTER'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const remedialPaymentSettings = pgTable('remedial_payment_settings', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  className: text('class_name'),
+  ratePerPeriod: numeric('rate_per_period').default('5000'),
+  effectiveDate: date('effective_date').defaultNow(),
+});
+
+export const sittingPlans = pgTable('sitting_plans', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  roomName: text('room_name').notNull(),
+  examDate: date('exam_date'),
+  examSession: text('exam_session'),
+  totalCandidates: integer('total_candidates').default(0),
+  gridLayout: jsonb('grid_layout').default({}),
+  theme: text('theme').default('navy'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const gatePassLogs = pgTable('gate_pass_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  studentId: uuid('student_id'),
+  studentName: text('student_name'),
+  regNo: text('reg_no'),
+  className: text('class_name'),
+  stream: text('stream'),
+  type: text('type'),
+  reason: text('reason'),
+  officerName: text('officer_name'),
+  timestamp: timestamp('timestamp').defaultNow(),
+  status: text('status').default('VALID'),
+  feeStatus: text('fee_status'),
+});
+
+export const periods = pgTable('periods', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  startTime: text('start_time').notNull(),
+  endTime: text('end_time').notNull(),
+  isBreak: boolean('is_break').default(false),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const subjects = pgTable('subjects', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  code: text('code'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const teachingLogs = pgTable('teaching_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  teacherId: uuid('teacher_id'),
+  teacherName: text('teacher_name'),
+  className: text('class_name'),
+  subject: text('subject'),
+  date: date('date'),
+  topic: text('topic'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const authorizedStaff = pgTable('authorized_staff', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  role: text('role').default('TEACHER'),
+  assignedSubjects: jsonb('assigned_subjects').default([]),
+  isActive: boolean('is_active').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const environmentEquipment = pgTable('environment_equipment', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  category: text('category').default('Usafi'),
+  quantity: integer('quantity').default(1),
+  condition: text('condition').default('Nzuri'),
+  location: text('location').default('Stoo ya Mazingira'),
+  purchaseDate: date('purchase_date').defaultNow(),
+  addedBy: text('added_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const equipmentUsageLog = pgTable('equipment_usage_log', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  equipmentId: uuid('equipment_id').references(() => environmentEquipment.id, { onDelete: 'cascade' }),
+  usedBy: text('used_by').notNull(),
+  quantityUsed: integer('quantity_used').default(1),
+  purpose: text('purpose'),
+  dateUsed: date('date_used').defaultNow(),
+  returnedDate: date('returned_date'),
+  status: text('status').default('Imetumika'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const environmentOrders = pgTable('environment_orders', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  studentId: text('student_id'),
+  studentName: text('student_name').notNull(),
+  class: text('class').notNull(),
+  stream: text('stream'),
+  equipmentName: text('equipment_name').notNull(),
+  quantityOrdered: integer('quantity_ordered').default(1),
+  orderDate: date('order_date').defaultNow(),
+  status: text('status').default('Imeagizwa'),
+  notes: text('notes'),
+  orderedBy: text('ordered_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const schoolPurchasedEquipment = pgTable('school_purchased_equipment', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  equipmentName: text('equipment_name').notNull(),
+  category: text('category').default('Kilimo'),
+  quantityBought: integer('quantity_bought').default(1),
+  unitPrice: numeric('unit_price').default('0'),
+  totalCost: numeric('total_cost').default('0'),
+  supplier: text('supplier'),
+  purchaseDate: date('purchase_date').defaultNow(),
+  receiptNumber: text('receipt_number'),
+  condition: text('condition').default('Nzuri'),
+  storageLocation: text('storage_location'),
+  addedBy: text('added_by'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const reamPaperRecords = pgTable('ream_paper_records', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  studentId: text('student_id'),
+  studentName: text('student_name').notNull(),
+  class: text('class').notNull(),
+  stream: text('stream'),
+  reamsBrought: numeric('reams_brought').default('1'),
+  dateBrought: date('date_brought').defaultNow(),
+  term: text('term').default('Muhula 1'),
+  academicYear: text('academic_year').default('2026'),
+  receivedBy: text('received_by'),
+  notes: text('notes'),
+  createdAt: timestamp('created_at').defaultNow(),
+});

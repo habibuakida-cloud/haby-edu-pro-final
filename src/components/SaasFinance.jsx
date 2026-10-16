@@ -19,9 +19,9 @@ import {
   RefreshCw,
   Wallet
 } from 'lucide-react';
-import { supabase } from '../lib/supabaseClient';
+import { db } from '../lib/firebaseClient';
 
-import { saveSchoolData, getSchoolData } from '../lib/supabaseService';
+import { saveSchoolData, getSchoolData } from '../lib/dataService';
 
 const AVAILABLE_CLASS_LEVELS = [
   'Form 1',

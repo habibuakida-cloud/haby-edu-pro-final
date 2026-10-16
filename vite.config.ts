@@ -40,7 +40,6 @@ export default defineConfig(() => {
     resolve: {
       alias: {
         '@': path.resolve(import.meta.dirname, '.'),
-        'firebase/firestore': path.resolve(import.meta.dirname, 'src/lib/firestoreShim.ts'),
       },
     },
     server: {

@@ -24,8 +24,7 @@ import {
 } from 'lucide-react';
 import { HabyEduProLogo } from './HabyEduProLogo';
 import { QRCodeSVG } from 'qrcode.react';
-import { supabase } from '../../lib/supabaseClient';
-import { getAll } from '../../lib/supabaseClient';
+import { db, supabase, getAll } from '../../lib/dbClient';
 
 interface VerifiedStudentProfileViewProps {
   regNo: string;

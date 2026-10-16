@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
+import { QRCodeCanvas } from 'qrcode.react';
 import { 
   X, 
   User, 
@@ -24,7 +25,8 @@ import {
   Building,
   RefreshCw,
   Layers,
-  MapPin
+  MapPin,
+  QrCode
 } from 'lucide-react';
 import { 
   BarChart, 
@@ -432,6 +434,14 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
                 ) : (
                   <User className="w-10 h-10 text-slate-400 stroke-1" />
                 )}
+              </div>
+              
+              <div className="w-20 h-20 bg-white border border-slate-200 rounded-xl overflow-hidden shrink-0 flex items-center justify-center shadow-xs">
+                <QRCodeCanvas 
+                  value={student.regNo || student.id.toString()}
+                  size={70}
+                  level="H"
+                />
               </div>
 
               <div className="space-y-1">

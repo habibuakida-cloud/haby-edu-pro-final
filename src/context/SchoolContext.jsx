@@ -6,7 +6,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import { supabase } from "../lib/supabaseClient";
+import { db } from "../lib/dbClient";
 
 const SchoolContext = createContext(null);
 

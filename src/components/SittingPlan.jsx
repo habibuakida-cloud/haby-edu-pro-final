@@ -24,7 +24,7 @@ import {
 } from 'lucide-react';
 import { useReactToPrint } from 'react-to-print';
 import html2canvas from 'html2canvas';
-import { supabase } from '../lib/supabaseClient';
+import { db } from '../lib/firebaseClient';
 
 const EXAM_TYPES = [
   'CSEE',
