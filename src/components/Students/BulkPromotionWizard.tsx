@@ -42,8 +42,6 @@ export const BulkPromotionWizard: React.FC<BulkPromotionWizardProps> = ({
   schoolInfo,
   onExecutePromotion
 }) => {
-  if (!isOpen) return null;
-
   const [currentStep, setCurrentStep] = useState<1 | 2 | 3>(1);
   
   // Step 1: Source & Criteria
@@ -177,6 +175,8 @@ export const BulkPromotionWizard: React.FC<BulkPromotionWizardProps> = ({
     onExecutePromotion(updatedStudents, historyLogs);
     onClose();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in">

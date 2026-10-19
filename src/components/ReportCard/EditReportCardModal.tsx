@@ -36,8 +36,6 @@ export const EditReportCardModal: React.FC<EditReportCardModalProps> = ({
   onClose,
   onSave
 }) => {
-  if (!isOpen) return null;
-
   const [activeTab, setActiveTab] = useState<'marks' | 'periods' | 'character' | 'remarks' | 'photo'>('marks');
   const [passportPhoto, setPassportPhoto] = useState<string>(student.passportPhoto || '');
 
@@ -183,6 +181,8 @@ export const EditReportCardModal: React.FC<EditReportCardModalProps> = ({
     'Satisfactory results. Encouraged to participate actively in evening study clinics.',
     'Needs serious dedication and parent-teacher counseling to strengthen core competencies.'
   ];
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto">

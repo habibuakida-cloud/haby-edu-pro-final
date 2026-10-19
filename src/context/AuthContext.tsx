@@ -140,27 +140,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
-      // Super Admin fallback
-      if (isSuperAdmin) {
-        const schoolId = sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
-        const adminAccount: UserAccount = {
-          id: fbUser.id,
-          email: normEmail,
-          fullName: 'Administrator (Mwl. Habibu Akida)',
-          role: 'HEADMASTER',
-          schoolId,
-          school_id: schoolId,
-          isSuperAdmin: true
-        };
-        sessionStorage.setItem('haby_school_id', schoolId);
-        localStorage.setItem('currentSchoolId', schoolId);
-        sessionStorage.setItem('haby_demo_user', JSON.stringify(adminAccount));
-        setUserAccount(adminAccount);
-        setLoading(false);
-        return;
-      }
-
-      throw new Error("User profile not found in database");
+      // Auto-create default user account if profile not explicitly in database
+      const schoolId = sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
+      const defaultAccount: UserAccount = {
+        id: fbUser.id,
+        email: normEmail,
+        fullName: fbUser.user_metadata?.full_name || fbUser.email?.split('@')[0] || 'Authorized User',
+        role: isAdmin || isSuperAdmin ? 'HEADMASTER' : 'TEACHER',
+        schoolId,
+        school_id: schoolId,
+        isSuperAdmin: isSuperAdmin || isAdmin
+      };
+      sessionStorage.setItem('haby_school_id', schoolId);
+      localStorage.setItem('currentSchoolId', schoolId);
+      sessionStorage.setItem('haby_demo_user', JSON.stringify(defaultAccount));
+      setUserAccount(defaultAccount);
+      setLoading(false);
+      return;
     } catch (error: any) {
       console.error("[Auth Error] Error fetching user profile:", error);
       setLoading(false);

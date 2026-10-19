@@ -683,6 +683,7 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
             >
               <option value="All">All Exam Types</option>
+              <option value="Weekly">Weekly Test</option>
               <option value="Monthly">Monthly Test</option>
               <option value="Midterm">Midterm Examination</option>
               <option value="Terminal">Terminal Examination</option>

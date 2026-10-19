@@ -201,6 +201,35 @@ export const StudentBulkImportModal: React.FC<StudentBulkImportModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Filter and Summary Helpers
+  const filteredValidatedRows = useMemo(() => {
+    return validatedData.filter(row => {
+      // Step filter
+      if (filterMode === 'VALID' && !row.isValid) return false;
+      if (filterMode === 'ERRORS' && row.isValid) return false;
+
+      // Search filter
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchName = row.name.toLowerCase().includes(q);
+        const matchClass = row.className.toLowerCase().includes(q);
+        const matchPhone = (row.parentPhone || '').includes(q);
+        const matchReg = (row.regNo || '').toLowerCase().includes(q);
+        return matchName || matchClass || matchPhone || matchReg;
+      }
+      return true;
+    });
+  }, [validatedData, filterMode, searchQuery]);
+
+  const stats = useMemo(() => {
+    const total = validatedData.length;
+    const valid = validatedData.filter(r => r.isValid).length;
+    const errors = validatedData.filter(r => !r.isValid).length;
+    const withWarnings = validatedData.filter(r => r.warnings.length > 0 && r.isValid).length;
+    const selected = validatedData.filter(r => r.isSelected).length;
+    return { total, valid, errors, withWarnings, selected };
+  }, [validatedData]);
+
   if (!isOpen) return null;
 
   // -------------------------------------------------------------
@@ -578,37 +607,6 @@ export const StudentBulkImportModal: React.FC<StudentBulkImportModalProps> = ({
     setValidatedData(validated);
     setCurrentStep(3);
   };
-
-  // -------------------------------------------------------------
-  // Filter and Summary Helpers
-  // -------------------------------------------------------------
-  const filteredValidatedRows = useMemo(() => {
-    return validatedData.filter(row => {
-      // Step filter
-      if (filterMode === 'VALID' && !row.isValid) return false;
-      if (filterMode === 'ERRORS' && row.isValid) return false;
-
-      // Search filter
-      if (searchQuery.trim()) {
-        const q = searchQuery.toLowerCase();
-        const matchName = row.name.toLowerCase().includes(q);
-        const matchClass = row.className.toLowerCase().includes(q);
-        const matchPhone = (row.parentPhone || '').includes(q);
-        const matchReg = (row.regNo || '').toLowerCase().includes(q);
-        return matchName || matchClass || matchPhone || matchReg;
-      }
-      return true;
-    });
-  }, [validatedData, filterMode, searchQuery]);
-
-  const stats = useMemo(() => {
-    const total = validatedData.length;
-    const valid = validatedData.filter(r => r.isValid).length;
-    const errors = validatedData.filter(r => !r.isValid).length;
-    const withWarnings = validatedData.filter(r => r.warnings.length > 0 && r.isValid).length;
-    const selected = validatedData.filter(r => r.isSelected).length;
-    return { total, valid, errors, withWarnings, selected };
-  }, [validatedData]);
 
   const handleToggleSelectRow = (originalIndex: number) => {
     setValidatedData(prev => prev.map(r => 

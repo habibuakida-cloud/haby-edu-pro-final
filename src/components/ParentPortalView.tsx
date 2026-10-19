@@ -27,9 +27,18 @@ import {
   Sparkles,
   Info,
   TrendingUp,
-  BarChart2
+  BarChart2,
+  Eye,
+  EyeOff,
+  Key
 } from 'lucide-react';
 import { normalizeTzPhone } from '../utils/phoneUtils';
+import { 
+  verifyParentCredentials, 
+  getParentPinForPhone, 
+  isParentPhoneMatch, 
+  DEFAULT_PARENT_PIN 
+} from '../utils/parentAuth';
 import { 
   ResponsiveContainer, 
   LineChart, 
@@ -43,12 +52,21 @@ import {
 
 export interface ParentPortalViewProps {
   onBackToMain?: () => void;
+  students?: any[];
+  schoolInfo?: any;
+  examinationRecords?: any[];
 }
 
-export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain }) => {
+export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ 
+  onBackToMain, 
+  students = [], 
+  schoolInfo, 
+  examinationRecords = [] 
+}) => {
   const [parent, setParent] = useState<{ id: string; phone: string; full_name: string } | null>(null);
   const [phoneInput, setPhoneInput] = useState('');
   const [passwordInput, setPasswordInput] = useState('123456');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [copiedAccount, setCopiedAccount] = useState(false);
@@ -65,6 +83,27 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
   const [newMessageText, setNewMessageText] = useState('');
   const [activeTab, setActiveTab] = useState<'dashboard' | 'matokeo' | 'ada' | 'mahudhurio' | 'tabia' | 'ujumbe' | 'matangazo'>('dashboard');
 
+  const getAllStudents = async (): Promise<any[]> => {
+    if (students && Array.isArray(students) && students.length > 0) return students;
+    try {
+      const cached = localStorage.getItem('haby_school_data_v3');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed.students && Array.isArray(parsed.students) && parsed.students.length > 0) {
+          return parsed.students;
+        }
+      }
+    } catch (e) {}
+    try {
+      const schoolId = localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
+      const supaData = await getSchoolData(schoolId);
+      if (supaData && supaData.students && Array.isArray(supaData.students) && supaData.students.length > 0) {
+        return supaData.students;
+      }
+    } catch (e) {}
+    return [];
+  };
+
   // Auto-login or check session
   useEffect(() => {
     try {
@@ -79,28 +118,6 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
         }
       }
     } catch (e) {}
-
-    // Real-time subscriptions
-    // const announcementsSub = supabase
-    //   .channel('public:announcements')
-    //   .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => {
-    //     if (parent) fetchParentData(parent.phone, parent.id);
-    //   })
-    //   .subscribe();
-
-    // const messagesSub = supabase
-    //   .channel('public:parent_messages')
-    //   .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'parent_messages' }, (payload) => {
-    //     if (parent && (payload.new.parent_id === parent.id || payload.new.parent_phone === parent.phone)) {
-    //       setMessages(prev => [...prev, payload.new]);
-    //     }
-    //   })
-    //   .subscribe();
-
-    // return () => {
-    //   announcementsSub.unsubscribe();
-    //   messagesSub.unsubscribe();
-    // };
   }, [parent?.id]);
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -109,58 +126,69 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
     setErrorMsg(null);
 
     const rawPhone = phoneInput.trim();
-    const studentRegNo = passwordInput.trim(); // Using password field for RegNo per requirement
+    const enteredPassword = passwordInput.trim();
 
-    if (!rawPhone || !studentRegNo) {
-      setErrorMsg('Tafadhali jaza namba ya simu na namba ya usajili ya mwanafunzi.');
+    if (!rawPhone) {
+      setErrorMsg('Tafadhali jaza namba ya simu ya mzazi.');
       setLoading(false);
       return;
     }
 
-    const normalizedPhone = normalizeTzPhone(rawPhone);
-
     try {
-      // 1. Verify student exists with this parent phone AND reg_no
-      // const { data: students, error: studError } = await supabase
-      //   .from('students')
-      //   .select('*')
-      //   .eq('reg_no', studentRegNo.toUpperCase())
-      //   .or(`parent_phone.eq.${rawPhone},parent_phone.eq.${normalizedPhone},phone.eq.${rawPhone},phone.eq.${normalizedPhone}`);
+      const allStuds = await getAllStudents();
 
-      // if (studError) throw studError;
-      const students: any[] = [];
-
-      if (!students || students.length === 0) {
-        throw new Error('Mwanafunzi mwenye namba hii ya usajili na simu hakuonekana. Tafadhali thibitisha taarifa zako.');
+      if (allStuds.length === 0) {
+        const demoChild = {
+          id: 'demo-student-1',
+          name: 'Baraka Juma Mohamed',
+          regNo: 'S0123/0002/2026',
+          class: 'Form 2',
+          className: 'Form 2',
+          stream: 'STREAM A',
+          gender: 'Male',
+          parent_phone: rawPhone,
+          parentPhone: rawPhone,
+          parentName: 'Juma Mohamed',
+          average: '82.4',
+          division: 'Division I',
+          total: 412
+        };
+        const parentSession = {
+          id: `p_demo`,
+          phone: rawPhone,
+          full_name: 'Mzazi wa Baraka Juma',
+          school_id: 'DEMO_SCHOOL'
+        };
+        setParent(parentSession);
+        sessionStorage.setItem('haby_parent_session', JSON.stringify(parentSession));
+        setChildren([demoChild]);
+        setSelectedChild(demoChild);
+        await fetchChildDetails(demoChild.id, rawPhone);
+        return;
       }
 
-      const activeChild = students[0];
-      
-      // 2. Look for the parent record linked to this student
-      let parentData: any = null;
-      // const { data: linkedParents } = await supabase
-      //   .from('parent_students')
-      //   .select('parent_id, parents(*)')
-      //   .eq('student_id', activeChild.id);
-      const linkedParents: any[] = [];
+      const res = verifyParentCredentials(rawPhone, enteredPassword, allStuds);
 
-      if (linkedParents && linkedParents.length > 0) {
-        parentData = linkedParents[0].parents;
+      if (!res.success) {
+        setErrorMsg(res.error || 'Namba ya simu au nenosiri si sahihi.');
+        setLoading(false);
+        return;
       }
 
+      const activeChild = res.matchedStudents[0];
       const parentSession = {
-        id: parentData?.id || `p_${activeChild.id}`,
-        phone: rawPhone,
-        full_name: parentData?.full_name || `Mzazi wa ${activeChild.name}`,
-        school_id: activeChild.school_id
+        id: `p_${activeChild.id}`,
+        phone: res.parentPhone,
+        full_name: res.parentName,
+        school_id: (activeChild as any).school_id || 'DEMO_SCHOOL'
       };
 
       setParent(parentSession);
       sessionStorage.setItem('haby_parent_session', JSON.stringify(parentSession));
-      setChildren(students);
+      setChildren(res.matchedStudents);
       setSelectedChild(activeChild);
-      await fetchChildDetails(activeChild.id, rawPhone);
-      
+      await fetchChildDetails(activeChild.id, res.parentPhone);
+
     } catch (err: any) {
       setErrorMsg(err.message || 'Hitilafu imetokea wakati wa kuingia.');
     } finally {
@@ -170,20 +198,13 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
 
   const fetchParentData = async (phone: string, parentId: string) => {
     try {
-      const normalized = normalizeTzPhone(phone);
-      const local = phone.startsWith('255') ? '0' + phone.slice(3) : phone;
+      const allStuds = await getAllStudents();
+      const matched = allStuds.filter(s => isParentPhoneMatch(phone, s.parentPhone) || isParentPhoneMatch(phone, s.phone));
 
-      // Query students linked to this parent
-      // const { data: studentRows } = await supabase
-      //   .from('students')
-      //   .select('*')
-      //   .or(`parent_phone.eq.${phone},parent_phone.eq.${normalized},parent_phone.eq.${local},phone.eq.${phone}`);
-      const studentRows: any[] = [];
-
-      if (studentRows && studentRows.length > 0) {
-        setChildren(studentRows);
-        setSelectedChild(studentRows[0]);
-        await fetchChildDetails(studentRows[0].id, phone);
+      if (matched.length > 0) {
+        setChildren(matched);
+        setSelectedChild(matched[0]);
+        await fetchChildDetails(matched[0].id, phone);
       } else {
         const demoChild = {
           id: 'demo-student-1',
@@ -194,6 +215,7 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
           stream: 'STREAM A',
           gender: 'Male',
           parent_phone: phone,
+          parentPhone: phone,
           average: '82.4',
           division: 'Division I',
           total: 412
@@ -203,28 +225,8 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
         await fetchChildDetails(demoChild.id, phone);
       }
 
-      // Fetch announcements
-      try {
-        // const { data: annRows } = await supabase
-        //   .from('announcements')
-        //   .select('*')
-        //   .order('created_at', { ascending: false })
-        //   .limit(10);
-        // setAnnouncements(annRows || []);
-        setAnnouncements([]);
-      } catch (e) {}
-
-      // Fetch messages
-      try {
-        // const { data: msgRows } = await supabase
-        //   .from('parent_messages')
-        //   .select('*')
-        //   .or(`parent_id.eq.${parentId},parent_phone.eq.${phone}`)
-        //   .order('created_at', { ascending: true });
-        // setMessages(msgRows || []);
-        setMessages([]);
-      } catch (e) {}
-
+      setAnnouncements([]);
+      setMessages([]);
     } catch (e) {
       console.warn("Error fetching parent data:", e);
     }
@@ -461,23 +463,51 @@ export const ParentPortalView: React.FC<ParentPortalViewProps> = ({ onBackToMain
             </div>
 
             <div>
-              <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-1.5">
-                Nenosiri (Password)
+              <label className="block text-xs font-black text-slate-700 uppercase tracking-wider mb-1.5 flex items-center justify-between">
+                <span>Nenosiri / Namba ya Siri (PIN)</span>
+                <span className="text-[10px] text-blue-600 font-bold">Chaguo-msingi: 123456</span>
               </label>
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Lock className="w-4 h-4" />
                 </div>
                 <input
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   required
                   value={passwordInput}
                   onChange={e => setPasswordInput(e.target.value)}
-                  placeholder="Nenosiri la awali: 123456"
-                  className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-600 focus:bg-white focus:outline-none transition-all placeholder:text-slate-400 font-mono"
+                  placeholder="PIN ya awali: 123456"
+                  className="w-full pl-10 pr-11 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-bold text-slate-900 focus:ring-2 focus:ring-blue-600 focus:bg-white focus:outline-none transition-all placeholder:text-slate-400 font-mono"
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 cursor-pointer"
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
               </div>
-              <p className="text-[10px] text-slate-400 mt-1">Nenosiri la awali kwa wazazi wote ni <strong className="text-blue-700 font-mono">123456</strong>.</p>
+              <p className="text-[10px] text-slate-500 mt-1 flex items-center gap-1">
+                <span>Wazazi wote huanza na PIN ya</span>
+                <strong className="text-blue-700 font-mono font-bold bg-blue-50 px-1 rounded">123456</strong>
+                <span>au unaweza kutumia Namba ya Usajili ya mtoto.</span>
+              </p>
+            </div>
+
+            {/* Quick Demo Fill button for testing */}
+            <div className="p-2.5 bg-sky-50/70 border border-sky-100 rounded-xl text-[11px] text-sky-900 flex items-center justify-between">
+              <span className="font-medium">Jaribu akaunti ya mtihani:</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const demoPh = (students && students[0]?.parentPhone) || '0717616343';
+                  setPhoneInput(demoPh);
+                  setPasswordInput('123456');
+                }}
+                className="px-2 py-1 bg-white hover:bg-sky-100 text-sky-800 rounded font-bold border border-sky-200 transition text-[10px] cursor-pointer"
+              >
+                Jaza Data ya Mfano
+              </button>
             </div>
 
             <button

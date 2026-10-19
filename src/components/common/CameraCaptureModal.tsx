@@ -16,8 +16,6 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   title = 'Live Passport Photo Capture',
   guideText = 'Align the student face within the passport guide frame below.'
 }) => {
-  if (!isOpen) return null;
-
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -26,6 +24,7 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!isOpen) return;
     let stream: MediaStream | null = null;
 
     const startCamera = async () => {
@@ -147,6 +146,8 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   const handleRetake = () => {
     setCapturedImage(null);
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4 animate-in fade-in">

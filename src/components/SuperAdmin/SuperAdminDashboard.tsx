@@ -299,22 +299,24 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setAdminError(null);
 
     try {
-      const payload: Record<string, any> = {
-        full_name: adminFullName.trim(),
+      const payload = {
+        fullName: adminFullName.trim(),
         email: adminEmail.trim().toLowerCase(),
         password: adminPassword.trim(),
         role: adminRole,
-        school_id: adminRole === 'super_admin' ? (adminSchoolId || null) : adminSchoolId,
-        created_at: new Date().toISOString()
+        schoolId: adminSchoolId || null,
+        createdAt: new Date().toISOString()
       };
 
-      const { error } = await supabase.from('school_admins').insert([payload]);
-      if (error) throw error;
+      const response = await fetch('/api/db/school-admins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      
+      if (!response.ok) throw new Error('Failed to save admin');
 
-      showNotification(
-        'success', 
-        `Mtawala ${adminFullName.trim()} (${adminEmail.trim()}) amesajiliwa kwenye Supabase!`
-      );
+      showNotification('success', `Mtawala ${adminFullName.trim()} (${adminEmail.trim()}) amesajiliwa!`);
       setAdminFullName('');
       setAdminEmail('');
       setAdminPassword('');

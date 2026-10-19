@@ -62,6 +62,7 @@ import {
 } from '../types';
 import { SUBJECT_LIST, INVIGILATOR_COLORS, STAFF_ROLES_LIST, DEFAULT_CLASSES } from '../constants/defaults';
 import { getTeacherColor } from '../utils/colors';
+import { cleanSubjectName } from '../utils/cleanSubject';
 import { TeacherEvaluationView } from './TeacherEvaluationView';
 import { MultipleTeacherRegistrationModal } from './Teachers/MultipleTeacherRegistrationModal';
 import { PhoneInputPlugin } from './common/PhoneInputPlugin';
@@ -447,6 +448,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       return;
     }
 
+    const cleanedSubjects = Array.from(new Set(subjects.map(cleanSubjectName).filter(Boolean)));
     const finalRole = isCustomRole ? (customRole.trim() || 'Subject Teacher') : schoolRole;
     const finalGender = gender || (finalRole.includes('Mistress') || finalRole.includes('Headmistress') ? 'Female' : 'Male');
 
@@ -457,7 +459,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
         initial: generateInitials(name.trim(), editingTeacher.id),
         gender: finalGender,
         schoolRole: finalRole,
-        subjects: subjects,
+        subjects: cleanedSubjects,
         excludeInvigilation,
         color: customColor,
         phone: phone.trim() || undefined,
@@ -468,7 +470,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       };
       onUpdateTeacher(updatedTeacher);
       setEditingTeacher(null);
-      setFormNotice(`Teacher ${updatedTeacher.name} updated successfully with ${subjects.length} subjects!`);
+      setFormNotice(`Teacher ${updatedTeacher.name} updated successfully with ${cleanedSubjects.length} subjects!`);
       setTimeout(() => setFormNotice(null), 4000);
     } else {
       const newTeacher: Teacher = {
@@ -477,7 +479,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
         initial: currentInitial,
         gender: finalGender,
         schoolRole: finalRole,
-        subjects: subjects,
+        subjects: cleanedSubjects,
         excludeInvigilation,
         color: customColor,
         phone: phone.trim() || undefined,
@@ -2012,8 +2014,16 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                                   <span>Timetable</span>
                                 </button>
                               </div>
-                              <div className="text-[10px] text-slate-500 truncate max-w-xs">
-                                {(t.teachingStreams || []).join(', ') || 'Streams: Standard Allocation'}
+                              <div className="flex flex-wrap gap-1 mt-1">
+                                {(t.teachingStreams && t.teachingStreams.length > 0) ? (
+                                  t.teachingStreams.map((st, idx) => (
+                                    <span key={idx} className="bg-indigo-50 text-indigo-800 border border-indigo-200 px-1.5 py-0.5 rounded text-[9px] font-bold">
+                                      {st}
+                                    </span>
+                                  ))
+                                ) : (
+                                  <span className="text-[10px] text-slate-400 italic">All Streams / Standard</span>
+                                )}
                               </div>
                             </div>
                           </td>

@@ -14,6 +14,7 @@ import { ExaminationRecordsView } from './components/ExaminationRecords/Examinat
 import NectaAnalyzer from './components/NectaAnalyzer.jsx';
 import { SmsModule } from './components/SmsModule';
 import { ExamsView } from './components/ExamsView';
+import { ExamSettingsView } from './components/Exams/ExamSettingsView';
 import { TimetableContainer } from './components/Timetable/TimetableContainer';
 import { InvigilationContainer } from './components/InvigilationContainer';
 import { SettingsView } from './components/SettingsView';
@@ -116,14 +117,20 @@ export default function App() {
       try {
         const storedSchool = localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
         const local = localStorage.getItem(`haby_school_data_snapshot_${storedSchool}`) || localStorage.getItem(`haby_school_data_${storedSchool}`);
+        console.log("App init: Loading from localStorage for school:", storedSchool, "Data found:", !!local);
         if (local) {
           const parsed = JSON.parse(local);
           if (parsed && typeof parsed === 'object') {
-            return { ...DEFAULT_APP_DATA, ...parsed };
+            return { 
+              ...DEFAULT_APP_DATA, 
+              ...parsed,
+              schoolInfo: { ...DEFAULT_APP_DATA.schoolInfo, ...(parsed.schoolInfo || {}) }
+            };
           }
         }
-      } catch (e) {}
+      } catch (e) { console.error("App init: Error loading from localStorage:", e); }
     }
+    console.log("App init: Using default app data");
     return DEFAULT_APP_DATA;
   });
 
@@ -253,29 +260,38 @@ export default function App() {
       });
     }
 
-    // Pre-populate state from IndexedDB cache immediately to respect user's deleted/configured state
+    // Pre-populate state from localStorage immediately on boot to guarantee persistence across refreshes
+    try {
+      const localSnap = localStorage.getItem(`haby_school_data_${schoolId}`) || localStorage.getItem(`haby_school_data_snapshot_${schoolId}`);
+      const localTimetable = localStorage.getItem(`haby_timetable_assignments_${schoolId}`);
+      const localPeriods = localStorage.getItem(`haby_period_settings_${schoolId}`);
+      const localStreams = localStorage.getItem(`haby_stream_settings_${schoolId}`);
+      const localTeacherAssignments = localStorage.getItem(`haby_teacher_assignments_${schoolId}`);
+
+      if (localSnap || localTimetable || localPeriods || localStreams || localTeacherAssignments) {
+        const parsed = localSnap ? JSON.parse(localSnap) : {};
+        setData(prev => ({
+          ...prev,
+          ...parsed,
+          timetableAssignments: localTimetable ? JSON.parse(localTimetable) : (parsed.timetableAssignments || prev.timetableAssignments || []),
+          periodSettings: localPeriods ? JSON.parse(localPeriods) : (parsed.periodSettings || prev.periodSettings || []),
+          streamSettings: localStreams ? JSON.parse(localStreams) : (parsed.streamSettings || prev.streamSettings || []),
+          teacherAssignments: localTeacherAssignments ? JSON.parse(localTeacherAssignments) : (parsed.teacherAssignments || prev.teacherAssignments || [])
+        }));
+      }
+    } catch (e) {
+      console.warn("Immediate localStorage boot load error:", e);
+    }
+
     getCachedData(schoolKey).then(cached => {
       if (cached && typeof cached === 'object') {
-        // If cached periodSettings contains the old default 35 template periods, reset them to empty array so user starts fresh!
-        const isOldDefault35Periods = Array.isArray(cached.periodSettings) &&
-          cached.periodSettings.length === 35 &&
-          cached.periodSettings[0]?.name === 'Period 1' &&
-          cached.periodSettings[0]?.start === '08:00';
-
-        const isOldDefault17Streams = Array.isArray(cached.streamSettings) &&
-          cached.streamSettings.length === 17 &&
-          cached.streamSettings[0]?.className === 'Nursery';
-
-        const cleanPeriods = isOldDefault35Periods ? [] : (cached.periodSettings || []);
-        const cleanStreams = isOldDefault17Streams ? [] : (cached.streamSettings || []);
-        const cleanAssignments = isOldDefault35Periods ? [] : (cached.timetableAssignments || []);
-
         setData(prev => ({
           ...prev,
           ...cached,
-          streamSettings: cleanStreams,
-          periodSettings: cleanPeriods,
-          timetableAssignments: cleanAssignments
+          timetableAssignments: cached.timetableAssignments && cached.timetableAssignments.length > 0 ? cached.timetableAssignments : prev.timetableAssignments,
+          periodSettings: cached.periodSettings && cached.periodSettings.length > 0 ? cached.periodSettings : prev.periodSettings,
+          streamSettings: cached.streamSettings && cached.streamSettings.length > 0 ? cached.streamSettings : prev.streamSettings,
+          teacherAssignments: cached.teacherAssignments && cached.teacherAssignments.length > 0 ? cached.teacherAssignments : prev.teacherAssignments
         }));
       }
     }).catch(e => console.warn("Initial IDB cache load error:", e));
@@ -346,7 +362,7 @@ export default function App() {
         const remoteData = { ...rawSchoolData } as Partial<AppData>;
         
         setData(prev => {
-          // Resolve students: prioritize Cloud SQL relational rows or snapshot array
+          // Resolve students: prioritize Cloud SQL relational rows, snapshot array, or preserve prev state
           let resolvedStudents = prev.students;
           if (supaStudents.length > 0) {
             resolvedStudents = supaStudents;
@@ -354,8 +370,8 @@ export default function App() {
             resolvedStudents = rawSchoolData.students;
           } else if (Array.isArray(remoteData.students) && remoteData.students.length > 0) {
             resolvedStudents = remoteData.students;
-          } else if (Array.isArray(rawSchoolData.students)) {
-            resolvedStudents = rawSchoolData.students;
+          } else if (prev.students && prev.students.length > 0) {
+            resolvedStudents = prev.students;
           }
 
           let resolvedTeachers = prev.teachers;
@@ -365,15 +381,20 @@ export default function App() {
             resolvedTeachers = rawSchoolData.teachers;
           } else if (Array.isArray(remoteData.teachers) && remoteData.teachers.length > 0) {
             resolvedTeachers = remoteData.teachers;
-          } else if (Array.isArray(rawSchoolData.teachers)) {
-            resolvedTeachers = rawSchoolData.teachers;
+          } else if (prev.teachers && prev.teachers.length > 0) {
+            resolvedTeachers = prev.teachers;
           }
 
-          const resolvedExams = supaExams.length > 0 
-            ? supaExams 
-            : ((rawSchoolData.exams && rawSchoolData.exams.length > 0)
-                ? rawSchoolData.exams
-                : (remoteData.exams && remoteData.exams.length > 0 ? remoteData.exams : prev.exams));
+          let resolvedExams = prev.exams;
+          if (supaExams.length > 0) {
+            resolvedExams = supaExams;
+          } else if (Array.isArray(rawSchoolData.exams) && rawSchoolData.exams.length > 0) {
+            resolvedExams = rawSchoolData.exams;
+          } else if (Array.isArray(remoteData.exams) && remoteData.exams.length > 0) {
+            resolvedExams = remoteData.exams;
+          } else if (prev.exams && prev.exams.length > 0) {
+            resolvedExams = prev.exams;
+          }
 
           const resolvedSchoolInfo = 
             (rawSchoolData.schoolInfo && Object.keys(rawSchoolData.schoolInfo).length > 0)
@@ -506,7 +527,10 @@ export default function App() {
           } catch (e) {}
 
           setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
-          return updatedState;
+          return {
+            ...prev,
+            ...updatedState
+          };
         });
 
         setIsCloudSynced(true);
@@ -610,6 +634,18 @@ export default function App() {
     try {
       localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextData));
       localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextData));
+      if (nextData.timetableAssignments) {
+        localStorage.setItem(`haby_timetable_assignments_${schoolId}`, JSON.stringify(nextData.timetableAssignments));
+      }
+      if (nextData.periodSettings) {
+        localStorage.setItem(`haby_period_settings_${schoolId}`, JSON.stringify(nextData.periodSettings));
+      }
+      if (nextData.streamSettings) {
+        localStorage.setItem(`haby_stream_settings_${schoolId}`, JSON.stringify(nextData.streamSettings));
+      }
+      if (nextData.teacherAssignments) {
+        localStorage.setItem(`haby_teacher_assignments_${schoolId}`, JSON.stringify(nextData.teacherAssignments));
+      }
     } catch (e) {}
     setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
 
@@ -812,10 +848,15 @@ export default function App() {
   if (isParentPortalHash || (hasParentSession && activeView === 'parentportal')) {
     return (
       <ConfirmDeleteProvider>
-        <ParentPortalView onBackToMain={() => {
-           window.location.hash = '';
-           window.location.reload();
-        }} />
+        <ParentPortalView
+          students={data.students}
+          examinationRecords={data.examinationRecords}
+          schoolInfo={data.schoolInfo}
+          onBackToMain={() => {
+            window.location.hash = '';
+            window.location.reload();
+          }}
+        />
       </ConfirmDeleteProvider>
     );
   }
@@ -1387,6 +1428,19 @@ export default function App() {
     });
   };
 
+  const handleUpdateExams = (updatedExams: Exam[]) => {
+    const activityLogs = logActivity(
+      'EXAM_UPDATED',
+      'exams',
+      'Examinations Settings Updated',
+      `Synchronized status for ${updatedExams.length} examinations`
+    );
+    updateRemoteData({
+      exams: updatedExams,
+      activityLogs
+    });
+  };
+
   const handleAddDisciplineRecord = (record: DisciplineRecord) => {
     const current = data.disciplineRecords || [];
     const activityLogs = logActivity(
@@ -1745,6 +1799,8 @@ export default function App() {
                 setActiveView('markentry');
               }}
               teachers={data.teachers}
+              onUpdateExam={handleUpdateExam}
+              onUpdateExams={handleUpdateExams}
               ledgerSubjectKeys={data.ledgerSubjectKeys?.[data.schoolInfo.name || 'default'] || []}
               onUpdateLedgerSubjectKeys={keys => {
                 const updated = { ...(data.ledgerSubjectKeys || {}) };
@@ -1926,6 +1982,7 @@ export default function App() {
               currentUser={userAccount}
               schoolInfo={data.schoolInfo}
               onUpdateStudents={handleUpdateStudents}
+              onNavigateToExamSettings={() => setActiveView('examsettings')}
             />
           )}
 
@@ -2002,24 +2059,42 @@ export default function App() {
               exams={data.exams}
               onAddExam={handleAddExam}
               onUpdateExam={handleUpdateExam}
+              onUpdateExams={handleUpdateExams}
               onDeleteExam={handleDeleteExam}
               students={data.students}
+              schoolInfo={data.schoolInfo}
+              onNavigateToMarkEntry={(examName, className) => {
+                setActiveView('markentry');
+              }}
+            />
+          )}
+
+          {activeView === 'examsettings' && (
+            <ExamSettingsView
+              exams={data.exams}
+              onUpdateExam={handleUpdateExam}
+              onUpdateExams={handleUpdateExams}
+              onNavigateToMarkEntry={(examName, className) => {
+                setActiveView('markentry');
+              }}
+              onNavigateToExams={() => setActiveView('exams')}
+              currentUser={userAccount}
               schoolInfo={data.schoolInfo}
             />
           )}
 
           {activeView === 'classjournal' && (
             <TimetableContainer
-              assignments={data.timetableAssignments}
-              teachers={data.teachers}
-              periodSettings={data.periodSettings}
-              streamSettings={data.streamSettings}
-              classTimetableReleased={data.classTimetableReleased}
-              schoolName={data.schoolInfo.name}
-              schoolInfo={data.schoolInfo}
+              assignments={data.timetableAssignments || []}
+              teachers={data.teachers || []}
+              periodSettings={data.periodSettings || []}
+              streamSettings={data.streamSettings || []}
+              classTimetableReleased={data.classTimetableReleased || {}}
+              schoolName={data.schoolInfo?.name || 'HABY EDUPRO'}
+              schoolInfo={data.schoolInfo || DEFAULT_APP_DATA.schoolInfo}
               currentUser={userAccount}
-              students={data.students}
-              dayThemes={data.dayThemes}
+              students={data.students || []}
+              dayThemes={data.dayThemes || {}}
               institutionalPolicy={data.institutionalPolicy}
               subjectPeriodAllocations={data.subjectPeriodAllocations || []}
               teacherAssignments={data.teacherAssignments || []}
@@ -2060,16 +2135,16 @@ export default function App() {
 
           {activeView === 'timetable' && (
             <TimetableContainer
-              assignments={data.timetableAssignments}
-              teachers={data.teachers}
-              periodSettings={data.periodSettings}
-              streamSettings={data.streamSettings}
-              classTimetableReleased={data.classTimetableReleased}
-              schoolName={data.schoolInfo.name}
-              schoolInfo={data.schoolInfo}
+              assignments={data.timetableAssignments || []}
+              teachers={data.teachers || []}
+              periodSettings={data.periodSettings || []}
+              streamSettings={data.streamSettings || []}
+              classTimetableReleased={data.classTimetableReleased || {}}
+              schoolName={data.schoolInfo?.name || 'HABY EDUPRO'}
+              schoolInfo={data.schoolInfo || DEFAULT_APP_DATA.schoolInfo}
               currentUser={userAccount}
-              students={data.students}
-              dayThemes={data.dayThemes}
+              students={data.students || []}
+              dayThemes={data.dayThemes || {}}
               institutionalPolicy={data.institutionalPolicy}
               subjectPeriodAllocations={data.subjectPeriodAllocations || []}
               teacherAssignments={data.teacherAssignments || []}
@@ -2150,6 +2225,7 @@ export default function App() {
               supervisors={data.supervisors}
               selectedInvigilators={data.selectedInvigilators}
               invigilationAssignments={data.invigilationAssignments}
+              savedInvigilationRecords={data.savedInvigilationRecords || []}
               timetableReleased={data.timetableReleased}
               schoolInfo={data.schoolInfo}
               dayThemes={data.dayThemes}
@@ -2165,6 +2241,7 @@ export default function App() {
                 );
                 updateRemoteData({ invigilationAssignments, activityLogs });
               }}
+              onUpdateSavedInvigilationRecords={savedInvigilationRecords => updateRemoteData({ savedInvigilationRecords })}
               onToggleRelease={() => updateRemoteData({ timetableReleased: !data.timetableReleased })}
               onNavigateToSittingPlan={() => setActiveView('sittingplan')}
             />
@@ -2187,7 +2264,12 @@ export default function App() {
           )}
 
           {activeView === 'parentportal' && (
-            <ParentPortalView onBackToMain={() => setActiveView('dashboard')} />
+            <ParentPortalView 
+              students={data.students}
+              examinationRecords={data.examinationRecords}
+              schoolInfo={data.schoolInfo}
+              onBackToMain={() => setActiveView('dashboard')} 
+            />
           )}
 
           {activeView === 'settings' && (

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb, integer, numeric, date, boolean, primaryKey } from 'drizzle-orm/pg-core';
+import { pgTable, text, timestamp, uuid, jsonb, integer, numeric, date, boolean, primaryKey, unique } from 'drizzle-orm/pg-core';
 import { relations } from 'drizzle-orm';
 
 // 1. SCHOOLS
@@ -468,6 +468,7 @@ export const schoolAdmins = pgTable('school_admins', {
   schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
   email: text('email').notNull(),
   fullName: text('full_name'),
+  password: text('password'),
   role: text('role').default('HEADMASTER'),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -628,3 +629,18 @@ export const reamPaperRecords = pgTable('ream_paper_records', {
   notes: text('notes'),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+export const examResults = pgTable('exam_results', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  studentId: uuid('student_id').references(() => students.id, { onDelete: 'cascade' }),
+  subjectId: uuid('subject_id'), 
+  examType: text('exam_type').notNull(), // 'MIDTERM', 'TERMINAL', 'ANNUAL'
+  year: integer('year').notNull(),
+  term: text('term').notNull(),
+  marks: numeric('marks').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+}, (table) => ({
+  uniqueConstraint: unique('unique_exam_result').on(table.studentId, table.subjectId, table.examType, table.year, table.term),
+}));
+

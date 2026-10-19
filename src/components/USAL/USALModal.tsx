@@ -92,6 +92,28 @@ export const USALModal: React.FC<USALModalProps> = ({
     setCandidateScores(map);
   }, [currentRecord?.id]);
 
+  // Calculate CSEE / CPS Summary for all students in this class
+  const classCandidatesForCPS = useMemo(() => {
+    if (!currentRecord) return [];
+    const targetClass = currentRecord.className || '';
+    const targetClassLower = targetClass.toLowerCase();
+    const matchingStudents = (students || []).filter(
+      s => s && typeof s.className === 'string' && s.className.toLowerCase() === targetClassLower
+    );
+
+    return matchingStudents.map((st, idx) => {
+      const res = calculateNectaLevelResults(st.marks || {}, targetClass);
+      return {
+        rank: idx + 1,
+        student: st,
+        ...res
+      };
+    }).sort((a, b) => (b.total || 0) - (a.total || 0)).map((item, idx) => ({
+      ...item,
+      position: idx + 1
+    }));
+  }, [currentRecord, students]);
+
   if (!isOpen) return null;
 
   const policy = currentRecord ? getNectaPolicyForClass(currentRecord.className) : null;
@@ -184,27 +206,7 @@ export const USALModal: React.FC<USALModalProps> = ({
     return c.studentName.toLowerCase().includes(q) || c.regNo.toLowerCase().includes(q);
   });
 
-  // Calculate CSEE / CPS Summary for all students in this class
-  const classCandidatesForCPS = useMemo(() => {
-    if (!currentRecord) return [];
-    const targetClass = currentRecord.className || '';
-    const targetClassLower = targetClass.toLowerCase();
-    const matchingStudents = (students || []).filter(
-      s => s && typeof s.className === 'string' && s.className.toLowerCase() === targetClassLower
-    );
 
-    return matchingStudents.map((st, idx) => {
-      const res = calculateNectaLevelResults(st.marks || {}, targetClass);
-      return {
-        rank: idx + 1,
-        student: st,
-        ...res
-      };
-    }).sort((a, b) => (b.total || 0) - (a.total || 0)).map((item, idx) => ({
-      ...item,
-      position: idx + 1
-    }));
-  }, [currentRecord, students]);
 
   return (
     <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto animate-in fade-in">

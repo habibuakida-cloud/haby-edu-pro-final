@@ -210,24 +210,36 @@ export function generateTimetableIntegrityReport(
     });
   };
 
+  const safeTeachers = Array.isArray(teachers) ? teachers : [];
+  const safePeriodSettings = Array.isArray(periodSettings) ? periodSettings : [];
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+
   const teacherMap = new Map<number, Teacher>();
-  teachers.forEach(t => teacherMap.set(t.id, t));
+  safeTeachers.forEach(t => {
+    if (t && t.id !== undefined) teacherMap.set(t.id, t);
+  });
 
   // Build slot timings lookup from periodSettings
   const periodSettingMap = new Map<string, PeriodSetting>();
-  periodSettings.forEach(p => {
-    const key = `${p.day}_${p.name.trim().toLowerCase()}`;
+  safePeriodSettings.forEach(p => {
+    if (!p) return;
+    const pName = (p.name || '').trim().toLowerCase();
+    const pDay = p.day || '';
+    const key = `${pDay}_${pName}`;
     periodSettingMap.set(key, p);
   });
 
-  const parsedAssignments = assignments.map(a => {
-    const parsed = parsePeriodTiming(a.period);
+  const parsedAssignments = safeAssignments.map(a => {
+    const rawPeriod = a?.period || a?.periodName || '';
+    const parsed = parsePeriodTiming(rawPeriod);
     // If start/end missing in assignment string, attempt lookup in periodSettings
     if (parsed.startMinutes === undefined) {
-      const setting = periodSettingMap.get(`${a.day}_${(a.periodName || parsed.periodName).toLowerCase()}`);
+      const aDay = a?.day || '';
+      const aPeriodName = (a?.periodName || parsed.periodName || '').toLowerCase();
+      const setting = periodSettingMap.get(`${aDay}_${aPeriodName}`);
       if (setting && setting.start && setting.end) {
-        const partsS = setting.start.split(':').map(Number);
-        const partsE = setting.end.split(':').map(Number);
+        const partsS = String(setting.start).split(':').map(Number);
+        const partsE = String(setting.end).split(':').map(Number);
         if (!isNaN(partsS[0]) && !isNaN(partsE[0])) {
           parsed.start = setting.start;
           parsed.end = setting.end;
@@ -963,29 +975,34 @@ export function generateTimetableIntegrityReport(
  * or reassigning to an available qualified colleague without removing the subject!
  */
 export function autoResolveTimetableClashes(
-  assignments: TimetableAssignment[],
-  teachers: Teacher[]
+  assignments: TimetableAssignment[] = [],
+  teachers: Teacher[] = []
 ): {
   updatedAssignments: TimetableAssignment[];
   resolvedCount: number;
   changesLog: { assignmentId: number | string; description: string }[];
 } {
-  const resolved = assignments.map(a => ({ ...a }));
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const safeTeachers = Array.isArray(teachers) ? teachers : [];
+  const resolved = safeAssignments.map(a => ({ ...a }));
   const changesLog: { assignmentId: number | string; description: string }[] = [];
   let resolvedCount = 0;
 
   // 1. Group by day + period + teacherId
   const slotTeacherMap: Record<string, TimetableAssignment[]> = {};
   resolved.forEach(a => {
-    if (!a.teacherId) return;
-    const norm = (a.periodName || a.period.split(' (')[0]).trim().toLowerCase();
-    const key = `${a.day}_${norm}_teacher_${a.teacherId}`;
+    if (!a || !a.teacherId) return;
+    const rawPeriod = a.periodName || a.period || '';
+    const norm = (rawPeriod ? String(rawPeriod).split(' (')[0] : '').trim().toLowerCase();
+    const key = `${a.day || ''}_${norm}_teacher_${a.teacherId}`;
     if (!slotTeacherMap[key]) slotTeacherMap[key] = [];
     slotTeacherMap[key].push(a);
   });
 
   const teacherMap = new Map<number, Teacher>();
-  teachers.forEach(t => teacherMap.set(t.id, t));
+  safeTeachers.forEach(t => {
+    if (t && t.id !== undefined) teacherMap.set(t.id, t);
+  });
 
   Object.values(slotTeacherMap).forEach(group => {
     if (group.length > 1) {
@@ -995,15 +1012,18 @@ export function autoResolveTimetableClashes(
         const idx = resolved.findIndex(r => r.id === clashingSlot.id);
         if (idx !== -1) {
           const originalTeacher = teacherMap.get(clashingSlot.teacherId!);
-          const normSubject = normalizeSubject(clashingSlot.subject);
+          const normSubject = normalizeSubject(clashingSlot.subject || '');
 
           // Attempt to find another qualified teacher who is FREE at this day & period
-          const dayPeriodKey = `${clashingSlot.day}_${(clashingSlot.periodName || clashingSlot.period.split(' (')[0]).trim().toLowerCase()}`;
+          const clashPeriodRaw = clashingSlot.periodName || clashingSlot.period || '';
+          const clashNorm = (clashPeriodRaw ? String(clashPeriodRaw).split(' (')[0] : '').trim().toLowerCase();
+          const dayPeriodKey = `${clashingSlot.day || ''}_${clashNorm}`;
           const busyTeacherIds = new Set<number>();
           resolved.forEach(r => {
             if (r.id !== clashingSlot.id && r.teacherId && r.day === clashingSlot.day) {
-              const rNorm = (r.periodName || r.period.split(' (')[0]).trim().toLowerCase();
-              if (rNorm === (clashingSlot.periodName || clashingSlot.period.split(' (')[0]).trim().toLowerCase()) {
+              const rPeriodRaw = r.periodName || r.period || '';
+              const rNorm = (rPeriodRaw ? String(rPeriodRaw).split(' (')[0] : '').trim().toLowerCase();
+              if (rNorm === clashNorm) {
                 busyTeacherIds.add(r.teacherId);
               }
             }

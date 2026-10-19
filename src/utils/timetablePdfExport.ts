@@ -373,121 +373,78 @@ export function exportTimetablePDF(options: TimetablePdfExportOptions): void {
   // VIEW MODE 3: GENERAL / MASTER TIMETABLE
   // =========================================================================
   } else {
-    const activeDays = DAYS_OF_WEEK.filter(d => selectedDay === 'All' || selectedDay === d);
-
-    activeDays.forEach((day) => {
-      if (y + 30 > pageHeight - 20) {
-        doc.addPage('a4', isLandscape ? 'landscape' : 'portrait');
-        y = margin;
-      }
-
-      // Day Header Strip
-      doc.setFillColor(primaryNavyR, primaryNavyG, primaryNavyB);
-      doc.rect(margin, y, contentWidth, 7, 'F');
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8.5);
-      doc.setTextColor(255, 255, 255);
-      doc.text(`DAY: ${day.toUpperCase()}`, margin + 4, y + 5);
-
-      y += 7;
-
-      // Table Header Row
-      const genCols = [
-        { name: '#', width: 10 },
-        { name: 'PERIOD & TIME', width: 45 },
-        { name: 'CLASS & STREAM', width: 45 },
-        { name: 'SUBJECT', width: 80 },
-        { name: 'TEACHER', width: 60 },
-        { name: 'ROOM', width: 37 }
-      ];
-
-      doc.setFillColor(tableHeaderBgR, tableHeaderBgG, tableHeaderBgB);
-      doc.rect(margin, y, contentWidth, 6, 'F');
-      doc.setDrawColor(borderGrayR, borderGrayG, borderGrayB);
-      doc.rect(margin, y, contentWidth, 6, 'S');
-
-      let gx = margin;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7);
-      doc.setTextColor(slateDarkR, slateDarkG, slateDarkB);
-      genCols.forEach(c => {
-        doc.text(c.name, gx + c.width / 2, y + 4.2, { align: 'center' });
-        gx += c.width;
-      });
-
-      y += 6;
-
-      const dayAssignments = assignments.filter(a => {
-        const matchDay = (a?.day || '').toLowerCase() === (day || '').toLowerCase();
-        const matchClass = selectedClass === 'All' || (a?.className || '').toLowerCase() === (selectedClass || '').toLowerCase();
-        const matchStream = selectedStream === 'All' || !a.stream || a.stream.toLowerCase().includes(selectedStream.toLowerCase());
-        return matchDay && matchClass && matchStream;
-      });
-
-      if (dayAssignments.length === 0) {
-        doc.setFillColor(255, 255, 255);
-        doc.rect(margin, y, contentWidth, 6, 'F');
-        doc.setDrawColor(borderGrayR, borderGrayG, borderGrayB);
-        doc.rect(margin, y, contentWidth, 6, 'S');
-
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(6.5);
-        doc.setTextColor(slateMutedR, slateMutedG, slateMutedB);
-        doc.text('No scheduled periods for this day.', pageWidth / 2, y + 4, { align: 'center' });
-        y += 6;
-      } else {
-        dayAssignments.forEach((a, aIdx) => {
-          if (y + 6 > pageHeight - 20) {
-            doc.addPage('a4', isLandscape ? 'landscape' : 'portrait');
-            y = margin;
-          }
-
-          const isEven = aIdx % 2 === 0;
-          doc.setFillColor(isEven ? 255 : 248, isEven ? 255 : 250, isEven ? 255 : 252);
-          doc.rect(margin, y, contentWidth, 6, 'F');
-          doc.setDrawColor(borderGrayR, borderGrayG, borderGrayB);
-          doc.rect(margin, y, contentWidth, 6, 'S');
-
-          let cellX = margin;
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(6.5);
-          doc.setTextColor(slateDarkR, slateDarkG, slateDarkB);
-
-          // #
-          doc.text(String(aIdx + 1), cellX + genCols[0].width / 2, y + 4, { align: 'center' });
-          cellX += genCols[0].width;
-
-          // Period
-          doc.setFont('helvetica', 'normal');
-          doc.text(a.periodName || a.period || 'Period', cellX + genCols[1].width / 2, y + 4, { align: 'center' });
-          cellX += genCols[1].width;
-
-          // Class
-          doc.setFont('helvetica', 'bold');
-          doc.text(`${a.className} ${a.stream || ''}`, cellX + genCols[2].width / 2, y + 4, { align: 'center' });
-          cellX += genCols[2].width;
-
-          // Subject
-          doc.text(a.subject || a.customNote || (a as any).activityName || 'Subject', cellX + genCols[3].width / 2, y + 4, { align: 'center' });
-          cellX += genCols[3].width;
-
-          // Teacher
-          doc.setFont('helvetica', 'normal');
-          const tObj = teachers.find(t => t.id === a.teacherId);
-          const tName = (a as any).teacher || tObj?.name || tObj?.initial || 'Unassigned';
-          doc.text(tName, cellX + genCols[4].width / 2, y + 4, { align: 'center' });
-          cellX += genCols[4].width;
-
-          // Room
-          doc.setTextColor(30, 64, 175);
-          doc.text(a.room || 'Classroom', cellX + genCols[5].width / 2, y + 4, { align: 'center' });
-
-          y += 6;
-        });
-      }
-
-      y += 4;
+    // Build flat array of assignments sorted by Day of week, Class, and Period
+    const dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const filteredAssignments = assignments.filter(a => {
+      const matchDay = selectedDay === 'All' || (a?.day || '').toLowerCase() === (selectedDay || '').toLowerCase();
+      const matchClass = selectedClass === 'All' || (a?.className || '').toLowerCase() === (selectedClass || '').toLowerCase();
+      const matchStream = selectedStream === 'All' || !a.stream || a.stream.toLowerCase().includes(selectedStream.toLowerCase());
+      return matchDay && matchClass && matchStream;
+    }).sort((a, b) => {
+      const dDiff = dayOrder.indexOf(a.day) - dayOrder.indexOf(b.day);
+      if (dDiff !== 0) return dDiff;
+      return (a.className || '').localeCompare(b.className || '');
     });
+
+    const tableRows = filteredAssignments.map((a, idx) => {
+      const tObj = teachers.find(t => t.id === a.teacherId);
+      const tName = (a as any).teacher || tObj?.name || (tObj ? `Tr. ${tObj.initial}` : 'Unassigned');
+      return [
+        idx + 1,
+        a.day || '—',
+        a.periodName || a.period || 'Period',
+        `${a.className} ${a.stream ? `(${a.stream})` : ''}`.trim(),
+        a.subject || a.customNote || (a as any).activityName || 'Subject',
+        tName,
+        a.room || 'Classroom'
+      ];
+    });
+
+    autoTable(doc, {
+      startY: y,
+      head: [[
+        '#',
+        'Day of Week',
+        'Period & Time Slot',
+        'Class & Stream',
+        'Teaching Subject',
+        'Assigned Teacher',
+        'Room / Hall'
+      ]],
+      body: tableRows.length > 0 ? tableRows : [[
+        '—', '—', '—', '—', 'No scheduled timetable periods found for selected filters', '—', '—'
+      ]],
+      theme: 'grid',
+      headStyles: {
+        fillColor: [primaryNavyR, primaryNavyG, primaryNavyB],
+        textColor: [255, 255, 255],
+        fontSize: 8,
+        halign: 'center',
+        valign: 'middle',
+        fontStyle: 'bold'
+      },
+      bodyStyles: {
+        fontSize: 7,
+        valign: 'middle',
+        textColor: [slateDarkR, slateDarkG, slateDarkB]
+      },
+      alternateRowStyles: {
+        fillColor: [248, 250, 252]
+      },
+      columnStyles: {
+        0: { cellWidth: 10, halign: 'center' },
+        1: { cellWidth: 26, fontStyle: 'bold' },
+        2: { cellWidth: 38 },
+        3: { cellWidth: 38, fontStyle: 'bold' },
+        4: { cellWidth: 70, fontStyle: 'bold' },
+        5: { cellWidth: 65 },
+        6: { cellWidth: 30, halign: 'center' }
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    // Update y to the end of the autoTable for the footer sign-off block
+    y = (doc as any).lastAutoTable.finalY + 8;
   }
 
   // =========================================================================

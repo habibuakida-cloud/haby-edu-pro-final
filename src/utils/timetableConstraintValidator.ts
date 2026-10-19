@@ -111,14 +111,20 @@ export const DEFAULT_CONSTRAINTS_CONFIG: TimetableConstraintsConfig = {
  * and generates structured conflict reports with exact slot coordinates for live red highlighting.
  */
 export function validateTimetableAgainstConstraints(
-  assignments: TimetableAssignment[],
-  teachers: Teacher[],
-  periodSettings: PeriodSetting[],
-  streamSettings: StreamSetting[],
+  assignments: TimetableAssignment[] = [],
+  teachers: Teacher[] = [],
+  periodSettings: PeriodSetting[] = [],
+  streamSettings: StreamSetting[] = [],
   config: TimetableConstraintsConfig = DEFAULT_CONSTRAINTS_CONFIG
 ): ConstraintValidationReport {
+  const safeAssignments = Array.isArray(assignments) ? assignments : [];
+  const safeTeachers = Array.isArray(teachers) ? teachers : [];
+  const safeConfig = config || DEFAULT_CONSTRAINTS_CONFIG;
+
   const issues: ConstraintValidationIssue[] = [];
-  const teacherMap = new Map<number, Teacher>(teachers.map(t => [t.id, t]));
+  const teacherMap = new Map<number, Teacher>(
+    safeTeachers.filter(t => t && t.id !== undefined).map(t => [t.id, t])
+  );
 
   const violatingSlotsMap: Record<string, ConstraintValidationIssue[]> = {};
   const violatingAssignmentIds: Record<number, ConstraintValidationIssue[]> = {};
@@ -153,16 +159,18 @@ export function validateTimetableAgainstConstraints(
   // key: teacherId -> { day -> TimetableAssignment[] }
   const teacherDayAssignments: Record<number, Record<string, TimetableAssignment[]>> = {};
 
-  teachers.forEach(t => {
-    teacherDayAssignments[t.id] = { Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [], Saturday: [] };
+  safeTeachers.forEach(t => {
+    if (t && t.id !== undefined) {
+      teacherDayAssignments[t.id] = { Monday: [], Tuesday: [], Wednesday: [], Thursday: [], Friday: [], Saturday: [] };
+    }
   });
 
   // Track double periods per class stream and subject
   // key: `${className}_${stream}_${subject}` -> { day -> TimetableAssignment[] }
   const classSubjectDayAllocations: Record<string, Record<string, TimetableAssignment[]>> = {};
 
-  assignments.forEach(asg => {
-    if (!asg.day || !asg.period) return;
+  safeAssignments.forEach(asg => {
+    if (!asg || !asg.day || !asg.period) return;
 
     // A. Teacher Loads
     if (asg.teacherId) {
@@ -175,8 +183,8 @@ export function validateTimetableAgainstConstraints(
       teacherDayAssignments[asg.teacherId][asg.day].push(asg);
 
       // Rule 3: Teacher Availability Windows & Off-Days Check
-      if (config.teacherAvailabilityWindows.enabled) {
-        const tWindow = config.teacherAvailabilityWindows.windows[asg.teacherId];
+      if (safeConfig.teacherAvailabilityWindows?.enabled) {
+        const tWindow = safeConfig.teacherAvailabilityWindows?.windows?.[asg.teacherId];
         if (tWindow) {
           // Check blocked day
           if (tWindow.unavailableDays && tWindow.unavailableDays.includes(asg.day)) {

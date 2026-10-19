@@ -17,33 +17,44 @@ import {
   Filter,
   Eye,
   Check,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Lock,
+  Unlock,
+  Sliders,
+  ShieldCheck
 } from 'lucide-react';
 import { useConfirmDelete } from '../context/ConfirmDeleteContext';
 import { Exam, InvigilationSession, EducationLevel, Student, SchoolInfo } from '../types';
 import { ALL_SCHOOL_CLASSES, NURSERY_CLASSES, PRIMARY_CLASSES, SECONDARY_CLASSES } from '../constants/defaults';
 import { ExamDocumentsModal } from './Exams/ExamDocumentsModal';
 import { SubjectPaperConfigModal } from './Exams/SubjectPaperConfigModal';
+import { ExamSettingsView } from './Exams/ExamSettingsView';
 
 interface ExamsViewProps {
   exams: Exam[];
   onAddExam: (exam: Exam, session: InvigilationSession) => void;
   onUpdateExam?: (exam: Exam) => void;
+  onUpdateExams?: (exams: Exam[]) => void;
   onDeleteExam: (id: number) => void;
   students?: Student[];
   schoolInfo?: SchoolInfo;
+  onNavigateToMarkEntry?: (examName?: string, className?: string) => void;
+  initialViewMode?: 'calendar' | 'table' | 'settings';
 }
 
 export const ExamsView: React.FC<ExamsViewProps> = ({
   exams,
   onAddExam,
   onUpdateExam,
+  onUpdateExams,
   onDeleteExam,
   students = [],
-  schoolInfo
+  schoolInfo,
+  onNavigateToMarkEntry,
+  initialViewMode = 'calendar'
 }) => {
   const { openConfirmDelete } = useConfirmDelete();
-  const [viewMode, setViewMode] = useState<'calendar' | 'table'>('calendar');
+  const [viewMode, setViewMode] = useState<'calendar' | 'table' | 'settings'>(initialViewMode);
   const [calendarScope, setCalendarScope] = useState<'month' | 'week'>('month');
   const [currentDate, setCurrentDate] = useState<Date>(new Date());
   
@@ -347,7 +358,41 @@ export const ExamsView: React.FC<ExamsViewProps> = ({
               <List className="w-3.5 h-3.5" />
               <span>List ({exams.length})</span>
             </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('settings')}
+              className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-all cursor-pointer ${
+                viewMode === 'settings' 
+                  ? 'bg-rose-700 text-white shadow-2xs font-black' 
+                  : 'text-slate-700 hover:text-rose-700'
+              }`}
+              title="Dhibiti ufunguaji na ufungwaji wa mitihani (Lock / Unlock)"
+            >
+              <Lock className="w-3.5 h-3.5 text-rose-500" />
+              <span>Exam Settings (Lock Control)</span>
+              <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-black ${
+                viewMode === 'settings' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-800'
+              }`}>
+                {exams.filter(e => e.status === 'Inactive' || e.status === 'Locked' || e.isActive === false).length > 0 
+                  ? `${exams.filter(e => e.status === 'Inactive' || e.status === 'Locked' || e.isActive === false).length} LOCKED` 
+                  : 'ACTIVE'}
+              </span>
+            </button>
           </div>
+
+          <button
+            type="button"
+            onClick={() => setViewMode('settings')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-xs ${
+              viewMode === 'settings'
+                ? 'bg-rose-700 text-white ring-2 ring-rose-400 font-black'
+                : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-300'
+            }`}
+            title="Dhibiti ufunguaji na ufungwaji wa mitihani kwa walimu (Active/Locked switch)"
+          >
+            <Sliders className="w-4 h-4 text-rose-600" />
+            <span>Exam Settings</span>
+          </button>
 
           <button
             type="button"
@@ -794,6 +839,19 @@ export const ExamsView: React.FC<ExamsViewProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* EXAM SETTINGS (ACTIVE / LOCKED SWITCH & ISOLATION MANAGEMENT) */}
+      {viewMode === 'settings' && (
+        <ExamSettingsView
+          exams={exams}
+          onUpdateExam={onUpdateExam}
+          onUpdateExams={onUpdateExams}
+          onNavigateToMarkEntry={onNavigateToMarkEntry}
+          onNavigateToExams={() => setViewMode('calendar')}
+          schoolInfo={schoolInfo}
+          isEmbedded={true}
+        />
       )}
 
       {/* CREATE EXAM MODAL */}

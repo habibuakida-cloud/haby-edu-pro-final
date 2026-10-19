@@ -18,7 +18,9 @@ import {
   Layers,
   ChevronRight,
   Eye,
-  Award
+  Award,
+  Sliders,
+  Unlock
 } from 'lucide-react';
 import { 
   Student, 
@@ -44,6 +46,7 @@ import {
 } from '../constants/defaults';
 import { calculateOLevelDivision, calculatePrimaryScoreResult, isPrimaryOrNursery, getPrimarySubjectGradeInfo, cleanAndFilterMarksForClass, isSameClass } from '../utils/reportCardUtils';
 import { USALModal } from './USAL/USALModal';
+import { upsertRecord, getCurrentSchoolId } from '../lib/dbClient';
 
 interface MarkEntryViewProps {
   students: Student[];
@@ -59,6 +62,7 @@ interface MarkEntryViewProps {
   currentUser?: UserAccount | null;
   schoolInfo?: SchoolInfo;
   onUpdateStudents: (updatedStudents: Student[]) => void;
+  onNavigateToExamSettings?: () => void;
 }
 
 const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
@@ -76,7 +80,8 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
   onSaveUsalRecord,
   currentUser,
   schoolInfo,
-  onUpdateStudents
+  onUpdateStudents,
+  onNavigateToExamSettings
 }) => {
   // Navigation sub-tab: 'marks' | 'timetable' | 'invigilation'
   const [activeSubTab, setActiveSubTab] = useState<'marks' | 'timetable' | 'invigilation'>('marks');
@@ -117,34 +122,37 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
     return teachers.find(t => t.id === selectedTeacherId) || loggedInTeacher || teachers[0];
   }, [teachers, selectedTeacherId, loggedInTeacher]);
 
+  const [selectedExamType, setSelectedExamType] = useState<string>('All');
+  
   // Dynamic available exams from both registered exams and standard defaults
   const allAvailableExams = useMemo(() => {
-    const list: string[] = [];
+    const list: Exam[] = [];
     const seen = new Set<string>();
 
-    exams.forEach(e => {
+    // Filter exams by type if selected
+    const filteredExams = exams.filter(e => 
+      selectedExamType === 'All' || 
+      (e.type && e.type.toLowerCase() === selectedExamType.toLowerCase())
+    );
+
+    filteredExams.forEach(e => {
       if (e.name && !seen.has(e.name)) {
         seen.add(e.name);
-        list.push(e.name);
-      }
-    });
-
-    ['Midterm I', 'Terminal', 'Annual', 'Midterm II', 'Mock'].forEach(d => {
-      if (!seen.has(d)) {
-        seen.add(d);
-        list.push(d);
+        list.push(e);
       }
     });
 
     return list;
-  }, [exams]);
+  }, [exams, selectedExamType]);
+  
+  const examNames = useMemo(() => allAvailableExams.map(e => e.name), [allAvailableExams]);
 
   // Set default selectedExam from first registered exam if available
   useEffect(() => {
-    if (exams.length > 0 && !exams.some(e => e.name === selectedExam)) {
-      setSelectedExam(exams[0].name);
+    if (allAvailableExams.length > 0 && !allAvailableExams.some(e => e.name === selectedExam)) {
+      setSelectedExam(allAvailableExams[0].name);
     }
-  }, [exams]);
+  }, [allAvailableExams, selectedExam]);
 
   // Dynamic registered streams across all students
   const availableStreams = useMemo(() => {
@@ -194,8 +202,54 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
     }
   }, [availableSubjects, selectedSubject]);
 
+  // Selected Exam Object & Lock Status
+  const selectedExamObj = useMemo(() => {
+    return exams.find(e => 
+      e.name?.toLowerCase().trim() === selectedExam?.toLowerCase().trim() ||
+      e.type?.toLowerCase().trim() === selectedExam?.toLowerCase().trim() ||
+      String(e.id) === String(selectedExam) ||
+      (e.name && selectedExam && e.name.toLowerCase().includes(selectedExam.toLowerCase())) ||
+      (selectedExam && e.name && selectedExam.toLowerCase().includes(e.name.toLowerCase()))
+    );
+  }, [exams, selectedExam]);
+
+  const isExamLocked = useMemo(() => {
+    // 1. Direct match on selectedExamObj
+    if (selectedExamObj) {
+      if (selectedExamObj.status === 'Inactive' || selectedExamObj.status === 'Locked' || selectedExamObj.isActive === false) {
+        return true;
+      }
+    }
+    // 2. Fallback check across all exams for matching name or type
+    if (selectedExam) {
+      const q = selectedExam.toLowerCase().trim();
+      const match = exams.filter(e => 
+        e.name?.toLowerCase().trim() === q ||
+        e.type?.toLowerCase().trim() === q ||
+        (e.name && e.name.toLowerCase().includes(q)) ||
+        (e.type && e.type.toLowerCase().includes(q))
+      );
+      if (match.length > 0) {
+        return match.some(e => e.status === 'Inactive' || e.status === 'Locked' || e.isActive === false);
+      }
+    }
+    return false;
+  }, [selectedExamObj, exams, selectedExam]);
+
+  const [selectedYear, setSelectedYear] = useState<string>(String(new Date().getFullYear()));
+  const [selectedTerm, setSelectedTerm] = useState<string>('Term 1');
+  const examKey = useMemo(() => {
+    if (!selectedExamObj) return '';
+    return `${selectedExamObj.id}_${selectedYear}_${selectedTerm}`.toLowerCase();
+  }, [selectedExamObj, selectedYear, selectedTerm]);
+
   // Local state for mark values: studentId -> score
   const [localScores, setLocalScores] = useState<Record<number, number | string>>({});
+
+  // Clear marks when switching exam, year, term, class, stream, or subject to guarantee strict exam isolation
+  useEffect(() => {
+    setLocalScores({});
+  }, [selectedExam, selectedExamType, selectedYear, selectedTerm, selectedClass, selectedStream, selectedSubject]);
 
   // Filter students matching class and stream strictly to prevent cross-class data mixing
   const filteredStudents = useMemo(() => {
@@ -215,12 +269,12 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
     });
   }, [students, selectedClass, selectedStream, searchQuery]);
 
-  // Determine current score for a student
+  // Determine current score for a student strictly isolated by examKey
   const getStudentScore = (s: Student): number | string => {
     if (localScores[s.id] !== undefined) {
       return localScores[s.id];
     }
-    return s.marks?.[selectedSubject] ?? '';
+    return s.examMarks?.[examKey]?.[selectedSubject] ?? '';
   };
 
   const handleScoreChange = (studentId: number, val: string) => {
@@ -283,22 +337,31 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
     };
   }, [filteredStudents, localScores, selectedSubject, isClassPrimary]);
 
-  const handleSaveAll = () => {
+  const handleSaveAll = async () => {
+    if (isExamLocked) {
+      alert(`Mtihani wa "${selectedExam}" umefungwa na Msimamizi wa Taaluma (Academic Master). Huwezi kuingiza wala kuhariri alama.`);
+      return;
+    }
+
+    const schoolId = currentUser?.schoolId || getCurrentSchoolId();
     const updated = students.map(s => {
       const pending = localScores[s.id];
       if (pending === undefined) return s;
 
-      const currentMarks = { ...(s.marks || {}) };
+      const examMarks = { ...(s.examMarks || {}) };
+      const currentExamScores = { ...(examMarks[examKey] || {}) };
+
       if (pending === '') {
-        delete currentMarks[selectedSubject];
-        if (selectedSubject === 'Basic Mathematics') delete currentMarks['Mathematics'];
+        delete currentExamScores[selectedSubject];
+        if (selectedSubject === 'Basic Mathematics') delete currentExamScores['Mathematics'];
       } else {
-        currentMarks[selectedSubject] = Number(pending);
-        if (selectedSubject === 'Basic Mathematics') delete currentMarks['Mathematics'];
+        currentExamScores[selectedSubject] = Number(pending);
+        if (selectedSubject === 'Basic Mathematics') delete currentExamScores['Mathematics'];
       }
+      examMarks[examKey] = currentExamScores;
 
       const isStudentPrimary = isPrimaryOrNursery(s.level, s.className || selectedClass);
-      const cleanedMarks = cleanAndFilterMarksForClass(currentMarks, s.className || selectedClass, s.level);
+      const cleanedMarks = cleanAndFilterMarksForClass(currentExamScores, s.className || selectedClass, s.level);
       const markVals = Object.values(cleanedMarks);
       const total = markVals.reduce((acc, curr) => acc + curr, 0);
       const avg = markVals.length > 0 ? (total / markVals.length).toFixed(1) : undefined;
@@ -307,7 +370,8 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
         const primaryRes = calculatePrimaryScoreResult(cleanedMarks);
         return {
           ...s,
-          marks: cleanedMarks,
+          examMarks,
+          marks: currentExamScores,
           total,
           average: avg,
           primaryGrade: primaryRes.overallGrade,
@@ -318,7 +382,8 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
         const olevel = calculateOLevelDivision(cleanedMarks);
         return {
           ...s,
-          marks: cleanedMarks,
+          examMarks,
+          marks: currentExamScores,
           total,
           average: avg,
           division: olevel.division
@@ -327,8 +392,31 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
     });
 
     onUpdateStudents(updated);
+
+    try {
+      const resultsPayload: any[] = [];
+      updated.forEach(s => {
+        const pending = localScores[s.id];
+        if (pending !== undefined && pending !== '') {
+          resultsPayload.push({
+            school_id: schoolId,
+            student_id: String(s.id),
+            exam_type: selectedExam,
+            year: Number(selectedYear),
+            term: selectedTerm,
+            marks: Number(pending)
+          });
+        }
+      });
+      if (resultsPayload.length > 0) {
+        await upsertRecord('exam_results', resultsPayload);
+      }
+    } catch (e) {
+      console.warn("Could not save exam_results to Cloud SQL:", e);
+    }
+
     setLocalScores({});
-    setSaveSuccessMsg(`Marks for ${selectedSubject} (${selectedClass} ${selectedStream} - ${selectedExam}) saved successfully!`);
+    setSaveSuccessMsg(`Marks for ${selectedSubject} (${selectedClass} - ${selectedExam} | ${selectedYear} ${selectedTerm}) saved successfully!`);
     setTimeout(() => setSaveSuccessMsg(null), 3500);
   };
 
@@ -525,9 +613,61 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
             </div>
           )}
 
+          {/* Prominent Exam Scope Badge & Strict Isolation Header */}
+          <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-lg flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-blue-800/60">
+            <div className="flex items-start gap-3.5">
+              <div className="w-12 h-12 rounded-xl bg-blue-500/20 border border-blue-400/40 text-blue-300 flex items-center justify-center font-black shrink-0">
+                <Layers className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-widest text-blue-300">
+                  Strict Exam Isolation Module Active
+                </div>
+                <div className="text-base sm:text-lg font-black tracking-tight text-white mt-0.5 flex items-center gap-2 flex-wrap">
+                  <span>Exam: {selectedExam}</span>
+                  <span className="text-blue-400">•</span>
+                  <span>Year: {selectedYear}</span>
+                  <span className="text-blue-400">•</span>
+                  <span>Term: {selectedTerm}</span>
+                </div>
+                <p className="text-xs text-blue-100/80 mt-0.5">
+                  Alama zimefungwa kwenye mtihani huu pekee. Kubadili mtihani kutafungua fomu safi ya mtihani huo husika.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2.5 self-start sm:self-center shrink-0">
+              <div className="bg-white/10 border border-white/15 rounded-xl px-3.5 py-2 text-xs font-bold text-blue-100 flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span>Isolated Key: <strong className="font-mono text-amber-300">{selectedExam} ({selectedYear} {selectedTerm})</strong></span>
+              </div>
+            </div>
+          </div>
+
           {/* Filter Controls Header */}
           <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-5 shadow-xs flex flex-wrap items-center justify-between gap-4">
             <div className="flex flex-wrap items-center gap-3 text-xs font-bold text-slate-700">
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 uppercase tracking-wider text-[11px]">Year:</span>
+                <select
+                  value={selectedYear}
+                  onChange={e => setSelectedYear(e.target.value)}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                >
+                  {['2026', '2025', '2024', '2023'].map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 uppercase tracking-wider text-[11px]">Term:</span>
+                <select
+                  value={selectedTerm}
+                  onChange={e => setSelectedTerm(e.target.value)}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                >
+                  {['Term 1', 'Term 2', 'Term 3'].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
               <div className="flex items-center gap-1.5">
                 <span className="text-slate-500 uppercase tracking-wider text-[11px]">Class:</span>
                 <select
@@ -562,16 +702,44 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
               </div>
 
               <div className="flex items-center gap-1.5">
+                <span className="text-slate-500 uppercase tracking-wider text-[11px]">Type:</span>
+                <select
+                  value={selectedExamType}
+                  onChange={e => setSelectedExamType(e.target.value)}
+                  className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="All">All Types</option>
+                  {['Midterm', 'Terminal', 'Annual', 'Mock'].map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5">
                 <span className="text-slate-500 uppercase tracking-wider text-[11px]">Exam:</span>
                 <select
                   value={selectedExam}
                   onChange={e => setSelectedExam(e.target.value)}
                   className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
                 >
-                  {allAvailableExams.map(ex => (
-                    <option key={ex} value={ex}>{ex}</option>
-                  ))}
+                  {allAvailableExams.map(ex => {
+                    const locked = ex.status === 'Inactive' || ex.status === 'Locked' || ex.isActive === false;
+                    return (
+                      <option key={ex.id} value={ex.name}>
+                        {locked ? `🔒 ${ex.name} [LOCKED]` : `🟢 ${ex.name} [ACTIVE]`}
+                      </option>
+                    );
+                  })}
                 </select>
+                {isExamLocked ? (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1 shrink-0">
+                    <Lock className="w-3 h-3" />
+                    LOCKED
+                  </span>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1 shrink-0">
+                    <CheckCircle2 className="w-3 h-3" />
+                    ACTIVE
+                  </span>
+                )}
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -636,11 +804,17 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
 
               <button
                 type="button"
+                disabled={isExamLocked}
                 onClick={handleSaveAll}
-                className="px-4 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                className={`px-4 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs ${
+                  isExamLocked
+                    ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
+                    : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                }`}
+                title={isExamLocked ? 'Mtihani umefungwa, huwezi kuhifadhi alama' : 'Hifadhi alama zote'}
               >
-                <Save className="w-3.5 h-3.5" />
-                <span>Save All Marks</span>
+                {isExamLocked ? <Lock className="w-3.5 h-3.5 text-slate-500" /> : <Save className="w-3.5 h-3.5" />}
+                <span>{isExamLocked ? 'Mtihani Umefungwa (Locked)' : 'Save All Marks'}</span>
               </button>
             </div>
           </div>
@@ -693,6 +867,47 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
             </div>
           </div>
 
+          {/* Exam Lock Warning Banner */}
+          {isExamLocked && (
+            <div className="bg-rose-50 border-2 border-rose-300 text-rose-900 rounded-2xl p-5 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-rose-600 text-white flex items-center justify-center font-black shadow-md shrink-0">
+                  <Lock className="w-5 h-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-sm font-black text-rose-950">
+                      MTIHANI HUU UMEFUNGWA (EXAM LOCKED)
+                    </h4>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-200 text-rose-900 border border-rose-300">
+                      KUINGIZA ALAMA KUMEZUIWA
+                    </span>
+                  </div>
+                  <p className="text-xs text-rose-800 mt-1">
+                    Msimamizi wa Taaluma (Academic Master / Admin) amefunga mtihani wa <strong>"{selectedExam}"</strong>. Viingizio vya alama vimefungwa (disabled) na huwezi kuhifadhi alama mpya au kufanya mabadiliko hadi mtihani utakapofunguliwa tena kwenye <strong>Examination Dashboard → Exam Settings</strong> au <strong>Exams</strong>.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <div className="text-xs font-bold text-rose-800 bg-white/80 border border-rose-200 rounded-xl px-3 py-2 flex items-center gap-1.5">
+                  <Lock className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Alama Zimefungwa</span>
+                </div>
+                {onNavigateToExamSettings && (
+                  <button
+                    type="button"
+                    onClick={onNavigateToExamSettings}
+                    className="px-3.5 py-2 bg-rose-700 hover:bg-rose-800 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+                    title="Fungua mtihani huu kwenye Exam Settings"
+                  >
+                    <Sliders className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Exam Settings</span>
+                  </button>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Mark Entry Table */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -703,11 +918,21 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
                 <span className="text-xs text-slate-500 font-medium">
                   ({selectedExam})
                 </span>
+                {isExamLocked ? (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-1">
+                    <Lock className="w-2.5 h-2.5" /> Locked
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                    <CheckCircle2 className="w-2.5 h-2.5" /> Active
+                  </span>
+                )}
               </div>
               <span className="text-xs font-semibold text-slate-500">
                 Range: 0 - 100
               </span>
             </div>
+
 
             <div className="overflow-x-auto">
               <table className="w-full text-left text-xs border-collapse">
@@ -773,10 +998,16 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
                                   type="number"
                                   min="0"
                                   max="100"
+                                  disabled={isExamLocked}
                                   value={currentScore}
                                   onChange={e => handleScoreChange(st.id, e.target.value)}
-                                  placeholder="0-100"
-                                  className="w-20 px-2.5 py-1 text-center font-bold text-sm bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
+                                  placeholder={isExamLocked ? "Locked" : "0-100"}
+                                  className={`w-20 px-2.5 py-1 text-center font-bold text-sm rounded-lg outline-none transition ${
+                                    isExamLocked
+                                      ? 'bg-slate-100 text-slate-400 border border-slate-300 cursor-not-allowed opacity-80'
+                                      : 'bg-white border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
+                                  }`}
+                                  title={isExamLocked ? "Mtihani umefungwa, huwezi kuandika alama" : "Ingiza alama 0-100"}
                                 />
                               </div>
                             ) : (
@@ -821,17 +1052,24 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  disabled={isExamLocked}
                   onClick={handleSaveAll}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  className={`px-4 py-2 rounded-lg font-bold flex items-center gap-1.5 shadow-xs ${
+                    isExamLocked
+                      ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
+                      : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
+                  }`}
+                  title={isExamLocked ? 'Mtihani umefungwa, huwezi kuhifadhi alama' : 'Hifadhi alama zote'}
                 >
-                  <Save className="w-4 h-4" />
-                  <span>Save &amp; Publish All Marks</span>
+                  {isExamLocked ? <Lock className="w-4 h-4 text-slate-500" /> : <Save className="w-4 h-4" />}
+                  <span>{isExamLocked ? 'Mtihani Umefungwa (Locked)' : 'Save & Publish All Marks'}</span>
                 </button>
               </div>
             </div>
           </div>
         </div>
       )}
+
 
       {/* SUB-TAB 2: TEACHER CLASS TIMETABLE & TEACHING SCHEDULE */}
       {activeSubTab === 'timetable' && (

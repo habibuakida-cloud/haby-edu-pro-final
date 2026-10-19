@@ -61,6 +61,7 @@ export type ActiveView =
   | 'reampapers'
   | 'nectaregs'
   | 'laboratory'
+  | 'examsettings'
   | 'settings';
 
 export interface SubModuleRoute {
@@ -120,7 +121,8 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     subModules: [
       { id: 'results', label: 'Academic / Results Dashboard', description: 'Performance reports, report cards & student analysis' },
       { id: 'markentry', label: 'Mark Entry', description: 'Subject mark entry, teacher grading & USAL scores', badge: 'RESTORED' },
-      { id: 'exams', label: 'Exams', description: 'Examination sessions, paper configs & grading thresholds' },
+      { id: 'exams', label: 'Exams & Scheduling', description: 'Examination sessions, paper configs & grading thresholds' },
+      { id: 'examsettings', label: 'Exam Settings (Lock Control)', description: 'Lock or unlock exams to control teacher mark entry (Active / Locked)', badge: 'LOCK' },
       { id: 'examrecords', label: 'Exam Records & Top Performers', description: 'Master marksheets, Top Performers leaderboard, yearly profiles & promotion', badge: 'Leaderboard' },
       { id: 'nectaanalyzer', label: 'NECTA Analyzer', description: 'National exam statistics, divisions & GPA analysis' },
       { id: 'sittingplan', label: 'Sitting Plan', description: 'Automated exam hall seating arrangement & desk labels' },

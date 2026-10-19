@@ -51,6 +51,7 @@ export interface Student {
   combination?: string;
   subjects: string[];
   marks?: Record<string, number>;
+  examMarks?: Record<string, Record<string, number>>; // examKey -> (subject -> score)
   total?: number;
   average?: string;
   division?: string;
@@ -63,6 +64,7 @@ export interface Student {
   phone?: string;
   parentPhone?: string;
   parentName?: string;
+  parentPin?: string; // Custom PIN / password for Parent Portal access
   feeStatus?: 'PAID' | 'UNPAID' | string;
 }
 
@@ -112,7 +114,10 @@ export interface Exam {
   level: EducationLevel;
   className: string;
   date: string;
-  status?: 'Active' | 'Inactive';
+  status?: 'Active' | 'Inactive' | 'Locked';
+  isActive?: boolean;
+  academicYear?: string;
+  term?: string;
 }
 
 export interface DisciplineRecord {
@@ -624,6 +629,7 @@ export interface SavedInvigilationRecord {
   sessions: InvigilationSession[];
   supervisorsCount: number;
   supervisors: Supervisor[];
+  assignments?: Record<string, number>;
 }
 
 export interface AppData {

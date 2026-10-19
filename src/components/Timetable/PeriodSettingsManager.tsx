@@ -92,7 +92,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Main Form State (Used for adding OR top-editing)
-  const [formDay, setFormDay] = useState<string>('Monday');
+  const [formDays, setFormDays] = useState<string[]>(['Monday']);
   const [formName, setFormName] = useState<string>('Period 1');
   const [formStart, setFormStart] = useState<string>('08:00');
   const [formEnd, setFormEnd] = useState<string>('08:40');
@@ -136,6 +136,12 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
 
   // Delete Confirmation Modal / Prompt State
   const [periodToDelete, setPeriodToDelete] = useState<PeriodSetting | null>(null);
+
+  // Replicate Across Days Modal State
+  const [isReplicateModalOpen, setIsReplicateModalOpen] = useState(false);
+  const [replicateSourceDay, setReplicateSourceDay] = useState<string>('Monday');
+  const [replicateTargetDays, setReplicateTargetDays] = useState<string[]>(['Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+  const [replicateMode, setReplicateMode] = useState<'replace' | 'merge'>('replace');
 
   // Feedback Notification
   const [feedbackMessage, setFeedbackMessage] = useState<{ type: 'success' | 'info' | 'error'; text: string } | null>(null);
@@ -226,7 +232,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
   // Start editing a period (loads into top form and scrolls to it)
   const handleStartEdit = (p: PeriodSetting) => {
     setEditingPeriodId(p.id);
-    setFormDay(p.day);
+    setFormDays([p.day]);
     setFormName(p.name);
     setFormStart(p.start);
     setFormEnd(p.end);
@@ -238,6 +244,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
   // Cancel edit
   const handleCancelEdit = () => {
     setEditingPeriodId(null);
+    setFormDays(['Monday']);
     setFormName('Period 1');
     setFormStart('08:00');
     setFormEnd('08:40');
@@ -347,20 +354,20 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
 
       const nameChanged = existing.name !== trimmedName;
       const timeChanged = existing.start !== formStart || existing.end !== formEnd;
-      const dayChanged = existing.day !== formDay;
+      const dayChanged = existing.day !== formDays[0];
 
       if ((nameChanged || timeChanged || dayChanged) && onUpdateAssignments && assignments.length > 0) {
         const oldKey = `${existing.name} (${existing.start}-${existing.end})`;
         const newKey = `${trimmedName} (${formStart}-${formEnd})`;
         const affected = assignments.filter(
-          a => a.day === existing.day && (a.period === existing.name || a.period === oldKey || a.periodName === existing.name)
+          a => a.day === formDays[0] && (a.period === existing.name || a.period === oldKey || a.periodName === existing.name)
         );
         if (affected.length > 0) {
           const updatedAssignments = assignments.map(a => {
             if (a.day === existing.day && (a.period === existing.name || a.period === oldKey || a.periodName === existing.name)) {
               return { 
                 ...a, 
-                day: formDay, 
+                day: formDays[0], 
                 period: a.period.includes('(') ? newKey : trimmedName,
                 periodName: trimmedName 
               };
@@ -375,7 +382,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
         if (String(p.id) === String(editingPeriodId)) {
           return {
             ...p,
-            day: formDay,
+            day: formDays[0],
             name: trimmedName,
             start: formStart,
             end: formEnd,
@@ -387,36 +394,44 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
       });
 
       onUpdatePeriodSettings(updated);
-      showFeedback(`Saved changes to "${trimmedName}" (${formDay})!`);
+      showFeedback(`Saved changes to "${trimmedName}" (${formDays[0]})!`);
       handleCancelEdit();
     } else {
       // ADD MODE
-      const duplicateIndex = periodSettings.findIndex(
-        p => p.day === formDay && p.name.toLowerCase() === trimmedName.toLowerCase() && (p.className || 'All Classes') === formClassName
-      );
-      if (duplicateIndex > -1) {
-        const updated = [...periodSettings];
-        updated[duplicateIndex] = {
-          ...updated[duplicateIndex],
-          start: formStart,
-          end: formEnd,
-          streamName: formStreamName
-        };
-        onUpdatePeriodSettings(updated);
-        showFeedback(`Kipindi "${trimmedName}" (${formDay}) kimesasishwa: ${formStart} - ${formEnd}!`);
+      const newPeriods: PeriodSetting[] = [];
+      
+      formDays.forEach(day => {
+          const duplicateIndex = periodSettings.findIndex(
+            p => p.day === day && p.name.toLowerCase() === trimmedName.toLowerCase() && (p.className || 'All Classes') === formClassName
+          );
+          
+          if (duplicateIndex > -1) {
+            const updated = [...periodSettings];
+            updated[duplicateIndex] = {
+              ...updated[duplicateIndex],
+              start: formStart,
+              end: formEnd,
+              streamName: formStreamName
+            };
+            onUpdatePeriodSettings(updated);
+          } else {
+            newPeriods.push({
+              id: Date.now() + Math.random(),
+              day,
+              name: trimmedName,
+              start: formStart,
+              end: formEnd,
+              className: formClassName,
+              streamName: formStreamName
+            });
+          }
+      });
+      
+      if (newPeriods.length > 0) {
+        onUpdatePeriodSettings([...periodSettings, ...newPeriods]);
+        showFeedback(`Vipindi vipya "${trimmedName}" vimeongezwa kwa siku zilizochaguliwa!`);
       } else {
-        const newPeriod: PeriodSetting = {
-          id: Date.now(),
-          day: formDay,
-          name: trimmedName,
-          start: formStart,
-          end: formEnd,
-          className: formClassName,
-          streamName: formStreamName
-        };
-
-        onUpdatePeriodSettings([...periodSettings, newPeriod]);
-        showFeedback(`Kipindi kipya "${trimmedName}" (${formDay}) kimeongezwa!`);
+        showFeedback(`Vipindi vilivyopo "${trimmedName}" vimesasishwa!`, 'info');
       }
 
       // Increment period name for next addition if standard period
@@ -507,43 +522,82 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     showFeedback('Sampuli ya kawaida ya vipindi vya Tanzania imepakiwa.', 'success');
   };
 
-  // Replicate Monday periods to all weekdays
-  const handleReplicateMondayToWeekdays = () => {
-    const mondayPeriods = periodSettings.filter(p => p.day === 'Monday');
-    if (mondayPeriods.length === 0) {
-      showFeedback('Hakuna vipindi vilivyowekwa kwa siku ya Jumatatu vya kunakili.', 'error');
+  // Open Replicate Modal with pre-selected source day
+  const openReplicateModal = (sourceDay?: string) => {
+    const sDay = sourceDay && DAYS_OF_WEEK.includes(sourceDay) 
+      ? sourceDay 
+      : (selectedDayFilter !== 'All' ? selectedDayFilter : 'Monday');
+    setReplicateSourceDay(sDay);
+    // Pre-select all other standard weekdays by default
+    const otherWeekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].filter(d => d !== sDay);
+    setReplicateTargetDays(otherWeekdays);
+    setIsReplicateModalOpen(true);
+  };
+
+  // Replicate periods from ANY selected day to ANY target days
+  const handleExecuteReplication = () => {
+    const sourcePeriods = periodSettings.filter(p => p.day === replicateSourceDay);
+    if (sourcePeriods.length === 0) {
+      showFeedback(`Hakuna vipindi vilivyowekwa kwa siku ya ${replicateSourceDay} vya kunakili.`, 'error');
       return;
     }
 
-    const weekdays = ['Tuesday', 'Wednesday', 'Thursday', 'Friday'];
-    const count = mondayPeriods.length;
+    if (replicateTargetDays.length === 0) {
+      showFeedback('Tafadhali chagua angalau siku moja ya kuwekea ratiba (Target Days).', 'error');
+      return;
+    }
 
-    const newEntries: PeriodSetting[] = [];
+    let updated = [...periodSettings];
+    let addedCount = 0;
     let idCounter = Date.now();
 
-    weekdays.forEach(day => {
-      mondayPeriods.forEach(mp => {
-        // Only add if not already existing by name on that day
-        const exists = periodSettings.some(p => p.day === day && p.name === mp.name);
-        if (!exists) {
-          newEntries.push({
-            id: idCounter++,
-            day,
-            name: mp.name,
-            start: mp.start,
-            end: mp.end
-          });
-        }
-      });
-    });
+    if (replicateMode === 'replace') {
+      // Overwrite mode: clear target days and copy exact periods
+      updated = updated.filter(p => !replicateTargetDays.includes(p.day));
 
-    if (newEntries.length === 0) {
-      showFeedback('All weekdays already have matching periods from Monday.', 'info');
-      return;
+      replicateTargetDays.forEach(targetDay => {
+        sourcePeriods.forEach(sp => {
+          updated.push({
+            id: idCounter++,
+            day: targetDay,
+            name: sp.name,
+            start: sp.start,
+            end: sp.end,
+            className: sp.className,
+            streamName: sp.streamName
+          });
+          addedCount++;
+        });
+      });
+    } else {
+      // Merge mode: only add missing periods
+      replicateTargetDays.forEach(targetDay => {
+        sourcePeriods.forEach(sp => {
+          const exists = updated.some(p => 
+            p.day === targetDay && 
+            p.name.trim().toLowerCase() === sp.name.trim().toLowerCase() &&
+            (p.className || 'All Classes') === (sp.className || 'All Classes') &&
+            (p.streamName || 'All Streams') === (sp.streamName || 'All Streams')
+          );
+          if (!exists) {
+            updated.push({
+              id: idCounter++,
+              day: targetDay,
+              name: sp.name,
+              start: sp.start,
+              end: sp.end,
+              className: sp.className,
+              streamName: sp.streamName
+            });
+            addedCount++;
+          }
+        });
+      });
     }
 
-    onUpdatePeriodSettings([...periodSettings, ...newEntries]);
-    showFeedback(`Successfully added ${newEntries.length} periods across Tuesday-Friday!`);
+    onUpdatePeriodSettings(updated);
+    setIsReplicateModalOpen(false);
+    showFeedback(`Ratiba ya ${replicateSourceDay} (${sourcePeriods.length} vipindi) imenakiliwa kikamilifu kwenye siku ${replicateTargetDays.join(', ')}!`, 'success');
   };
 
   // Filtered periods
@@ -649,12 +703,12 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
 
           <button
             type="button"
-            onClick={handleReplicateMondayToWeekdays}
-            className="px-3 py-1.5 text-xs font-semibold bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg hover:bg-indigo-100 flex items-center gap-1.5 transition-colors cursor-pointer"
-            title="Duplicate Monday schedule to Tuesday through Friday"
+            onClick={() => openReplicateModal(selectedDayFilter !== 'All' ? selectedDayFilter : 'Monday')}
+            className="px-3.5 py-1.5 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+            title="Nakili ratiba ya siku yoyote (Monday, Tuesday, etc.) kwenda siku unazochagua au siku zote za wiki"
           >
             <Copy className="w-3.5 h-3.5" />
-            <span>Replicate Mon to Weekdays</span>
+            <span>Nakili Ratiba ya Siku (Replicate Across Days)</span>
           </button>
         </div>
       </div>
@@ -842,17 +896,22 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3">
           <div>
             <label className="text-xs font-bold text-slate-600 uppercase block mb-1">
-              Day of Week *
+              Day of Week (Select Multiple) *
             </label>
-            <select
-              value={formDay}
-              onChange={e => setFormDay(e.target.value)}
-              className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
-            >
+            <div className="flex flex-wrap gap-1">
               {DAYS_OF_WEEK.map(d => (
-                <option key={d} value={d}>{d}</option>
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => {
+                      setFormDays(prev => prev.includes(d) ? prev.filter(day => day !== d) : [...prev, d]);
+                  }}
+                  className={`px-2 py-1 text-[10px] font-bold rounded border transition-colors ${formDays.includes(d) ? 'bg-blue-600 text-white border-blue-700' : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'}`}
+                >
+                  {d.substring(0, 3)}
+                </button>
               ))}
-            </select>
+            </div>
           </div>
 
           <div>
@@ -1078,6 +1137,18 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
                 </button>
               );
             })}
+
+            {selectedDayFilter !== 'All' && (
+              <button
+                type="button"
+                onClick={() => openReplicateModal(selectedDayFilter)}
+                className="px-2.5 py-1 text-xs font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-lg flex items-center gap-1 transition-colors cursor-pointer ml-1"
+                title={`Nakili ratiba ya ${selectedDayFilter} kwenda siku nyingine`}
+              >
+                <Copy className="w-3 h-3 text-indigo-600" />
+                <span>Nakili {selectedDayFilter}...</span>
+              </button>
+            )}
           </div>
 
           {/* Search Box */}
@@ -1432,6 +1503,263 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
           </div>
         </div>
       )}
+
+      {/* Universal Replicate Across Days Modal */}
+      {isReplicateModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 animate-in fade-in duration-150">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 max-h-[90vh] overflow-y-auto">
+            {/* Modal Header */}
+            <div className="flex items-start justify-between border-b pb-3">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-indigo-100 text-indigo-700 flex items-center justify-center font-bold">
+                  <Copy className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-base font-bold text-slate-900">
+                    Nakili Ratiba ya Siku (Replicate Across Days)
+                  </h4>
+                  <p className="text-xs text-slate-500">
+                    Chagua siku ya chanzo (sio Monday tu!) na siku za kuwekea ratiba hiyo.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsReplicateModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* 1. Source Day Selector */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-700 uppercase flex items-center justify-between">
+                <span>1. Chagua Siku ya Chanzo (Copy FROM):</span>
+                <span className="text-[11px] text-indigo-700 font-bold">
+                  {periodSettings.filter(p => p.day === replicateSourceDay).length} vipindi vilivyopo
+                </span>
+              </label>
+              <select
+                value={replicateSourceDay}
+                onChange={e => {
+                  const newSource = e.target.value;
+                  setReplicateSourceDay(newSource);
+                  setReplicateTargetDays(prev => prev.filter(d => d !== newSource));
+                }}
+                className="w-full px-3 py-2.5 text-sm font-bold border border-slate-300 rounded-xl bg-slate-50 text-slate-900 focus:bg-white focus:ring-2 focus:ring-indigo-500"
+              >
+                {DAYS_OF_WEEK.map(d => {
+                  const count = periodSettings.filter(p => p.day === d).length;
+                  return (
+                    <option key={d} value={d}>
+                      {d} ({count} {count === 1 ? 'kipindi' : 'vipindi'})
+                    </option>
+                  );
+                })}
+              </select>
+
+              {/* Source Day Periods Preview */}
+              <div className="mt-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl max-h-28 overflow-y-auto">
+                <span className="text-[10px] font-bold text-slate-500 uppercase block mb-1">
+                  Vipindi vya {replicateSourceDay}:
+                </span>
+                {(() => {
+                  const sourceList = periodSettings
+                    .filter(p => p.day === replicateSourceDay)
+                    .sort((a, b) => a.start.localeCompare(b.start));
+                  if (sourceList.length === 0) {
+                    return (
+                      <p className="text-xs text-rose-600 font-bold italic">
+                        Hakuna vipindi kwenye {replicateSourceDay}. Tafadhali weka vipindi kwanza au chagua siku nyingine yenye vipindi!
+                      </p>
+                    );
+                  }
+                  return (
+                    <div className="flex flex-wrap gap-1">
+                      {sourceList.map(p => (
+                        <span key={p.id} className="inline-flex items-center gap-1 text-[11px] bg-white border border-slate-200 px-2 py-0.5 rounded font-mono font-medium text-slate-700">
+                          <strong>{p.name}</strong> ({p.start}-{p.end})
+                        </span>
+                      ))}
+                    </div>
+                  );
+                })()}
+              </div>
+            </div>
+
+            {/* 2. Target Days Selector */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-700 uppercase">
+                  2. Chagua Siku za Kuwekea Ratiba (Copy TO):
+                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const weekdays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'].filter(d => d !== replicateSourceDay);
+                      setReplicateTargetDays(weekdays);
+                    }}
+                    className="px-2 py-0.5 text-[10px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded transition"
+                  >
+                    Mon - Fri
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setReplicateTargetDays(DAYS_OF_WEEK.filter(d => d !== replicateSourceDay));
+                    }}
+                    className="px-2 py-0.5 text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-700 rounded transition"
+                  >
+                    Siku Zote
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReplicateTargetDays([])}
+                    className="px-2 py-0.5 text-[10px] font-bold text-slate-400 hover:text-slate-600 transition"
+                  >
+                    Futa
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {DAYS_OF_WEEK.map(day => {
+                  const isSource = day === replicateSourceDay;
+                  const isSelected = replicateTargetDays.includes(day);
+                  const count = periodSettings.filter(p => p.day === day).length;
+
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      disabled={isSource}
+                      onClick={() => {
+                        if (isSelected) {
+                          setReplicateTargetDays(prev => prev.filter(d => d !== day));
+                        } else {
+                          setReplicateTargetDays(prev => [...prev, day]);
+                        }
+                      }}
+                      className={`p-2.5 rounded-xl border text-left transition-all ${
+                        isSource
+                          ? 'bg-slate-100 border-slate-200 opacity-50 cursor-not-allowed'
+                          : isSelected
+                          ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50/50'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold">{day}</span>
+                        {isSelected && !isSource && <Check className="w-3.5 h-3.5 text-white" />}
+                      </div>
+                      <div className={`text-[10px] mt-0.5 ${isSelected && !isSource ? 'text-indigo-200' : 'text-slate-400'}`}>
+                        {isSource ? '(Siku ya Chanzo)' : `${count} vilivyopo`}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 3. Replication Mode */}
+            <div className="space-y-1.5 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+              <label className="text-xs font-bold text-slate-700 uppercase block mb-1">
+                3. Njia ya Unakili (Replication Mode):
+              </label>
+              <div className="space-y-2 text-xs">
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="replicateMode"
+                    value="replace"
+                    checked={replicateMode === 'replace'}
+                    onChange={() => setReplicateMode('replace')}
+                    className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <span className="font-bold text-slate-900 block">
+                      Badilisha Kabisa (Replace / Overwrite - Inashauriwa)
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Inafuta ratiba ya zamani ya siku zilizochaguliwa na kuweka ratiba kamili inayofanana kabisa na {replicateSourceDay}.
+                    </span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2 cursor-pointer">
+                  <input
+                    type="radio"
+                    name="replicateMode"
+                    value="merge"
+                    checked={replicateMode === 'merge'}
+                    onChange={() => setReplicateMode('merge')}
+                    className="mt-0.5 text-indigo-600 focus:ring-indigo-500"
+                  />
+                  <div>
+                    <span className="font-bold text-slate-900 block">
+                      Ongeza Tu Visivyokuwepo (Merge / Keep Existing)
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      Inaongeza vipindi vya {replicateSourceDay} visivyokuwepo bila kufuta vile vilivyokuwepo kwenye siku zilizochaguliwa.
+                    </span>
+                  </div>
+                </label>
+              </div>
+            </div>
+
+            {/* Modal Actions */}
+            <div className="flex items-center justify-end gap-2.5 pt-2 border-t">
+              <button
+                type="button"
+                onClick={() => setIsReplicateModalOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition"
+              >
+                Ghairi
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteReplication}
+                disabled={
+                  replicateTargetDays.length === 0 ||
+                  periodSettings.filter(p => p.day === replicateSourceDay).length === 0
+                }
+                className="px-5 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl shadow-md transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>
+                  Nakili Kwenda Siku ({replicateTargetDays.length})
+                </span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Prominent Save Step Action Bar */}
+      <div className="bg-gradient-to-r from-blue-900 to-indigo-900 p-4 rounded-xl text-white flex flex-col sm:flex-row items-center justify-between gap-3 shadow-md mt-6">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-lg bg-white/10 flex items-center justify-center border border-white/20">
+            <Check className="w-5 h-5 text-emerald-400" />
+          </div>
+          <div>
+            <h4 className="text-xs sm:text-sm font-bold uppercase tracking-tight">Hifadhi Mabadiliko ya Hatua Hii (Save Period Settings)</h4>
+            <p className="text-[11px] text-blue-200">Kila mabadiliko unayofanya yanahifadhiwa moja kwa moja ili kuzuia mfumo kuanza upya.</p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => {
+            onUpdatePeriodSettings(periodSettings);
+            showFeedback('Mipangilio ya vipindi imehifadhiwa na kusasishwa kikamilifu kwenye mfumo!', 'success');
+          }}
+          className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs uppercase tracking-wider rounded-xl shadow-lg transition flex items-center gap-2 cursor-pointer active:scale-95 shrink-0"
+        >
+          <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+          <span>Hifadhi Hatua Hii (Save Step)</span>
+        </button>
+      </div>
     </div>
   );
 };

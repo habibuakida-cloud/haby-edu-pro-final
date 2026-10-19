@@ -23,13 +23,15 @@ import {
   Grid,
   Table,
   ListFilter,
-  Zap
+  Zap,
+  Save
 } from 'lucide-react';
 import { 
   InvigilationSession, 
   Teacher, 
   Supervisor, 
-  SchoolInfo 
+  SchoolInfo,
+  SavedInvigilationRecord
 } from '../types';
 import { SUBJECT_LIST, DEFAULT_CLASSES } from '../constants/defaults';
 import { getTeacherColor, getSubjectColor, getDayTheme } from '../utils/colors';
@@ -44,6 +46,7 @@ interface InvigilationContainerProps {
   supervisors: Supervisor[];
   selectedInvigilators: number[];
   invigilationAssignments: Record<string, number>;
+  savedInvigilationRecords?: SavedInvigilationRecord[];
   timetableReleased: boolean;
   schoolInfo: SchoolInfo;
   dayThemes?: Record<string, string>;
@@ -51,6 +54,7 @@ interface InvigilationContainerProps {
   onUpdateSupervisors: (supervisors: Supervisor[]) => void;
   onUpdateSelectedInvigilators: (ids: number[]) => void;
   onUpdateInvigilationAssignments: (assignments: Record<string, number>) => void;
+  onUpdateSavedInvigilationRecords?: (records: SavedInvigilationRecord[]) => void;
   onToggleRelease: () => void;
   onNavigateToSittingPlan?: () => void;
 }
@@ -61,6 +65,7 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
   supervisors,
   selectedInvigilators,
   invigilationAssignments,
+  savedInvigilationRecords = [],
   timetableReleased,
   schoolInfo,
   dayThemes,
@@ -68,11 +73,14 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
   onUpdateSupervisors,
   onUpdateSelectedInvigilators,
   onUpdateInvigilationAssignments,
+  onUpdateSavedInvigilationRecords,
   onToggleRelease,
   onNavigateToSittingPlan
 }) => {
   // Navigation tabs matching TimetableContainer aesthetic
-  const [activeTab, setActiveTab] = useState<'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'personal'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'personal' | 'saved'>('general');
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [snapshotTitle, setSnapshotTitle] = useState('Midterm Examination Invigilation Timetable');
   
   // Layout view mode for General Timetable: 'cards' (Modern visual cards), 'matrix' (Traditional Exam Hall grid) or 'master' (One large master table)
   const [viewMode, setViewMode] = useState<'cards' | 'matrix' | 'master'>('cards');
@@ -454,6 +462,19 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
           Personal Duty Slip
         </button>
 
+        <button
+          onClick={() => setActiveTab('saved')}
+          className={`px-4 py-2.5 rounded-lg text-xs sm:text-sm font-bold transition-colors flex items-center gap-2 cursor-pointer ${
+            activeTab === 'saved' ? 'bg-[#1f4d8b] text-white shadow-xs' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Save className="w-4 h-4" />
+          Saved Timetables
+          <span className="px-1.5 py-0.2 bg-blue-100 text-blue-800 text-[10px] rounded-full font-bold">
+            {(savedInvigilationRecords || []).length}
+          </span>
+        </button>
+
         {onNavigateToSittingPlan && (
           <button
             onClick={onNavigateToSittingPlan}
@@ -610,6 +631,18 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                       Draft (Not Released)
                     </>
                   )}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setSnapshotTitle(`Term Exam Invigilation Timetable (${new Date().getFullYear()})`);
+                    setSaveModalOpen(true);
+                  }}
+                  className="px-3 py-2 text-xs font-bold bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  title="Save current invigilation timetable snapshot (MIDTERM / TERMINAL)"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  Save Snapshot
                 </button>
 
                 <button
@@ -2110,6 +2143,95 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
       )}
 
       {/* ======================================================== */}
+      {/* TAB: SAVED INVIGILATION TIMETABLES                       */}
+      {/* ======================================================== */}
+      {activeTab === 'saved' && (
+        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-[#1f4d8b]">Saved Examination Invigilation Timetables</h3>
+              <p className="text-xs text-slate-500">
+                Access, load, or delete your previously saved exam invigilation schedules (MIDTERM, TERMINAL, ANNUAL).
+              </p>
+            </div>
+            <button
+              onClick={() => {
+                setSnapshotTitle(`Exam Invigilation Timetable - ${new Date().toLocaleDateString()}`);
+                setSaveModalOpen(true);
+              }}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-2 cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              Save Current Timetable
+            </button>
+          </div>
+
+          {(!savedInvigilationRecords || savedInvigilationRecords.length === 0) ? (
+            <div className="text-center py-16 bg-slate-50 rounded-xl border border-dashed border-slate-300">
+              <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h4 className="text-sm font-bold text-slate-700">No Saved Invigilation Timetables Yet</h4>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                Create and configure your exam sessions and room assignments in the Master Tab, then click "Save Snapshot" to store different exam timetables (MIDTERM, TERMINAL, ANNUAL) securely here.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {savedInvigilationRecords.map(rec => (
+                <div key={rec.id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4 hover:border-blue-300 transition-all flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="text-sm font-black text-slate-800 line-clamp-1">{rec.title}</h4>
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full shrink-0">
+                        {rec.createdAt}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 flex items-center gap-3">
+                      <span className="flex items-center gap-1 font-medium"><Clock className="w-3.5 h-3.5 text-blue-500" /> {rec.sessionsCount || rec.sessions?.length || 0} Sessions</span>
+                      <span className="flex items-center gap-1 font-medium"><ShieldCheck className="w-3.5 h-3.5 text-purple-500" /> {rec.supervisorsCount || rec.supervisors?.length || 0} Supervisors</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <button
+                      onClick={() => {
+                        if (confirm(`Load saved timetable "${rec.title}" into active workspace?`)) {
+                          onUpdateSessions(rec.sessions || []);
+                          onUpdateSupervisors(rec.supervisors || []);
+                          if (rec.assignments) {
+                            onUpdateInvigilationAssignments(rec.assignments);
+                          }
+                          setActiveTab('general');
+                          alert(`Successfully loaded "${rec.title}".`);
+                        }
+                      }}
+                      className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      Load Timetable
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (confirm(`Delete saved timetable "${rec.title}"?`)) {
+                          const updated = (savedInvigilationRecords || []).filter(r => r.id !== rec.id);
+                          if (onUpdateSavedInvigilationRecords) {
+                            onUpdateSavedInvigilationRecords(updated);
+                          }
+                        }
+                      }}
+                      className="p-2 text-rose-600 hover:bg-rose-50 rounded-lg border border-rose-200 transition-colors cursor-pointer"
+                      title="Delete saved timetable"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ======================================================== */}
       {/* MODAL: ADD / EDIT EXAMINATION SESSION                    */}
       {/* ======================================================== */}
       {sessionModalOpen && (
@@ -2135,6 +2257,86 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
           onSaveAssignments={(updated) => onUpdateInvigilationAssignments(updated)}
           onClose={() => setBulkEditModalOpen(false)}
         />
+      )}
+
+      {/* ======================================================== */}
+      {/* MODAL: SAVE TIMETABLE SNAPSHOT                           */}
+      {/* ======================================================== */}
+      {saveModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+            <div className="flex items-center justify-between">
+              <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                <Save className="w-5 h-5 text-emerald-600" />
+                Save Invigilation Timetable Snapshot
+              </h3>
+              <button
+                onClick={() => setSaveModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                  Timetable Title / Exam Type (e.g., MIDTERM / TERMINAL)
+                </label>
+                <input
+                  type="text"
+                  value={snapshotTitle}
+                  onChange={e => setSnapshotTitle(e.target.value)}
+                  placeholder="e.g. Midterm Term 1 Invigilation Timetable"
+                  className="w-full px-3.5 py-2.5 text-sm bg-slate-50 border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:outline-hidden font-medium"
+                />
+              </div>
+              <p className="text-xs text-slate-500 leading-relaxed">
+                Saving this snapshot preserves all exam sessions, room allocations, invigilator duty assignments, and supervisors. You can easily switch between Midterm and Terminal timetables anytime from the Saved Timetables tab.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setSaveModalOpen(false)}
+                className="px-4 py-2.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!snapshotTitle.trim()) {
+                    alert('Please enter a title.');
+                    return;
+                  }
+                  const newRecord: SavedInvigilationRecord = {
+                    id: 'invig_rec_' + Date.now(),
+                    title: snapshotTitle.trim(),
+                    createdAt: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+                    examTitle: snapshotTitle.trim(),
+                    sessionsCount: sessions.length,
+                    supervisorsCount: supervisors.length,
+                    sessions: JSON.parse(JSON.stringify(sessions)),
+                    supervisors: JSON.parse(JSON.stringify(supervisors)),
+                    assignments: JSON.parse(JSON.stringify(invigilationAssignments))
+                  };
+                  const updated = [newRecord, ...(savedInvigilationRecords || [])];
+                  if (onUpdateSavedInvigilationRecords) {
+                    onUpdateSavedInvigilationRecords(updated);
+                  }
+                  setSaveModalOpen(false);
+                  alert(`Invigilation timetable "${snapshotTitle}" saved successfully!`);
+                }}
+                className="px-5 py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs cursor-pointer flex items-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                Save Timetable
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -110,19 +110,37 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
     }
   }, [currentTeacher]);
 
-  // Available Classes & Streams
+  // Available Classes & Streams mapped from current teacher's assigned teachingStreams or streamSettings
   const availableClasses = useMemo(() => {
+    if (currentTeacher && currentTeacher.teachingStreams && currentTeacher.teachingStreams.length > 0) {
+      const classesFromTeacher = Array.from(new Set(currentTeacher.teachingStreams.map(ts => {
+        const parts = ts.split('-');
+        return parts[0]?.trim() || '';
+      }).filter(Boolean)));
+      if (classesFromTeacher.length > 0) return classesFromTeacher;
+    }
     const list = Array.from(new Set(streamSettings.map(s => s.className)));
     if (list.length === 0) return ['Form 1', 'Form 2', 'Form 3', 'Form 4', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7'];
     return list;
-  }, [streamSettings]);
+  }, [currentTeacher, streamSettings]);
 
   const availableStreams = useMemo(() => {
+    if (currentTeacher && currentTeacher.teachingStreams && currentTeacher.teachingStreams.length > 0) {
+      const streamsForClass = currentTeacher.teachingStreams
+        .filter(ts => ts.toLowerCase().includes(selectedClass.toLowerCase()))
+        .map(ts => {
+          const parts = ts.split('-');
+          return parts[1]?.trim() || ts;
+        });
+      if (streamsForClass.length > 0) {
+        return Array.from(new Set(streamsForClass));
+      }
+    }
     const streamObj = streamSettings.find(s => s.className === selectedClass);
     return streamObj?.streams || ['STREAM A', 'STREAM B', 'A', 'B'];
-  }, [streamSettings, selectedClass]);
+  }, [currentTeacher, streamSettings, selectedClass]);
 
-  // Available Subjects for Teacher
+  // Available Subjects for Teacher mapped from current teacher's assigned subjects in state
   const teacherSubjects = useMemo(() => {
     if (currentTeacher && currentTeacher.subjects && currentTeacher.subjects.length > 0) {
       return currentTeacher.subjects;
@@ -302,11 +320,19 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
                     {currentTeacher.subjects?.join(', ') || 'Hatayajapangwa'}
                   </span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-blue-300 font-bold">Mikondo/Madarasa:</span>
-                  <span className="font-bold text-white truncate max-w-[170px]" title={currentTeacher.teachingStreams?.join(', ')}>
-                    {currentTeacher.teachingStreams?.join(', ') || 'All Streams'}
-                  </span>
+                <div className="flex flex-col gap-1 pt-1">
+                  <span className="text-blue-300 font-bold">Mikondo/Madarasa (All Streams):</span>
+                  <div className="flex flex-wrap gap-1">
+                    {currentTeacher.teachingStreams && currentTeacher.teachingStreams.length > 0 ? (
+                      currentTeacher.teachingStreams.map((st, sIdx) => (
+                        <span key={sIdx} className="bg-white/15 text-white px-2 py-0.5 rounded text-[10px] font-bold border border-white/20">
+                          {st}
+                        </span>
+                      ))
+                    ) : (
+                      <span className="text-white font-bold text-[10px]">All Streams (Standard Allocation)</span>
+                    )}
+                  </div>
                 </div>
               </div>
             )}

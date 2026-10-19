@@ -171,10 +171,15 @@ app.get('/api/db/school-admins', async (req, res) => {
 app.post('/api/db/school-admins', async (req, res) => {
   try {
     const payload = req.body;
-    await db.insert(schema.schoolAdmins).values(payload).onConflictDoUpdate({
-      target: schema.schoolAdmins.id,
-      set: payload
-    });
+    if (payload.id) {
+        await db.insert(schema.schoolAdmins).values(payload).onConflictDoUpdate({
+          target: schema.schoolAdmins.id,
+          set: payload
+        });
+    } else {
+        const { id, ...insertPayload } = payload;
+        await db.insert(schema.schoolAdmins).values(insertPayload);
+    }
     res.json({ success: true });
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to save school admin' });
@@ -304,6 +309,7 @@ app.post('/api/db/query', async (req, res) => {
     timetable_assignments: schema.timetableAssignments,
     subject_period_allocations: schema.subjectPeriodAllocations,
     teacher_assignments: schema.teacherAssignments,
+    exam_results: schema.examResults,
   };
 
   const selectedTable = tableKeyMap[table];

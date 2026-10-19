@@ -48,7 +48,6 @@ export const ExamDocumentsModal: React.FC<ExamDocumentsModalProps> = ({
   initialClass,
   initialStream
 }) => {
-  if (!isOpen) return null;
 
   // Selected Examination
   const [selectedExamId, setSelectedExamId] = useState<number | string>(() => {
@@ -179,6 +178,8 @@ export const ExamDocumentsModal: React.FC<ExamDocumentsModalProps> = ({
     link.click();
     link.remove();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/75 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 print:p-0 print:bg-white print:static">

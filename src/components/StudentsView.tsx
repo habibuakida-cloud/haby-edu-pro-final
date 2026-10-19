@@ -29,9 +29,13 @@ import {
   Shield,
   QrCode,
   FileText,
-  BarChart2
+  BarChart2,
+  Lock,
+  Key,
+  Share2
 } from 'lucide-react';
 import { Student, SchoolInfo, EducationLevel, StreamSetting, ExaminationRecord } from '../types';
+import { getParentPinForPhone, saveParentPin, DEFAULT_PARENT_PIN } from '../utils/parentAuth';
 import { useConfirmDelete } from '../context/ConfirmDeleteContext';
 import { supabase } from '../lib/dbClient';
 import { CameraCaptureModal } from './common/CameraCaptureModal';
@@ -119,6 +123,9 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [dob, setDob] = useState('2010-01-01');
   const [parentPhone, setParentPhone] = useState('');
   const [parentName, setParentName] = useState('');
+  const [parentPin, setParentPin] = useState(DEFAULT_PARENT_PIN);
+  const [pinModalParent, setPinModalParent] = useState<{ phone: string; parentName: string; currentPin: string } | null>(null);
+  const [newPinValue, setNewPinValue] = useState('');
   const [feeStatus, setFeeStatus] = useState<'PAID' | 'UNPAID'>('UNPAID');
   const [passportPhoto, setPassportPhoto] = useState<string>('');
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([
@@ -701,6 +708,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       parentName: parentName.trim() || undefined,
       parentPhone: parentPhone.trim() || undefined,
       phone: parentPhone.trim() || undefined,
+      parentPin: parentPin.trim() || DEFAULT_PARENT_PIN,
       feeStatus: feeStatus,
       passportPhoto: passportPhoto || undefined,
       subjects: selectedSubjects,
@@ -709,6 +717,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       average: '0.0',
       division: '-'
     };
+
+    if (parentPhone.trim()) {
+      saveParentPin(parentPhone.trim(), parentPin.trim() || DEFAULT_PARENT_PIN);
+    }
 
     onAddStudent(newStudent);
 
@@ -727,6 +739,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     setName('');
     setParentPhone('');
     setParentName('');
+    setParentPin(DEFAULT_PARENT_PIN);
     setPassportPhoto('');
     // After Student Create, show all students in Student button list immediately
     setActiveTab('register_list');
@@ -1495,6 +1508,29 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                   required
                   studentName={name}
                 />
+
+                {/* Namba ya Siri ya Mzazi kwa Ajili ya Parent Portal */}
+                <div>
+                  <label className="text-xs font-bold text-slate-600 uppercase flex items-center justify-between mb-1">
+                    <span className="flex items-center gap-1.5">
+                      <Lock className="w-3.5 h-3.5 text-blue-600" />
+                      Namba ya Siri ya Mzazi (Portal PIN / Password)
+                    </span>
+                    <span className="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200">
+                      Chaguo-msingi: 123456
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    value={parentPin}
+                    onChange={e => setParentPin(e.target.value)}
+                    placeholder="123456"
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500"
+                  />
+                  <p className="text-[10px] text-slate-500 mt-1">
+                    Mzazi ataingia kwenye Portal kwa namba yake ya simu na PIN hii ili kuona matokeo, ada na mahudhurio.
+                  </p>
+                </div>
 
                 {/* Hali ya Ada / Fee Status */}
                 <div className="space-y-1">
@@ -2734,118 +2770,318 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         </div>
       )}
 
-      {/* TAB 4: PARENT DIRECTORY (WAZAZI NA WANAFUNZI WAO) */}
+      {/* TAB 4: PARENT DIRECTORY (WAZAZI NA WANAFUNZI WAO & USIMAMIZI WA PIN) */}
       {activeTab === 'parents_list' && (
-        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b border-slate-200">
-            <div>
-              <h3 className="text-base font-bold text-[#1f4d8b] flex items-center gap-2">
-                <Users className="w-4 h-4 text-indigo-600" />
-                Orodha ya Wazazi na Wanafunzi Wao (Parent Directory & Login Info)
-              </h3>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Wazazi wote waliojisajili kupitia namba za simu wakati wa kusajili wanafunzi, pamoja na wanafunzi wao. Wazazi wanaweza kuingia kwenye Parent Portal kwa namba zao za simu.
-              </p>
+        <div className="space-y-4">
+          {/* Detailed Guide Card explaining Parent Portal registration & PINs */}
+          <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white rounded-2xl p-5 sm:p-6 shadow-md border border-blue-800/50">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-white/10 rounded-xl flex items-center justify-center border border-white/20 shadow-inner">
+                  <Shield className="w-6 h-6 text-sky-300" />
+                </div>
+                <div>
+                  <h3 className="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-2">
+                    Mwongozo wa Portal ya Wazazi (Parent Portal Guide)
+                  </h3>
+                  <p className="text-xs text-sky-200 mt-0.5">
+                    Taarifa kamili kuhusu usajili wa wazazi, namba zao za siri (PIN), na jinsi ya kuwapa access ya mfumo.
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <a
+                  href="#parentportal"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-3 py-2 bg-sky-500 hover:bg-sky-400 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5"
+                >
+                  <Key className="w-3.5 h-3.5" />
+                  <span>Fungua Parent Portal</span>
+                </a>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 text-xs">
+              <div className="bg-white/10 rounded-xl p-3.5 border border-white/10 backdrop-blur-xs">
+                <div className="flex items-center gap-2 font-black text-sky-300 mb-1.5 uppercase tracking-wide">
+                  <span className="w-5 h-5 bg-sky-500/30 rounded-full flex items-center justify-center text-[10px] text-white">1</span>
+                  Wanasajiliwa Wapi?
+                </div>
+                <p className="text-blue-100 leading-relaxed text-[11px]">
+                  Mzazi anasajiliwa <strong>kiotomatiki</strong> wakati wa kusajili mwanafunzi (kwenye fomu ya <em>Sajili Mwanafunzi</em> au kupakia faili la Excel/CSV). Namba ya simu ya mzazi inakuwa <strong>Username</strong> yake ya kuingia kwenye mfumo.
+                </p>
+              </div>
+
+              <div className="bg-white/10 rounded-xl p-3.5 border border-white/10 backdrop-blur-xs">
+                <div className="flex items-center gap-2 font-black text-amber-300 mb-1.5 uppercase tracking-wide">
+                  <span className="w-5 h-5 bg-amber-500/30 rounded-full flex items-center justify-center text-[10px] text-white">2</span>
+                  Namba za Siri (PIN) Ziko Wapi?
+                </div>
+                <p className="text-blue-100 leading-relaxed text-[11px]">
+                  Kila mzazi anapewa namba ya siri ya awali ya kiotomatiki: <strong className="text-amber-300 font-mono">123456</strong> (au Namba ya Usajili ya mtoto). Unaweza <strong>kubadilisha au kumpa mzazi PIN maalum</strong> wakati wowote kupitia kitufe cha <em>"Badili PIN"</em> hapa chini!
+                </p>
+              </div>
+
+              <div className="bg-white/10 rounded-xl p-3.5 border border-white/10 backdrop-blur-xs">
+                <div className="flex items-center gap-2 font-black text-emerald-300 mb-1.5 uppercase tracking-wide">
+                  <span className="w-5 h-5 bg-emerald-500/30 rounded-full flex items-center justify-center text-[10px] text-white">3</span>
+                  Jinsi Mzazi Anavyoingia
+                </div>
+                <p className="text-blue-100 leading-relaxed text-[11px]">
+                  Mzazi anafungua tovuti ya shule na kubofya <strong>"Portal ya Wazazi"</strong> (au kiungo cha <code className="text-emerald-200">#parentportal</code>), kisha anaingiza <strong>Simu</strong> na <strong>PIN</strong>. Mwalimu anaweza pia kubofya kitufe cha <strong>"WhatsApp"</strong> kumtumia taarifa zake mara moja!
+                </p>
+              </div>
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-xs text-left">
-              <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase">
-                <tr>
-                  <th className="p-3 border-r border-slate-200">#</th>
-                  <th className="p-3 border-r border-slate-200">Parent / Guardian Name</th>
-                  <th className="p-3 border-r border-slate-200">Parent Phone (Portal Login)</th>
-                  <th className="p-3 border-r border-slate-200">Linked Student(s) Name</th>
-                  <th className="p-3 border-r border-slate-200">Reg No</th>
-                  <th className="p-3 border-r border-slate-200">Class & Stream</th>
-                  <th className="p-3 text-center">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {(() => {
-                  const parentMap = new Map<string, { parentName: string; phone: string; students: any[] }>();
-                  
-                  // 1. First populate from students array
-                  students.forEach(st => {
-                    const phone = st.parentPhone || st.phone || (st as any).parent_phone || '';
-                    if (!phone) return;
-                    const pName = st.parentName || (st as any).parent_name || 'Mzazi / Mlezi';
-                    const cleanPhone = phone.trim();
-                    if (!parentMap.has(cleanPhone)) {
-                      parentMap.set(cleanPhone, { parentName: pName, phone: cleanPhone, students: [] });
-                    }
-                    if (!parentMap.get(cleanPhone)?.students.some(s => s.id === st.id)) {
-                      parentMap.get(cleanPhone)?.students.push(st);
-                    }
-                  });
+          {/* Directory Table */}
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs space-y-4">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pb-2 border-b border-slate-200">
+              <div>
+                <h3 className="text-base font-bold text-[#1f4d8b] flex items-center gap-2">
+                  <Users className="w-4 h-4 text-indigo-600" />
+                  Orodha ya Wazazi, Namba za Siri (PIN) & Login Info
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Wazazi wote waliojisajili kupitia wanafunzi wao. Wanaweza kuingia kwenye Parent Portal kwa namba zao za simu na namba ya siri (PIN).
+                </p>
+              </div>
+            </div>
 
-                  // 2. Then merge from dbParents (loaded from parents table)
-                  dbParents.forEach(dp => {
-                    const phone = dp.phone || dp.phone_255 || '';
-                    if (!phone) return;
-                    const cleanPhone = phone.trim();
-                    const pName = dp.parent_name || dp.full_name || dp.student_name || 'Mzazi / Mlezi';
+            <div className="overflow-x-auto">
+              <table className="w-full border-collapse text-xs text-left">
+                <thead className="bg-slate-50 border-b border-slate-200 text-[10px] font-black text-slate-500 uppercase">
+                  <tr>
+                    <th className="p-3 border-r border-slate-200">#</th>
+                    <th className="p-3 border-r border-slate-200">Parent / Guardian Name</th>
+                    <th className="p-3 border-r border-slate-200">Parent Phone (Login ID)</th>
+                    <th className="p-3 border-r border-slate-200 bg-blue-50/50">Namba ya Siri (Portal PIN)</th>
+                    <th className="p-3 border-r border-slate-200">Linked Student(s)</th>
+                    <th className="p-3 border-r border-slate-200">Reg No</th>
+                    <th className="p-3 border-r border-slate-200">Class & Stream</th>
+                    <th className="p-3 text-center">Actions & Tuma Login</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {(() => {
+                    const parentMap = new Map<string, { parentName: string; phone: string; students: any[] }>();
                     
-                    if (!parentMap.has(cleanPhone)) {
-                      parentMap.set(cleanPhone, { parentName: pName, phone: cleanPhone, students: [] });
-                    }
-                    
-                    // Unconditionally find and link students by CNO or parentPhone
-                    const matchedSt = students.filter(st => 
-                      (dp.student_cno && st.regNo?.toUpperCase().trim() === dp.student_cno.toUpperCase().trim()) ||
-                      (st.parentPhone && st.parentPhone.trim() === cleanPhone)
-                    );
-                    matchedSt.forEach(st => {
+                    // 1. First populate from students array
+                    students.forEach(st => {
+                      const phone = st.parentPhone || st.phone || (st as any).parent_phone || '';
+                      if (!phone) return;
+                      const pName = st.parentName || (st as any).parent_name || 'Mzazi / Mlezi';
+                      const cleanPhone = phone.trim();
+                      if (!parentMap.has(cleanPhone)) {
+                        parentMap.set(cleanPhone, { parentName: pName, phone: cleanPhone, students: [] });
+                      }
                       if (!parentMap.get(cleanPhone)?.students.some(s => s.id === st.id)) {
                         parentMap.get(cleanPhone)?.students.push(st);
                       }
                     });
+
+                    // 2. Then merge from dbParents (loaded from parents table)
+                    dbParents.forEach(dp => {
+                      const phone = dp.phone || dp.phone_255 || '';
+                      if (!phone) return;
+                      const cleanPhone = phone.trim();
+                      const pName = dp.parent_name || dp.full_name || dp.student_name || 'Mzazi / Mlezi';
+                      
+                      if (!parentMap.has(cleanPhone)) {
+                        parentMap.set(cleanPhone, { parentName: pName, phone: cleanPhone, students: [] });
+                      }
+                      
+                      const matchedSt = students.filter(st => 
+                        (dp.student_cno && st.regNo?.toUpperCase().trim() === dp.student_cno.toUpperCase().trim()) ||
+                        (st.parentPhone && st.parentPhone.trim() === cleanPhone)
+                      );
+                      matchedSt.forEach(st => {
+                        if (!parentMap.get(cleanPhone)?.students.some(s => s.id === st.id)) {
+                          parentMap.get(cleanPhone)?.students.push(st);
+                        }
+                      });
+                    });
+
+                    const parentsList = Array.from(parentMap.values());
+
+                    if (parentsList.length === 0) {
+                      return (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-slate-400 font-bold italic">
+                            Hakuna wazazi waliosajiliwa na namba za simu bado. Sajili mwanafunzi na uweke namba ya simu ya mzazi.
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    return parentsList.map((p, idx) => {
+                      const currentPin = getParentPinForPhone(p.phone, students);
+                      const studentNames = p.students?.length > 0 ? p.students.map(s => s.name).join(', ') : 'Mwanafunzi';
+                      const studentRegs = p.students?.length > 0 ? p.students.map(s => s.regNo || '-').join(', ') : '-';
+                      const portalUrl = typeof window !== 'undefined' ? `${window.location.origin}/#parentportal` : 'https://habyedupro.app/#parentportal';
+
+                      const whatsappMsg = encodeURIComponent(
+                        `Habari Mzazi/Mlezi ${p.parentName},\n` +
+                        `Shule inakupa taarifa kuwa unaweza kuangalia matokeo, mahudhurio na hali ya ada ya mwanafunzi wako (${studentNames}) kupitia Portal ya Wazazi.\n\n` +
+                        `📌 Namba yako ya Simu: ${p.phone}\n` +
+                        `🔑 Namba ya Siri (PIN): ${currentPin}\n` +
+                        `🌐 Kiungo cha Kuingia: ${portalUrl}\n\n` +
+                        `Tafadhali ingia ili uweze kufuatilia maendeleo ya mwanafunzi wako.`
+                      );
+
+                      return (
+                        <tr key={p.phone} className="hover:bg-slate-50 transition-colors">
+                          <td className="p-3 border-r border-slate-200 font-bold text-slate-500 text-center">{idx + 1}</td>
+                          <td className="p-3 border-r border-slate-200 font-bold text-slate-900">{p.parentName}</td>
+                          <td className="p-3 border-r border-slate-200 font-mono font-bold text-blue-600">{p.phone}</td>
+                          <td className="p-3 border-r border-slate-200 bg-blue-50/30">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-mono bg-white px-2 py-0.5 rounded border border-blue-200 font-bold text-blue-900 shadow-2xs">
+                                {currentPin}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setPinModalParent({ phone: p.phone, parentName: p.parentName, currentPin });
+                                  setNewPinValue(currentPin);
+                                }}
+                                className="px-1.5 py-0.5 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded text-[10px] font-bold transition cursor-pointer"
+                                title="Badilisha Namba ya Siri ya Mzazi"
+                              >
+                                Badili
+                              </button>
+                            </div>
+                          </td>
+                          <td className="p-3 border-r border-slate-200 font-semibold text-slate-800">
+                            {studentNames}
+                          </td>
+                          <td className="p-3 border-r border-slate-200 font-mono text-slate-600">
+                            {studentRegs}
+                          </td>
+                          <td className="p-3 border-r border-slate-200 font-bold text-slate-700">
+                            {p.students?.length > 0 ? p.students.map(s => `${s.className} (${s.stream || '-'})`).join('; ') : '-'}
+                          </td>
+                          <td className="p-3">
+                            <div className="flex items-center justify-center gap-1.5">
+                              {/* Send Login info via WhatsApp */}
+                              <a
+                                href={`https://wa.me/255${p.phone.replace(/^0/, '').replace(/[^0-9]/g, '')}?text=${whatsappMsg}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-[10px] font-bold transition-colors flex items-center gap-1"
+                                title="Tuma namba ya siri na link ya portal kwa mzazi WhatsApp"
+                              >
+                                <Share2 className="w-3 h-3 text-emerald-600" />
+                                <span>WhatsApp</span>
+                              </a>
+
+                              {/* Copy Info */}
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const text = `Mzazi: ${p.parentName} | Simu: ${p.phone} | PIN: ${currentPin} | Wanafunzi: ${studentNames} | Portal: ${portalUrl}`;
+                                  navigator.clipboard.writeText(text);
+                                  alert(`Taarifa za kuingia Portal zimenakiliwa!\nSimu: ${p.phone}\nPIN: ${currentPin}`);
+                                }}
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[10px] font-bold transition-colors cursor-pointer"
+                                title="Kopi namba ya simu na PIN"
+                              >
+                                Copy Login
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: BADILISHA NAMBA YA SIRI (PIN) YA MZAZI */}
+      {pinModalParent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-fadeIn">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 space-y-4 border border-slate-100">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-lg bg-blue-100 text-blue-700 flex items-center justify-center font-bold">
+                  <Key className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">Badili Namba ya Siri (PIN ya Portal)</h3>
+                  <p className="text-[11px] text-slate-500">{pinModalParent.parentName} ({pinModalParent.phone})</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPinModalParent(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1">
+                  Weka Namba Mpya ya Siri (PIN / Password)
+                </label>
+                <input
+                  type="text"
+                  value={newPinValue}
+                  onChange={e => setNewPinValue(e.target.value)}
+                  placeholder="Mfano: 123456 au 4488"
+                  className="w-full px-3 py-2.5 border border-slate-300 rounded-xl text-sm font-mono font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  autoFocus
+                />
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Namba hii itatumika mara moja na mzazi huyu kuingia kwenye Portal ya Wazazi.
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
+                <button
+                  type="button"
+                  onClick={() => setNewPinValue(DEFAULT_PARENT_PIN)}
+                  className="text-xs text-blue-600 hover:underline font-bold"
+                >
+                  Weka PIN ya Awali (123456)
+                </button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t">
+              <button
+                type="button"
+                onClick={() => setPinModalParent(null)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition"
+              >
+                Ghairi
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const finalPin = newPinValue.trim() || DEFAULT_PARENT_PIN;
+                  saveParentPin(pinModalParent.phone, finalPin);
+                  // Also update any matching student records in parentPin
+                  students.forEach(st => {
+                    const stPhone = st.parentPhone || st.phone;
+                    if (stPhone && stPhone.trim() === pinModalParent.phone.trim()) {
+                      onUpdateStudent({ ...st, parentPin: finalPin });
+                    }
                   });
-
-                  const parentsList = Array.from(parentMap.values());
-
-                  if (parentsList.length === 0) {
-                    return (
-                      <tr>
-                        <td colSpan={7} className="p-8 text-center text-slate-400 font-bold italic">
-                          Hakuna wazazi waliosajiliwa na namba za simu bado. Sajili mwanafunzi na uweke namba ya simu ya mzazi.
-                        </td>
-                      </tr>
-                    );
-                  }
-
-                  return parentsList.map((p, idx) => (
-                    <tr key={p.phone} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-3 border-r border-slate-200 font-bold text-slate-500 text-center">{idx + 1}</td>
-                      <td className="p-3 border-r border-slate-200 font-bold text-slate-900">{p.parentName}</td>
-                      <td className="p-3 border-r border-slate-200 font-mono font-bold text-blue-600">{p.phone}</td>
-                      <td className="p-3 border-r border-slate-200 font-semibold text-slate-800">
-                        {p.students?.length > 0 ? p.students.map(s => s.name).join(', ') : 'Hakuna mwanafunzi aliyeunganishwa'}
-                      </td>
-                      <td className="p-3 border-r border-slate-200 font-mono text-slate-600">
-                        {p.students?.length > 0 ? p.students.map(s => s.regNo || '-').join(', ') : '-'}
-                      </td>
-                      <td className="p-3 border-r border-slate-200 font-bold text-slate-700">
-                        {p.students?.length > 0 ? p.students.map(s => `${s.className} (${s.stream || '-'})`).join('; ') : '-'}
-                      </td>
-                      <td className="p-3 text-center">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            navigator.clipboard.writeText(p.phone);
-                            alert(`Namba ya simu ya mzazi ${p.phone} imekopiwa! Wanafunzi: ${p.students?.map(s => s.name).join(', ') || 'Hakuna'}`);
-                          }}
-                          className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded text-[11px] font-bold transition-colors cursor-pointer"
-                        >
-                          Copy Phone / Login Info
-                        </button>
-                      </td>
-                    </tr>
-                  ));
-                })()}
-              </tbody>
-            </table>
+                  alert(`Namba ya siri ya mzazi ${pinModalParent.parentName} imebadilishwa na kuhifadhiwa: ${finalPin}`);
+                  setPinModalParent(null);
+                }}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition"
+              >
+                Hifadhi Namba ya Siri
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -2983,6 +3219,24 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     onChange={val => setEditingStudent({ ...editingStudent, parentPhone: val, phone: val })}
                     label="Parent / Guardian Phone Number"
                     studentName={editingStudent.name}
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-slate-600 block mb-1 flex items-center justify-between">
+                    <span>Namba ya Siri ya Mzazi (Portal PIN)</span>
+                    <span className="text-[10px] text-blue-600">PIN ya awali: 123456</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editingStudent.parentPin || getParentPinForPhone(editingStudent.parentPhone || editingStudent.phone || '', students)}
+                    onChange={e => {
+                      const newPin = e.target.value;
+                      setEditingStudent({ ...editingStudent, parentPin: newPin });
+                      const ph = editingStudent.parentPhone || editingStudent.phone;
+                      if (ph) saveParentPin(ph, newPin);
+                    }}
+                    placeholder="123456"
+                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono font-bold"
                   />
                 </div>
                 <div>

@@ -15,21 +15,25 @@ export interface ConflictInfo {
  * A conflict occurs if the same teacherId is assigned to multiple classes at the same (day, period).
  */
 export function detectTimetableConflicts(
-  assignments: TimetableAssignment[],
-  teachers: Teacher[]
+  assignments: TimetableAssignment[] = [],
+  teachers: Teacher[] = []
 ): Record<number, ConflictInfo> {
   const conflicts: Record<number, ConflictInfo> = {};
+  if (!Array.isArray(assignments) || !Array.isArray(teachers)) {
+    return conflicts;
+  }
 
   // Group by day + period + teacherId
   const slotTeacherMap: Record<string, TimetableAssignment[]> = {};
 
   assignments.forEach(assignment => {
-    // Only check if a real teacher is assigned (extra-curricular without a teacher doesn't clash)
-    if (!assignment.teacherId) return;
+    if (!assignment || !assignment.teacherId) return;
 
     // Normalize period name by removing time suffix like " (08:00-08:40)" if present
-    const normalizedPeriod = assignment.periodName || assignment.period.split(' (')[0];
-    const key = `${assignment.day}_${normalizedPeriod}_teacher_${assignment.teacherId}`;
+    const rawPeriod = assignment.periodName || assignment.period || '';
+    const normalizedPeriod = rawPeriod ? String(rawPeriod).split(' (')[0].trim() : 'Unknown';
+    const day = assignment.day || 'Unknown';
+    const key = `${day}_${normalizedPeriod}_teacher_${assignment.teacherId}`;
     if (!slotTeacherMap[key]) {
       slotTeacherMap[key] = [];
     }
@@ -41,14 +45,14 @@ export function detectTimetableConflicts(
     if (group.length > 1) {
       group.forEach(current => {
         const otherAssignments = group.filter(a => a.id !== current.id);
-        const teacher = teachers.find(t => t.id === current.teacherId);
+        const teacher = teachers.find(t => t && t.id === current.teacherId);
         
         conflicts[current.id] = {
           hasConflict: true,
           conflictingWith: otherAssignments.map(o => ({
-            className: o.className,
-            stream: o.stream,
-            subject: o.subject,
+            className: o.className || '',
+            stream: o.stream || '',
+            subject: o.subject || '',
             teacherName: teacher?.name
           }))
         };

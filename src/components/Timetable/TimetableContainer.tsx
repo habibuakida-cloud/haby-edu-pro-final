@@ -33,7 +33,8 @@ import {
   Share2,
   Zap,
   Sliders,
-  Edit3
+  Edit3,
+  LayoutGrid
 } from 'lucide-react';
 import { 
   TimetableAssignment, 
@@ -91,6 +92,11 @@ import { SubjectPeriodAllocationTab } from './SubjectPeriodAllocationTab';
 import { TeacherAssignmentsTab } from './TeacherAssignmentsTab';
 import { ClassJournalTab } from './ClassJournalTab';
 import { AITimetableAssistantModal } from './AITimetableAssistantModal';
+import { GraphicalTimetableGrid } from './GraphicalTimetableGrid';
+import { TeacherEntryForm } from './TeacherEntryForm';
+import { GeneralTimetableManualEntry } from './GeneralTimetableManualEntry';
+import { TeacherTimetable } from './TeacherTimetable';
+import { ClassTimetable } from './ClassTimetable';
 
 export const renderActivityIcon = (iconName: string, className = "w-3 h-3") => {
   switch (iconName) {
@@ -137,33 +143,33 @@ interface TimetableContainerProps {
 }
 
 export const TimetableContainer: React.FC<TimetableContainerProps> = ({
-  assignments,
-  teachers,
-  periodSettings,
-  streamSettings,
-  classTimetableReleased,
-  schoolName,
-  dayThemes,
+  assignments = [],
+  teachers = [],
+  periodSettings = [],
+  streamSettings = [],
+  classTimetableReleased = {},
+  schoolName = 'HABY EDUPRO',
+  dayThemes = {},
   institutionalPolicy = DEFAULT_INSTITUTIONAL_POLICY,
   subjectPeriodAllocations = [],
   teacherAssignments = [],
   schoolInfo,
   currentUser,
-  students,
+  students = [],
   initialTab,
-  onUpdateAssignments,
-  onUpdatePeriodSettings,
-  onUpdateStreamSettings,
-  onToggleClassRelease,
-  onUpdateDayThemes,
-  onUpdateInstitutionalPolicy,
-  onUpdateSubjectPeriodAllocations,
-  onUpdateTeacherAssignments,
+  onUpdateAssignments = () => {},
+  onUpdatePeriodSettings = () => {},
+  onUpdateStreamSettings = () => {},
+  onToggleClassRelease = () => {},
+  onUpdateDayThemes = () => {},
+  onUpdateInstitutionalPolicy = () => {},
+  onUpdateSubjectPeriodAllocations = () => {},
+  onUpdateTeacherAssignments = () => {},
   journalRecords = {},
-  onUpdateJournal
+  onUpdateJournal = () => {}
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'constraints' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings'
+    'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'constraints' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings' | 'graphical' | 'teacherEntry' | 'generalEntry'
   >(initialTab || 'general');
 
   React.useEffect(() => {
@@ -175,7 +181,13 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('Form 1');
   const [selectedGeneralClass, setSelectedGeneralClass] = useState<string>('Form 1');
   const [selectedGeneralStream, setSelectedGeneralStream] = useState<string>('All');
-  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<number>(teachers[0]?.id || 0);
+  const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<number>(teachers?.[0]?.id || 0);
+
+  React.useEffect(() => {
+    if ((!selectedTeacherFilter || selectedTeacherFilter === 0) && teachers && teachers.length > 0) {
+      setSelectedTeacherFilter(teachers[0].id);
+    }
+  }, [teachers, selectedTeacherFilter]);
 
   // Manual editing modal state
   const [editingSlot, setEditingSlot] = useState<{
@@ -265,10 +277,11 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       
       // Group assignments by the conflict key
       const slotTeacherMap: Record<string, TimetableAssignment[]> = {};
-      assignments.forEach(a => {
-        if (!a.teacherId) return;
-        const normalizedPeriod = a.periodName || a.period.split(' (')[0];
-        const key = `${a.day}_${normalizedPeriod}_teacher_${a.teacherId}`;
+      (assignments || []).forEach(a => {
+        if (!a || !a.teacherId) return;
+        const rawPeriod = a.periodName || a.period || '';
+        const normalizedPeriod = rawPeriod ? String(rawPeriod).split(' (')[0] : '';
+        const key = `${a.day || ''}_${normalizedPeriod}_teacher_${a.teacherId}`;
         if (!slotTeacherMap[key]) slotTeacherMap[key] = [];
         slotTeacherMap[key].push(a);
       });
@@ -339,12 +352,19 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     }
 
     // Check if target already has an assignment
-    const targetExisting = assignments.find(
-      a =>
-        isSameClass(a.className, targetClass) &&
-        isSameStream(a.stream, targetStream) &&
-        a.day === targetDay &&
-        (a.period === targetPeriod || a.periodName === targetPeriod || a.period.startsWith(targetPeriod.split(' (')[0]))
+    const targetNorm = targetPeriod ? targetPeriod.split(' (')[0] : '';
+    const targetExisting = (assignments || []).find(
+      a => {
+        if (!a) return false;
+        const aPeriodStr = a.period || '';
+        const aPeriodNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
+        return (
+          isSameClass(a.className, targetClass) &&
+          isSameStream(a.stream, targetStream) &&
+          a.day === targetDay &&
+          (a.period === targetPeriod || a.periodName === targetPeriod || aPeriodNorm === targetNorm || (targetNorm && aPeriodStr.startsWith(targetNorm)))
+        );
+      }
     );
 
     let updated: TimetableAssignment[];
@@ -431,12 +451,19 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       onUpdateAssignments([...updatedList, ...newItems]);
     } else {
       // Apply to single slot
-      const existing = assignments.find(
-        a =>
-          isSameClass(a.className, data.className) &&
-          isSameStream(a.stream, data.stream) &&
-          a.day === data.day &&
-          (a.period === data.period || a.periodName === data.period || a.period.startsWith(data.period.split(' (')[0]))
+      const dataPeriodNorm = data.period ? data.period.split(' (')[0] : '';
+      const existing = (assignments || []).find(
+        a => {
+          if (!a) return false;
+          const aPeriodStr = a.period || '';
+          const aPeriodNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
+          return (
+            isSameClass(a.className, data.className) &&
+            isSameStream(a.stream, data.stream) &&
+            a.day === data.day &&
+            (a.period === data.period || a.periodName === data.period || aPeriodNorm === dataPeriodNorm || (dataPeriodNorm && aPeriodStr.startsWith(dataPeriodNorm)))
+          );
+        }
       );
 
       if (existing) {
@@ -573,8 +600,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
   const [assignStream, setAssignStream] = useState('STREAM A');
   const [assignDay, setAssignDay] = useState('Monday');
   const [assignPeriod, setAssignPeriod] = useState('');
-  const [assignTeacher, setAssignTeacher] = useState<number>(teachers[0]?.id || 0);
-  const [assignSubject, setAssignSubject] = useState(teachers[0]?.subjects[0] || 'Mathematics');
+  const [assignTeacher, setAssignTeacher] = useState<number>(teachers?.[0]?.id || 0);
+  const [assignSubject, setAssignSubject] = useState(teachers?.[0]?.subjects?.[0] || 'Mathematics');
 
   const handleMasterAssign = (e: React.FormEvent) => {
     e.preventDefault();
@@ -613,14 +640,22 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     alert(`Assigned ${assignSubject} to ${assignClass} ${assignStream} on ${assignDay}!`);
   };
 
+  const printSettings = useMemo(() => {
+    try {
+      const saved = localStorage.getItem('haby_timetable_print_settings');
+      if (saved) return JSON.parse(saved);
+    } catch (e) {}
+    return { orientation: 'landscape', margin: '6mm', optimizedCss: true };
+  }, []);
+
   return (
     <div className="space-y-6">
       {/* Dedicated Master Timetable Print CSS Styling */}
       <style>{`
         @media print {
           @page {
-            size: ${printOrientation};
-            margin: 5mm;
+            size: ${printSettings.orientation || 'landscape'};
+            margin: ${printSettings.margin || '6mm'};
           }
 
           body * {
@@ -649,11 +684,26 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             left: 0 !important;
             top: 0 !important;
             width: 100% !important;
+            max-width: 100% !important;
             margin: 0 !important;
             padding: 0 !important;
             background: #ffffff !important;
             color: #000000 !important;
             z-index: 999999 !important;
+          }
+
+          #class-printable-view .overflow-x-auto,
+          #teacher-printable-view .overflow-x-auto {
+            overflow: visible !important;
+          }
+
+          #class-printable-view .grid,
+          #teacher-printable-view .grid {
+            display: grid !important;
+            grid-template-columns: repeat(auto-fit, minmax(50px, 1fr)) !important;
+            min-width: 0 !important;
+            width: 100% !important;
+            gap: 2px !important;
           }
 
           .no-print,
@@ -704,7 +754,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           .print-avoid-break {
             page-break-inside: avoid !important;
             break-inside: avoid !important;
-            margin-bottom: 12px !important;
+            margin-bottom: 8px !important;
           }
         }
       `}</style>
@@ -713,6 +763,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       <div className="bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs flex flex-wrap items-center justify-between gap-2 no-print">
         <div className="flex flex-wrap gap-1 items-center flex-1">
         <button
+          type="button"
           onClick={() => setActiveTab('general')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'general'
@@ -725,6 +776,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('class')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'class'
@@ -737,6 +789,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('teacher')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'teacher'
@@ -749,6 +802,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('master')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'master'
@@ -761,6 +815,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('journal')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'journal'
@@ -773,6 +828,33 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
+          onClick={() => setActiveTab('generalEntry')}
+          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
+            activeTab === 'generalEntry'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <FileSpreadsheet className="w-4 h-4" />
+          <span>General Manual Entry</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('teacherEntry')}
+          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
+            activeTab === 'teacherEntry'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Edit3 className="w-4 h-4" />
+          <span>Teacher Entry Form</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('policies')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'policies'
@@ -785,6 +867,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('constraints')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'constraints'
@@ -807,6 +890,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('allocations')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'allocations'
@@ -819,6 +903,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('teacherAssignments')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'teacherAssignments'
@@ -831,6 +916,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
           onClick={() => setActiveTab('settings')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'settings'
@@ -843,6 +929,20 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </button>
 
         <button
+          type="button"
+          onClick={() => setActiveTab('graphical')}
+          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
+            activeTab === 'graphical'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <LayoutGrid className="w-4 h-4" />
+          Graphical View
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('integrity')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'integrity'
@@ -1238,6 +1338,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               </button>
 
               <button
+                type="button"
                 onClick={() => {
                   exportTimetablePDF({
                     viewMode: 'general',
@@ -1250,14 +1351,14 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     selectedClass: selectedGeneralClass,
                     selectedStream: selectedGeneralStream,
                     selectedDay: selectedDayFilter,
-                    orientation: printOrientation
+                    orientation: 'landscape'
                   });
                 }}
-                className="px-3 py-2 text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
-                title="Save general timetable as a professional PDF document using jsPDF"
+                className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                title="Generate high-quality, formatted PDF export of the master timetable with all columns fitting in A4 landscape using jsPDF"
               >
                 <Download className="w-3.5 h-3.5 text-white" />
-                <span>Save PDF (jsPDF)</span>
+                <span>Download PDF</span>
               </button>
 
               <button
@@ -1287,7 +1388,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     />
                   ) : (
                     <div className="w-14 h-14 bg-blue-900 text-white rounded flex items-center justify-center font-black text-xl">
-                      {schoolName.substring(0, 2).toUpperCase()}
+                      {(schoolName || 'HP').substring(0, 2).toUpperCase()}
                     </div>
                   )}
                   <div>
@@ -1322,14 +1423,17 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             </div>
             {DAYS_OF_WEEK.filter(day => selectedDayFilter === 'All' || selectedDayFilter === day).map(day => {
               const dayTheme = getDayTheme(day, dayThemes);
-  const timeToMinutes = (timeStr: string) => {
-    const [hrs, mins] = timeStr.split(':').map(Number);
-    return hrs * 60 + mins;
-  };
+              const timeToMinutes = (timeStr?: string) => {
+                if (!timeStr || typeof timeStr !== 'string') return 0;
+                const parts = timeStr.split(':').map(Number);
+                const hrs = isNaN(parts[0]) ? 0 : parts[0];
+                const mins = isNaN(parts[1]) ? 0 : parts[1];
+                return hrs * 60 + mins;
+              };
 
-  const dayPeriods = periodSettings
-    .filter(p => p.day === day)
-    .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+              const dayPeriods = (periodSettings || [])
+                .filter(p => p && p.day === day)
+                .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
 
               if (dayPeriods.length === 0) return null;
 
@@ -1840,7 +1944,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 title="Save class timetable grid as a professional PDF document using jsPDF"
               >
                 <Download className="w-3.5 h-3.5 text-white" />
-                <span>Save Grid PDF (jsPDF)</span>
+                <span>Download PDF</span>
               </button>
 
               <button
@@ -1909,7 +2013,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     />
                   ) : (
                     <div className="w-14 h-14 bg-blue-900 text-white rounded flex items-center justify-center font-black text-xl">
-                      {schoolName.substring(0, 2).toUpperCase()}
+                      {(schoolName || 'HP').substring(0, 2).toUpperCase()}
                     </div>
                   )}
                   <div>
@@ -1942,192 +2046,21 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 </div>
               </div>
             </div>
-            {getStreamsForClass(selectedClassFilter).map(stream => {
-              const formTheme = getFormStreamTheme(selectedClassFilter);
-
-              return (
-                <div key={stream} className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                  <div
-                    style={{ backgroundColor: formTheme.accent }}
-                    className="px-5 py-3 text-white flex items-center justify-between font-bold"
-                  >
-                    <span className="text-sm">
-                      {selectedClassFilter} — {stream}
-                    </span>
-                    <span className="text-xs px-2.5 py-0.5 rounded-full bg-white/20">
-                      Standard Weekly Roster
-                    </span>
-                  </div>
-
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase text-[11px]">
-                          <th className="p-2.5 border-r border-slate-200 w-36">Period / Time</th>
-                          {DAYS_OF_WEEK.map(day => {
-                            const dayTheme = getDayTheme(day, dayThemes);
-                            return (
-                              <th
-                                key={day}
-                                style={{ backgroundColor: dayTheme.bg, color: dayTheme.text }}
-                                className="p-2.5 border-r border-slate-200 min-w-[120px] text-center"
-                              >
-                                {day}
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from(new Set(periodSettings.map(p => `${p.name} (${p.start}-${p.end})`))).map(periodKey => {
-                          return (
-                            <tr key={periodKey} className="border-b border-slate-100">
-                              <td className="p-2.5 border-r border-slate-200 font-semibold bg-slate-50 text-slate-800">
-                                {periodKey}
-                              </td>
-
-                              {DAYS_OF_WEEK.map(day => {
-                                const pNameOnly = periodKey.split(' (')[0];
-                                const assignment = assignments.find(
-                                  a =>
-                                    isSameClass(a.className, selectedClassFilter) &&
-                                    isSameStream(a.stream, stream) &&
-                                    a.day === day &&
-                                    (a.period === periodKey || a.period === pNameOnly || (a.periodName && a.periodName === pNameOnly))
-                                );
-                                const teacher = assignment?.teacherId
-                                  ? teachers.find(t => t.id === assignment.teacherId)
-                                  : undefined;
-                                const subColor = assignment ? getSubjectColor(assignment.subject) : null;
-                                const teacherColor = teacher ? getTeacherColor(teacher.id) : null;
-                                const extraInfo = assignment
-                                  ? getExtraCurricularInfo(assignment.subject, assignment.activityType)
-                                  : getExtraCurricularInfo(periodKey);
-
-                                const constraintViolation = getSlotConstraintViolation(
-                                  selectedClassFilter,
-                                  stream,
-                                  day,
-                                  periodKey,
-                                  constraintValidationReport,
-                                  assignment?.id
-                                );
-
-                                return (
-                                  <td
-                                    key={day}
-                                    onClick={() =>
-                                      setEditingSlot({
-                                        className: selectedClassFilter,
-                                        stream,
-                                        day,
-                                        period: periodKey,
-                                        assignment
-                                      })
-                                    }
-                                    style={{
-                                      backgroundColor: (highlightConstraintsInRed && constraintViolation.hasViolation && constraintViolation.isCritical)
-                                        ? '#fff1f2'
-                                        : (highlightConstraintsInRed && constraintViolation.hasViolation && constraintViolation.isWarning)
-                                        ? '#fffbeb'
-                                        : extraInfo 
-                                        ? extraInfo.cellBg 
-                                        : undefined,
-                                      borderLeft: extraInfo ? `3px solid ${extraInfo.cellBorder}` : undefined
-                                    }}
-                                    className={`p-2 border-r border-slate-200 text-center cursor-pointer transition-all ${
-                                      (highlightConstraintsInRed && constraintViolation.hasViolation && constraintViolation.isCritical)
-                                        ? 'ring-2 ring-rose-500 ring-inset z-10'
-                                        : (highlightConstraintsInRed && constraintViolation.hasViolation && constraintViolation.isWarning)
-                                        ? 'ring-2 ring-amber-500 ring-inset z-10'
-                                        : 'hover:bg-blue-50/40'
-                                    }`}
-                                  >
-                                    {assignment ? (
-                                      <div
-                                        style={{ 
-                                          backgroundColor: extraInfo ? extraInfo.cardBg : subColor?.bg, 
-                                          borderColor: (highlightConstraintsInRed && constraintViolation.hasViolation && constraintViolation.isCritical)
-                                            ? '#e11d48'
-                                            : extraInfo 
-                                            ? extraInfo.cellBorder 
-                                            : subColor?.border 
-                                        }}
-                                        className={`p-1.5 rounded-md border text-xs shadow-2xs relative ${extraInfo ? 'border-2' : ''} ${
-                                          highlightConstraintsInRed && constraintViolation.hasViolation ? 'shadow-lg' : ''
-                                        }`}
-                                      >
-                                        {/* Constraint Violation Indicator */}
-                                        {highlightConstraintsInRed && constraintViolation.hasViolation && (
-                                          <div 
-                                            className={`absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] text-white font-black z-20 shadow-sm border border-white ${
-                                              constraintViolation.isCritical ? 'bg-rose-600' : 'bg-amber-600'
-                                            }`}
-                                            title={constraintViolation.topMessage}
-                                          >
-                                            !
-                                          </div>
-                                        )}
-
-                                        {extraInfo && (
-                                          <div className="flex items-center justify-center gap-1 mb-1">
-                                            <span
-                                              style={{ backgroundColor: extraInfo.accent, color: '#ffffff' }}
-                                              className="text-[8px] font-extrabold px-1.5 py-0.2 rounded uppercase flex items-center gap-1"
-                                            >
-                                              {renderActivityIcon(extraInfo.iconName, "w-2.5 h-2.5")}
-                                              {extraInfo.badgeText}
-                                            </span>
-                                          </div>
-                                        )}
-                                        <div 
-                                          style={{ color: extraInfo ? extraInfo.text : subColor?.text }} 
-                                          className="font-bold truncate"
-                                        >
-                                          {assignment.subject}
-                                        </div>
-                                        <div className="mt-1 flex items-center justify-center gap-1 text-[10px]">
-                                          {teacher && (
-                                            <span
-                                              style={{ backgroundColor: teacherColor?.hex, color: '#ffffff' }}
-                                              className="px-1.5 py-0.2 rounded-full font-bold shadow-2xs"
-                                            >
-                                              {teacher.initial}
-                                            </span>
-                                          )}
-                                          {assignment.room && (
-                                            <span 
-                                              style={{ color: extraInfo ? extraInfo.text : undefined }}
-                                              className="font-semibold truncate max-w-[80px]"
-                                            >
-                                              {assignment.room}
-                                            </span>
-                                          )}
-                                        </div>
-                                      </div>
-                                    ) : extraInfo ? (
-                                      <span
-                                        style={{ color: extraInfo.accent }}
-                                        className="text-[10px] font-bold flex items-center justify-center gap-1 opacity-75"
-                                      >
-                                        {renderActivityIcon(extraInfo.iconName, "w-3 h-3")}
-                                        {extraInfo.name}
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-300 font-medium">—</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+            {(() => {
+              const streams = getStreamsForClass(selectedClassFilter);
+              const activeStreams = streams && streams.length > 0 ? streams : ['STREAM A'];
+              return activeStreams.map(stream => (
+                <div key={stream} className="mb-6">
+                  <ClassTimetable 
+                    className={selectedClassFilter} 
+                    stream={stream} 
+                    assignments={assignments} 
+                    periodSettings={periodSettings} 
+                    teachers={teachers}
+                  />
                 </div>
-              );
-            })}
+              ));
+            })()}
 
             {/* Official Signatures & Stamp Footer (Visible ONLY during print) */}
             <div className="hidden print:block mt-8 pt-4 border-t-2 border-slate-900">
@@ -2199,14 +2132,14 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     schoolInfo,
                     schoolName,
                     selectedTeacherId: selectedTeacherFilter,
-                    orientation: 'portrait'
+                    orientation: 'landscape'
                   });
                 }}
                 className="px-3 py-2 text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
-                title="Save teacher schedule as a professional PDF document using jsPDF"
+                title="Download teacher schedule as a professional A4 landscape PDF document using jsPDF"
               >
                 <Download className="w-3.5 h-3.5 text-white" />
-                <span>Save Schedule PDF (jsPDF)</span>
+                <span>Download PDF</span>
               </button>
 
               <button
@@ -2236,7 +2169,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     />
                   ) : (
                     <div className="w-14 h-14 bg-blue-900 text-white rounded flex items-center justify-center font-black text-xl">
-                      {schoolName.substring(0, 2).toUpperCase()}
+                      {(schoolName || 'HP').substring(0, 2).toUpperCase()}
                     </div>
                   )}
                   <div>
@@ -2266,130 +2199,11 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 </div>
               </div>
             </div>
-            {(() => {
-              const currentTeacher = teachers.find(t => t.id === selectedTeacherFilter);
-              if (!currentTeacher) return <p className="text-slate-500">Select a teacher.</p>;
-
-              const teacherAssignments = assignments.filter(a => a.teacherId === currentTeacher.id);
-              const teacherCol = getTeacherColor(currentTeacher.id);
-
-              return (
-                <div className="space-y-4">
-                  <div className="flex items-center gap-4 pb-4 border-b border-slate-200">
-                    <span
-                      style={{ backgroundColor: teacherCol.hex, color: '#ffffff' }}
-                      className="w-14 h-14 rounded-xl inline-flex items-center justify-center text-lg font-black shadow-sm"
-                    >
-                      {currentTeacher.initial}
-                    </span>
-                    <div>
-                      <h3 className="text-lg font-black text-slate-900 uppercase tracking-wide">{currentTeacher.name}</h3>
-                      <p className="text-xs font-bold text-slate-500 mt-0.5">
-                        Teaching Subjects: <span className="text-blue-700">{currentTeacher.subjects.join(', ')}</span> • Total Lessons Assigned: <span className="text-emerald-700">{teacherAssignments.length}</span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="overflow-x-auto mt-4">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-100 border-b border-slate-200 font-bold text-slate-700 uppercase text-[11px]">
-                          <th className="p-2.5 border-r border-slate-200 w-36">Period / Time</th>
-                          {DAYS_OF_WEEK.map(day => {
-                            const dayTheme = getDayTheme(day, dayThemes);
-                            return (
-                              <th
-                                key={day}
-                                style={{ backgroundColor: dayTheme.bg, color: dayTheme.text }}
-                                className="p-2.5 border-r border-slate-200 min-w-[130px] text-center"
-                              >
-                                {day}
-                              </th>
-                            );
-                          })}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {Array.from(new Set(periodSettings.map(p => `${p.name} (${p.start}-${p.end})`))).map(periodKey => {
-                          return (
-                            <tr key={periodKey} className="border-b border-slate-100">
-                              <td className="p-2.5 border-r border-slate-200 font-semibold bg-slate-50 text-slate-800">
-                                {periodKey}
-                              </td>
-
-                              {DAYS_OF_WEEK.map(day => {
-                                const pNameOnly = periodKey.split(' (')[0];
-                                const assignment = teacherAssignments.find(
-                                  a =>
-                                    a.day === day &&
-                                    (a.period === periodKey || a.period === pNameOnly || (a.periodName && a.periodName === pNameOnly))
-                                );
-                                const subColor = assignment ? getSubjectColor(assignment.subject) : null;
-
-                                const constraintViolation = assignment ? getSlotConstraintViolation(
-                                  assignment.className,
-                                  assignment.stream,
-                                  day,
-                                  periodKey,
-                                  constraintValidationReport,
-                                  assignment.id
-                                ) : { hasViolation: false, isCritical: false, isWarning: false, issues: [], topMessage: '' };
-
-                                return (
-                                  <td
-                                    key={day}
-                                    className={`p-2 border-r border-slate-200 text-center transition-all ${
-                                      (highlightConstraintsInRed && constraintViolation.hasViolation && constraintViolation.isCritical)
-                                        ? 'bg-rose-50 ring-2 ring-rose-500 ring-inset z-10'
-                                        : (highlightConstraintsInRed && constraintViolation.hasViolation && constraintViolation.isWarning)
-                                        ? 'bg-amber-50 ring-2 ring-amber-500 ring-inset z-10'
-                                        : 'hover:bg-blue-50/40'
-                                    }`}
-                                  >
-                                    {assignment ? (
-                                      <div
-                                        style={{ 
-                                          backgroundColor: subColor?.bg, 
-                                          borderColor: (highlightConstraintsInRed && constraintViolation.hasViolation && constraintViolation.isCritical)
-                                            ? '#e11d48'
-                                            : subColor?.border 
-                                        }}
-                                        className={`p-2 rounded-md border text-xs shadow-2xs space-y-0.5 relative ${
-                                          highlightConstraintsInRed && constraintViolation.hasViolation ? 'shadow-lg' : ''
-                                        }`}
-                                      >
-                                        {/* Constraint Violation Indicator */}
-                                        {highlightConstraintsInRed && constraintViolation.hasViolation && (
-                                          <div 
-                                            className={`absolute -top-1.5 -right-1.5 w-4 h-4 rounded-full flex items-center justify-center text-[8px] text-white font-black z-20 shadow-sm border border-white ${
-                                              constraintViolation.isCritical ? 'bg-rose-600' : 'bg-amber-600'
-                                            }`}
-                                            title={constraintViolation.topMessage}
-                                          >
-                                            !
-                                          </div>
-                                        )}
-
-                                        <div className="font-black text-slate-900 tracking-tighter">{assignment.subject}</div>
-                                        <div className="text-[10px] text-slate-700 font-bold bg-white/60 px-1.5 py-0.5 rounded">
-                                          {assignment.className} ({assignment.stream})
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <span className="text-slate-300 text-[10px] font-bold italic">— Free —</span>
-                                    )}
-                                  </td>
-                                );
-                              })}
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              );
-            })()}
+              {(() => {
+                const currentTeacher = teachers.find(t => t.id === selectedTeacherFilter);
+                if (!currentTeacher) return <p className="text-slate-500">Select a teacher.</p>;
+                return <TeacherTimetable teacher={currentTeacher} assignments={assignments} periodSettings={periodSettings} />;
+              })()}
 
             {/* Official Signatures & Stamp Footer (Visible ONLY during print) */}
             <div className="hidden print:block mt-8 pt-4 border-t-2 border-slate-900">
@@ -2416,6 +2230,28 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         </div>
       )}
 
+      {activeTab === 'generalEntry' && (
+        <GeneralTimetableManualEntry 
+          teachers={teachers} 
+          streamSettings={streamSettings} 
+          onUpdateAssignments={onUpdateAssignments}
+          assignments={assignments}
+          periodSettings={periodSettings}
+          classes={DEFAULT_CLASSES}
+        />
+      )}
+
+      {activeTab === 'teacherEntry' && (
+        <TeacherEntryForm 
+          teachers={teachers} 
+          streamSettings={streamSettings} 
+          onUpdateAssignments={onUpdateAssignments}
+          assignments={assignments}
+          periodSettings={periodSettings}
+          teacherAssignments={teacherAssignments}
+        />
+      )}
+
       {/* ======================================================== */}
       {/* 4. MASTER ASSIGNMENT TAB                                */}
       {/* ======================================================== */}
@@ -2435,12 +2271,16 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     </button>
 
                     {(() => {
-                      const normalizedTarget = assignPeriod.split(' (')[0];
-                      const hasConflict = assignments.some(a => 
-                        a.day === assignDay && 
-                        (a.periodName || a.period.split(' (')[0]) === normalizedTarget && 
-                        a.teacherId === assignTeacher
-                      );
+                      const normalizedTarget = assignPeriod ? assignPeriod.split(' (')[0] : '';
+                      const hasConflict = (assignments || []).some(a => {
+                        if (!a) return false;
+                        const aNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
+                        return (
+                          a.day === assignDay && 
+                          aNorm === normalizedTarget && 
+                          a.teacherId === assignTeacher
+                        );
+                      });
                       return hasConflict && (
                         <span className="text-[10px] bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full font-black animate-pulse flex items-center gap-1">
                           <AlertTriangle className="w-3 h-3" />
@@ -2938,6 +2778,18 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           streamSettings={streamSettings}
           teacherAssignments={teacherAssignments}
           onUpdateTeacherAssignments={onUpdateTeacherAssignments || (() => {})}
+        />
+      )}
+
+      {/* ======================================================== */}
+      {/* 10. GRAPHICAL TIMETABLE TAB                             */}
+      {/* ======================================================== */}
+      {activeTab === 'graphical' && (
+        <GraphicalTimetableGrid
+          assignments={assignments}
+          teachers={teachers}
+          periodSettings={periodSettings}
+          streamSettings={streamSettings}
         />
       )}
 

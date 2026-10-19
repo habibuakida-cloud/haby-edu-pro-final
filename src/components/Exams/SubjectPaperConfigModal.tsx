@@ -35,8 +35,6 @@ export const SubjectPaperConfigModal: React.FC<SubjectPaperConfigModalProps> = (
   onClose,
   onSelectPaperForDoc
 }) => {
-  if (!isOpen) return null;
-
   const [activeLevelTab, setActiveLevelTab] = useState<'A-Level' | 'O-Level'>('A-Level');
   const [searchQuery, setSearchQuery] = useState('');
   const [filterPaperCount, setFilterPaperCount] = useState<'ALL' | '1' | '2' | '3'>('ALL');
@@ -68,6 +66,8 @@ export const SubjectPaperConfigModal: React.FC<SubjectPaperConfigModalProps> = (
       onePaper: list.filter(s => s.paperCount === 1).length
     };
   }, [subjectDefinitions, activeLevelTab]);
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in">

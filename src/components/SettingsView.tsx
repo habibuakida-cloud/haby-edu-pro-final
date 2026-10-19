@@ -4,7 +4,7 @@ import {
   FileCode, ExternalLink, Users, KeyRound, UserPlus, Trash2, Eye, EyeOff, Shield, Globe, 
   Activity, Power, PowerOff, AlertCircle, Info, Search, Filter, History, FileSpreadsheet, 
   UserCheck, FileText, Layers, ArrowUpDown, CheckCircle, ChevronDown, Sparkles, Calendar,
-  LogIn, Copy, CheckCheck, BookOpen, Key, Edit, Github, Zap, Rocket
+  LogIn, Copy, CheckCheck, BookOpen, Key, Edit, Github, Zap, Rocket, Printer
 } from 'lucide-react';
 import { 
   SchoolInfo, PeriodSetting, TimetableAssignment, UserAccount, Student, Teacher,
@@ -493,6 +493,41 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [savedSuccess, setSavedSuccess] = useState(false);
   const [nectaStartNumber, setNectaStartNumber] = useState(schoolInfo.nectaStartNumber || '0001');
   const [nectaEndNumber, setNectaEndNumber] = useState(schoolInfo.nectaEndNumber || '0200');
+
+  const [printOrientation, setPrintOrientation] = useState<'portrait' | 'landscape'>(() => {
+    try {
+      const saved = localStorage.getItem('haby_timetable_print_settings');
+      if (saved) return JSON.parse(saved).orientation || 'landscape';
+    } catch (e) {}
+    return 'landscape';
+  });
+
+  const [printMargin, setPrintMargin] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('haby_timetable_print_settings');
+      if (saved) return JSON.parse(saved).margin || '6mm';
+    } catch (e) {}
+    return '6mm';
+  });
+
+  const [printOptimizedCss, setPrintOptimizedCss] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('haby_timetable_print_settings');
+      if (saved) return JSON.parse(saved).optimizedCss ?? true;
+    } catch (e) {}
+    return true;
+  });
+
+  const handleSavePrintSettings = () => {
+    try {
+      localStorage.setItem('haby_timetable_print_settings', JSON.stringify({
+        orientation: printOrientation,
+        margin: printMargin,
+        optimizedCss: printOptimizedCss
+      }));
+      alert('Print layout settings saved successfully!');
+    } catch (e) {}
+  };
 
   // Sync state when schoolInfo changes
   useEffect(() => {
@@ -1503,7 +1538,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* TAB 2: SCHOOL INFO */}
       {activeTab === 'school' && (
-        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6">
+        <div className="space-y-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-6">
           <div>
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-bold text-[#1f4d8b] flex items-center gap-2">
@@ -1773,7 +1809,72 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </div>
           </form>
         </div>
-      )}
+
+        {/* Print & Layout Configuration Card */}
+        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4 mt-6">
+          <div className="border-b border-slate-200 pb-3">
+            <h3 className="text-base font-bold text-[#1f4d8b] flex items-center gap-2 uppercase tracking-wide">
+              <Printer className="w-5 h-5 text-blue-600" />
+              Timetable Print Layout & CSS Optimization Settings
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5">
+              Customize print page orientation, page margins, and print-optimized CSS classes for clean A4 printing without cutting off periods.
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Print Page Orientation</label>
+              <select
+                value={printOrientation}
+                onChange={(e) => setPrintOrientation(e.target.value as any)}
+                className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg cursor-pointer"
+              >
+                <option value="landscape">Landscape (Recommended for Timetables)</option>
+                <option value="portrait">Portrait</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Custom Page Margin</label>
+              <select
+                value={printMargin}
+                onChange={(e) => setPrintMargin(e.target.value)}
+                className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg cursor-pointer"
+              >
+                <option value="4mm">4mm (Ultra Compact)</option>
+                <option value="6mm">6mm (Standard)</option>
+                <option value="10mm">10mm (Balanced)</option>
+                <option value="15mm">15mm (Spacious)</option>
+              </select>
+            </div>
+
+            <div className="flex items-center pt-5">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={printOptimizedCss}
+                  onChange={(e) => setPrintOptimizedCss(e.target.checked)}
+                  className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
+                />
+                <span className="text-xs font-bold text-slate-700">Enable Print-Optimized CSS & Crisp Borders</span>
+              </label>
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
+              onClick={handleSavePrintSettings}
+              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span>Save Print Preferences</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
 
       {/* TAB 3: USER ACCOUNTS & PASSWORDS */}
       {/* TAB 3: STAFF MANAGEMENT ROOM (REGISTERED MEMBERS) */}

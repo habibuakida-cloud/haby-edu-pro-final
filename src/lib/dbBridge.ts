@@ -98,6 +98,9 @@ export function fromSupabaseTeacher(t: any, idx: number): Teacher {
 
 // Transformers for Exams
 export function toSupabaseExam(e: any, schoolId: string) {
+  const isAct = e.isActive !== undefined 
+    ? Boolean(e.isActive) 
+    : (e.status !== 'Inactive' && e.status !== 'Locked');
   return {
     id: e.id && typeof e.id === 'string' && e.id.length > 10 ? e.id : undefined,
     school_id: schoolId,
@@ -107,18 +110,20 @@ export function toSupabaseExam(e: any, schoolId: string) {
     class_name: e.className || e.class_name || 'All',
     level: e.level || 'CSEE',
     date: e.date || new Date().toISOString().split('T')[0],
-    status: e.status || 'Active'
+    status: isAct ? 'Active' : 'Inactive'
   };
 }
 
 export function fromSupabaseExam(e: any, idx: number): Exam {
+  const isAct = e.status !== 'Inactive' && e.status !== 'Locked';
   return {
     id: e.id || (idx + 1),
     name: e.name || '',
     level: (e.level as any) || 'CSEE',
     className: e.class_name || e.className || 'All',
     date: e.date || '',
-    status: (e.status as any) || 'Active'
+    status: isAct ? 'Active' : 'Inactive',
+    isActive: isAct
   };
 }
 

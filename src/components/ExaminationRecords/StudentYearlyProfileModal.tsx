@@ -58,6 +58,7 @@ export const StudentYearlyProfileModal: React.FC<StudentYearlyProfileModalProps>
   selectedYear
 }) => {
   const [activeTermTab, setActiveTermTab] = useState<'Term 1' | 'Term 2' | 'Term 3'>('Term 1');
+  const [selectedExamType, setSelectedExamType] = useState<string>('All');
   const thisYearChartRef = useRef<HTMLCanvasElement | null>(null);
   const lifeChartRef = useRef<HTMLCanvasElement | null>(null);
   const thisYearChartInstance = useRef<ChartJS | null>(null);
@@ -67,7 +68,9 @@ export const StudentYearlyProfileModal: React.FC<StudentYearlyProfileModalProps>
 
   // Filter records for this student in this academic year
   const studentYearRecords = records.filter(
-    r => r.studentId === student.id && (selectedYear === 'All' || r.academicYear === selectedYear)
+    r => r.studentId === student.id && 
+         (selectedYear === 'All' || r.academicYear === selectedYear) &&
+         (selectedExamType === 'All' || r.examType === selectedExamType)
   );
 
   // All historical records for this student across entire school life
@@ -297,6 +300,17 @@ Hali: ${Number(annualAvg) >= 45 ? 'AMEFAULU / PASSED' : 'ANAHITAJI MAONGEZEKO'}`
                   <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-400 text-slate-900">
                     {calendarType === 'JULY-JUNE' ? 'JULY-JUNE (High School)' : 'JAN-DEC (Standard / Primary)'}
                   </span>
+                  <select
+                    value={selectedExamType}
+                    onChange={(e) => setSelectedExamType(e.target.value)}
+                    className="bg-white/10 text-white border border-white/20 rounded-lg px-3 py-1 text-[10px] font-bold cursor-pointer hover:bg-white/20 outline-none"
+                  >
+                    <option value="All">All Exams</option>
+                    <option value="Monthly">Monthly</option>
+                    <option value="Midterm">Midterm</option>
+                    <option value="Terminal">Terminal</option>
+                    <option value="Annual">Annual</option>
+                  </select>
                 </div>
               </div>
             </div>

@@ -36,7 +36,13 @@ import {
   Check,
   RefreshCw,
   BarChart3,
-  Smartphone
+  Smartphone,
+  Lock,
+  Unlock,
+  ShieldCheck,
+  ToggleLeft,
+  ToggleRight,
+  Archive
 } from 'lucide-react';
 import { Student, SchoolInfo, UserAccount, Exam, ExaminationRecord, Teacher, UsalRecord, ExamTerm, RecordExamType } from '../types';
 import { printReportCardDocument } from '../utils/export';
@@ -47,6 +53,8 @@ import { StudentComparisonView } from './StudentComparisonView';
 import { ExamDocumentsModal } from './Exams/ExamDocumentsModal';
 import { GradeCutoffModal } from './Exams/GradeCutoffModal';
 import { USALModal } from './USAL/USALModal';
+import { ExamSettingsView } from './Exams/ExamSettingsView';
+import { ExamArchiveView } from './Results/ExamArchiveView';
 import { calculateNectaLevelResults } from '../utils/nectaRules';
 import { buildExaminationRecord } from '../utils/examinationRecordsUtils';
 import { 
@@ -88,6 +96,8 @@ interface ResultsViewProps {
   teachers?: Teacher[];
   ledgerSubjectKeys?: string[];
   onUpdateLedgerSubjectKeys?: (keys: string[]) => void;
+  onUpdateExam?: (exam: Exam) => void;
+  onUpdateExams?: (exams: Exam[]) => void;
 }
 
 // Complete list of available Tanzanian subjects across Nursery, Primary, Secondary and High School
@@ -186,12 +196,19 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   onNavigateToMarkEntry,
   teachers = [],
   ledgerSubjectKeys: initialLedgerSubjectKeys = [],
-  onUpdateLedgerSubjectKeys
+  onUpdateLedgerSubjectKeys,
+  onUpdateExam,
+  onUpdateExams
 }) => {
-  const [activeTab, setActiveTab] = useState<'ledger' | 'dashboard' | 'reportcard' | 'comparison'>('ledger');
+  const [activeTab, setActiveTab] = useState<'ledger' | 'dashboard' | 'reportcard' | 'comparison' | 'exam_settings' | 'archive'>('ledger');
+  const [examSettingsSearch, setExamSettingsSearch] = useState<string>('');
+  const [examSettingsLevelFilter, setExamSettingsLevelFilter] = useState<string>('ALL');
+  const [examSettingsStatusFilter, setExamSettingsStatusFilter] = useState<'ALL' | 'ACTIVE' | 'LOCKED'>('ALL');
+  const [examSettingsToast, setExamSettingsToast] = useState<string | null>(null);
   const [selectedClass, setSelectedClass] = useState<string>('Form 1');
   const [selectedStream, setSelectedStream] = useState<string>('All');
   const [selectedExam, setSelectedExam] = useState<string>('Midterm I');
+  const [selectedExamType, setSelectedExamType] = useState<string>('All');
   const [selectedTerm, setSelectedTerm] = useState<string>('Term 1');
   const [selectedYear, setSelectedYear] = useState<string>(String(new Date().getFullYear()));
   const [isPdfExportModalOpen, setIsPdfExportModalOpen] = useState<boolean>(false);
@@ -202,6 +219,76 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   const [docModalExamId, setDocModalExamId] = useState<number | undefined>(undefined);
   const [isCutoffModalOpen, setIsCutoffModalOpen] = useState(false);
   const [isUsalModalOpen, setIsUsalModalOpen] = useState(false);
+
+  // Clear pending marks when filters change to ensure exam isolation
+  useEffect(() => {
+    setPendingMarks({});
+  }, [selectedExam, selectedExamType, selectedYear, selectedTerm, selectedClass, selectedStream]);
+
+  // Exam Lock Settings Helpers
+  const handleToggleExamStatus = (examToToggle: Exam) => {
+    const isCurrentlyActive = (examToToggle.status !== 'Inactive' && examToToggle.status !== 'Locked' && examToToggle.isActive !== false);
+    const newStatus = isCurrentlyActive ? 'Inactive' : 'Active';
+    const newIsActive = !isCurrentlyActive;
+
+    const updated: Exam = {
+      ...examToToggle,
+      status: newStatus as any,
+      isActive: newIsActive
+    };
+
+    if (onUpdateExam) {
+      onUpdateExam(updated);
+    } else if (onUpdateExams) {
+      onUpdateExams((exams || []).map(e => e.id === examToToggle.id ? updated : e));
+    }
+
+    setExamSettingsToast(
+      newIsActive 
+        ? `Mtihani wa "${examToToggle.name}" sasa ni WAZI (Active) - walimu wanaweza kuingiza alama.`
+        : `Mtihani wa "${examToToggle.name}" sasa UMEFUNGWA (Locked) - walimu hawawezi kuingiza wala kubadilisha alama.`
+    );
+    setTimeout(() => setExamSettingsToast(null), 4500);
+  };
+
+  const handleBulkToggleAllExams = (targetActive: boolean) => {
+    const updatedList = (exams || []).map(e => ({
+      ...e,
+      status: (targetActive ? 'Active' : 'Inactive') as any,
+      isActive: targetActive
+    }));
+    if (onUpdateExams) {
+      onUpdateExams(updatedList);
+    } else if (onUpdateExam) {
+      updatedList.forEach(e => onUpdateExam(e));
+    }
+    setExamSettingsToast(
+      targetActive 
+        ? 'Mitihani yote imefunguliwa kwa uingizaji alama!' 
+        : 'Mitihani yote imefungwa (Locked) kuzuia uingizaji au mabadiliko ya alama!'
+    );
+    setTimeout(() => setExamSettingsToast(null), 4500);
+  };
+
+  const filteredExamSettings = useMemo(() => {
+    return (exams || []).filter(e => {
+      const matchSearch = !examSettingsSearch.trim() || 
+        (e.name && e.name.toLowerCase().includes(examSettingsSearch.toLowerCase())) ||
+        (e.type && e.type.toLowerCase().includes(examSettingsSearch.toLowerCase())) ||
+        (e.className && e.className.toLowerCase().includes(examSettingsSearch.toLowerCase()));
+      const matchLevel = examSettingsLevelFilter === 'ALL' || e.level === examSettingsLevelFilter;
+      const isActive = e.status !== 'Inactive' && e.status !== 'Locked' && e.isActive !== false;
+      const matchStatus = examSettingsStatusFilter === 'ALL' ||
+        (examSettingsStatusFilter === 'ACTIVE' && isActive) ||
+        (examSettingsStatusFilter === 'LOCKED' && !isActive);
+      return matchSearch && matchLevel && matchStatus;
+    });
+  }, [exams, examSettingsSearch, examSettingsLevelFilter, examSettingsStatusFilter]);
+
+  const activeExamsCount = useMemo(() => {
+    return (exams || []).filter(e => e.status !== 'Inactive' && e.status !== 'Locked' && e.isActive !== false).length;
+  }, [exams]);
+  const lockedExamsCount = (exams || []).length - activeExamsCount;
 
   // Handle inline teacher remarks on candidate
   const handleUpdateStudentRemarks = (studentId: number, remarks: string) => {
@@ -337,7 +424,13 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   // Restrict ledger columns for Teacher role to only their registered/assigned subjects, or user customization
   const activeLedgerSubjects = useMemo(() => {
     // 1. Strictly filter by current class educational level
-    const levelSubjects = ALL_AVAILABLE_SUBJECTS.filter(sub => sub.level === currentSectionLevel);
+    let levelSubjects = ALL_AVAILABLE_SUBJECTS.filter(sub => sub.level === currentSectionLevel);
+
+    // 2. Further filter by Exam Type if necessary (e.g., Weekly Tests might have restricted subjects)
+    if (selectedExamType === 'Weekly') {
+      // Example: Only Core subjects for weekly tests
+      levelSubjects = levelSubjects.filter(sub => sub.category === 'Core' || sub.category === 'Languages');
+    }
 
     if (currentUser?.role === 'TEACHER') {
       const assigned = currentUser.assignedSubjects || [];
@@ -367,7 +460,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     } else {
       return levelSubjects.filter(s => NURSERY_SUBJECT_KEYS.includes(s.key));
     }
-  }, [currentUser, selectedSubjectKeys, currentSectionLevel, selectedClass]);
+  }, [currentUser, selectedSubjectKeys, currentSectionLevel, selectedClass, selectedExamType]);
 
   // Local pending marks: studentId -> { [subjectKey]: score }
   const [pendingMarks, setPendingMarks] = useState<Record<number, Record<string, number | string>>>({});
@@ -1392,6 +1485,18 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
           </div>
 
           <div className="flex items-center gap-1.5">
+            <span className="text-slate-500 uppercase tracking-wider text-[11px]">Type:</span>
+            <select
+              value={selectedExamType}
+              onChange={e => setSelectedExamType(e.target.value)}
+              className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 cursor-pointer"
+            >
+              <option value="All">All Types</option>
+              {['Midterm', 'Terminal', 'Annual', 'Mock', 'Weekly'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
             <span className="text-slate-500 uppercase tracking-wider text-[11px]">Exam:</span>
             <select
               value={selectedExam}
@@ -1507,6 +1612,33 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                 {selectedCandidateIds.length}
               </span>
             )}
+          </button>
+          <button
+            onClick={() => setActiveTab('exam_settings')}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'exam_settings'
+                ? 'bg-rose-700 text-white shadow-xs font-black'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-300'
+            }`}
+          >
+            <Lock className={`w-3.5 h-3.5 ${activeTab === 'exam_settings' ? 'text-amber-300' : 'text-rose-600'}`} />
+            <span>Exam Settings (Lock Control)</span>
+            <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${
+              activeTab === 'exam_settings' ? 'bg-white/20 text-white' : 'bg-rose-100 text-rose-800'
+            }`}>
+              LOCK CONTROL
+            </span>
+          </button>
+          <button
+            onClick={() => setActiveTab('archive')}
+            className={`px-4 py-2 text-xs font-bold rounded-lg transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'archive'
+                ? 'bg-indigo-700 text-white shadow-xs font-black'
+                : 'text-slate-700 hover:bg-slate-100 hover:text-slate-900 border border-slate-300'
+            }`}
+          >
+            <Archive className="w-3.5 h-3.5" />
+            <span>Exam Archive</span>
           </button>
         </div>
 
@@ -2667,6 +2799,27 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
           selectedExam={selectedExam}
           schoolInfo={schoolInfo}
           onBackToLedger={() => setActiveTab('ledger')}
+        />
+      )}
+
+      {/* TAB 5: EXAM SETTINGS & LOCK/UNLOCK MANAGEMENT */}
+      {activeTab === 'exam_settings' && (
+        <ExamSettingsView
+          exams={exams || []}
+          onUpdateExam={onUpdateExam}
+          onUpdateExams={onUpdateExams}
+          onNavigateToMarkEntry={onNavigateToMarkEntry}
+          onNavigateToExams={() => setActiveTab('ledger')}
+          currentUser={currentUser}
+          schoolInfo={schoolInfo}
+          isEmbedded={true}
+        />
+      )}
+
+      {activeTab === 'archive' && (
+        <ExamArchiveView
+          examinationRecords={examinationRecords || []}
+          schoolInfo={schoolInfo}
         />
       )}
 

@@ -40,8 +40,6 @@ export const StudentQrScannerModal: React.FC<StudentQrScannerModalProps> = ({
   onLogDiscipline,
   onViewStudentProfile
 }) => {
-  if (!isOpen) return null;
-
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [cameraActive, setCameraActive] = useState<boolean>(false);
@@ -119,6 +117,7 @@ export const StudentQrScannerModal: React.FC<StudentQrScannerModalProps> = ({
 
   // Camera video loop scanner
   useEffect(() => {
+    if (!isOpen) return;
     let animationFrameId: number;
     let stream: MediaStream | null = null;
 
@@ -224,6 +223,8 @@ export const StudentQrScannerModal: React.FC<StudentQrScannerModalProps> = ({
     setAttendanceStatus(status);
     playScanBeep();
   };
+
+  if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in">
