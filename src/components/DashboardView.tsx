@@ -47,6 +47,7 @@ import { MonthlyAttendanceTrendsWidget } from './Dashboard/MonthlyAttendanceTren
 import { CommandPaletteModal } from './common/CommandPaletteModal';
 import { QuickAddStudentModal } from './Students/QuickAddStudentModal';
 import { SmartDashboardWidget } from './SmartDashboardWidget';
+import { ActivityFeed } from './common/ActivityFeed';
 
 interface DashboardViewProps {
   students: Student[];
@@ -1215,56 +1216,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
 
-        {/* Recent Activity List */}
-        <div className="bg-white border border-slate-200/80 rounded-3xl p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-black text-slate-900 flex items-center gap-2">
-              <Clock className="w-4 h-4 text-indigo-600" />
-              <span>Recent Activity</span>
-            </h3>
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search className="w-3 h-3 absolute left-2 top-2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Search..."
-                  value={activitySearchQuery}
-                  onChange={(e) => setActivitySearchQuery(e.target.value)}
-                  className="text-[10px] font-bold bg-slate-100 border border-slate-200 rounded-lg pl-7 pr-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 w-24"
-                />
-              </div>
-              <select
-                value={activityCategoryFilter}
-                onChange={(e) => setActivityCategoryFilter(e.target.value as any)}
-                className="text-[10px] font-bold bg-slate-100 border border-slate-200 rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500"
-              >
-                <option value="ALL">All Categories</option>
-                <option value="students">Students</option>
-                <option value="teachers">Teachers</option>
-                <option value="exams">Exams</option>
-              </select>
-            </div>
-          </div>
-          <div className="space-y-3">
-            {recentActivity.length === 0 ? (
-              <p className="text-xs text-slate-400 py-6 text-center">Hakuna shughuli za hivi karibuni.</p>
-            ) : (
-              recentActivity.map((log) => (
-                <div key={log.id} className="flex gap-3 p-3 bg-slate-50 rounded-xl border border-slate-100">
-                  <div className="p-2 bg-indigo-100 text-indigo-700 rounded-lg h-fit">
-                    <Activity className="w-4 h-4" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-bold text-slate-900 truncate">{log.title}</p>
-                    <p className="text-[10px] text-slate-500 truncate">{log.description}</p>
-                    <p className="text-[9px] text-slate-400 font-mono mt-0.5">
-                      {new Date(log.timestamp).toLocaleString()}
-                    </p>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+        {/* Recent Activity Timeline Feed */}
+        <div className="lg:col-span-1">
+          <ActivityFeed activityLogs={activityLogs} maxItems={6} />
         </div>
 
         {/* Activity Trends Chart */}
