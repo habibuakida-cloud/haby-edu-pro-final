@@ -29,12 +29,12 @@ export interface FirestoreStudent {
   subjects?: string[];
   marks?: Record<string, any>;
   total?: number;
-  average?: number;
+  average?: number | string;
   grade?: string;
   division?: string;
-  points?: number;
+  points?: number | string;
   remark?: string;
-  position?: number;
+  position?: number | string;
 }
 
 export interface FirestoreTeacher {

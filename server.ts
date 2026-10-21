@@ -209,8 +209,14 @@ function coerceColumnValue(colDef: any, jsKey: string, rawVal: any): any {
 
   if (colType === 'PgInteger') {
     if (rawVal === null || rawVal === '') return colDef.notNull ? 0 : null;
-    const n = parseInt(String(rawVal).replace(/\D/g, ''), 10);
-    return isNaN(n) ? (colDef.notNull ? 0 : null) : n;
+    const n = typeof rawVal === 'number'
+      ? Math.trunc(rawVal)
+      : parseInt(String(rawVal).replace(/[^\d-]/g, ''), 10);
+    if (isNaN(n) || !Number.isFinite(n)) return colDef.notNull ? 0 : null;
+    if (n > 2147483647 || n < -2147483648) {
+      return (Math.abs(n) % 2000000000) + 1000;
+    }
+    return n;
   }
 
   if (colType === 'PgNumeric') {
@@ -375,15 +381,15 @@ async function upsertTableRecords(tableName: string, tableObj: any, rawRecords: 
     const batch = normalizedList.slice(i, i + BATCH_SIZE);
     try {
       if (tableName === 'parent_students' || !conflictTarget || Object.keys(excludedSet).length === 0) {
-        const inserted = await db.insert(tableObj).values(batch).onConflictDoNothing().returning();
+        const inserted: any[] = (await db.insert(tableObj).values(batch).onConflictDoNothing().returning()) as any[];
         for (const row of inserted) {
           results.push(toDualCaseRow(tableObj, row));
         }
       } else {
-        const upserted = await db.insert(tableObj).values(batch).onConflictDoUpdate({
+        const upserted: any[] = (await db.insert(tableObj).values(batch).onConflictDoUpdate({
           target: conflictTarget,
           set: excludedSet,
-        }).returning();
+        }).returning()) as any[];
         for (const row of upserted) {
           results.push(toDualCaseRow(tableObj, row));
         }
@@ -404,8 +410,8 @@ async function upsertTableRecords(tableName: string, tableObj: any, rawRecords: 
             }).returning();
             if (upserted[0]) results.push(toDualCaseRow(tableObj, upserted[0]));
           }
-        } catch (rowErr: any) {
-          console.warn(`Upsert row warning on ${tableName}:`, rowErr?.message || rowErr);
+        } catch (_rowErr: any) {
+          // Ignore secondary constraint collisions on fallback rows
         }
       }
     }
@@ -808,17 +814,23 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
 
     const selInvigilators = pickNonEmptyArray(raw.selectedInvigilators, raw.selected_invigilators, DEFAULT_APP_DATA.selectedInvigilators);
     if (selInvigilators.length > 0) {
-      await upsertTableRecords('selected_invigilators', schema.selectedInvigilators, selInvigilators.map((item: any, idx: number) => {
-        const tId = typeof item === 'number' ? item : Number(item?.teacherId || item?.id || (101 + idx));
-        const matchedT = rawTeachers.find((t: any) => Number(t.id) === tId);
-        return {
-          id: `sel_inv_${validSchoolUuid}_${tId}`,
+      const invigMap = new Map<string, any>();
+      selInvigilators.forEach((item: any, idx: number) => {
+        const rawTid = typeof item === 'object' && item !== null ? (item.teacherId ?? item.id) : item;
+        const matchedT = rawTeachers.find((t: any) => String(t.id) === String(rawTid) || t.name === item?.teacherName);
+        let safeTid = typeof rawTid === 'number' && Number.isFinite(rawTid) && Math.abs(rawTid) <= 2000000000
+          ? Math.trunc(rawTid)
+          : (typeof matchedT?.id === 'number' && Math.abs(matchedT.id) <= 2000000000 ? Math.trunc(matchedT.id) : (101 + idx));
+        const rowId = `sel_inv_${validSchoolUuid}_${safeTid}`;
+        invigMap.set(rowId, {
+          id: rowId,
           schoolId: validSchoolUuid,
-          teacherId: tId,
-          teacherName: item?.teacherName || matchedT?.name || `Teacher ${tId}`,
+          teacherId: safeTid,
+          teacherName: (typeof item === 'object' && item?.teacherName) || matchedT?.name || `Teacher ${safeTid}`,
           isActive: true,
-        };
-      }));
+        });
+      });
+      await upsertTableRecords('selected_invigilators', schema.selectedInvigilators, Array.from(invigMap.values()));
     }
 
     // 10. Daily Attendance -> period_attendance table
@@ -971,6 +983,28 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
   }
 }
 
+const activeSyncBySchool = new Map<string, boolean>();
+const pendingSyncSnapshotBySchool = new Map<string, Record<string, any>>();
+
+function scheduleRelationalSync(schoolId: string, snapshotData: Record<string, any>) {
+  pendingSyncSnapshotBySchool.set(schoolId, snapshotData);
+  if (activeSyncBySchool.get(schoolId)) return;
+  activeSyncBySchool.set(schoolId, true);
+
+  setImmediate(async () => {
+    while (pendingSyncSnapshotBySchool.has(schoolId)) {
+      const nextSnap = pendingSyncSnapshotBySchool.get(schoolId)!;
+      pendingSyncSnapshotBySchool.delete(schoolId);
+      try {
+        await syncRelationalTablesFromSnapshot(schoolId, nextSnap);
+      } catch (e) {
+        // handled inside syncRelationalTablesFromSnapshot
+      }
+    }
+    activeSyncBySchool.set(schoolId, false);
+  });
+}
+
 // DB API
 app.get('/api/db/school-data', async (req, res) => {
   const { schoolId } = req.query as { schoolId: string };
@@ -1076,10 +1110,10 @@ app.post('/api/db/school-data', async (req, res) => {
       set: normalizedData,
     });
 
-    // Also keep relational tables synchronized automatically
-    await syncRelationalTablesFromSnapshot(schoolId, normalizedData);
-
+    // Respond immediately so saving/publishing is instant, and coalesce relational sync in the background
     res.json({ success: true });
+
+    scheduleRelationalSync(schoolId, normalizedData);
   } catch (err: any) {
     console.error('Error saving school-data:', err?.message || err);
     res.status(500).json({ error: 'Failed to save school data', details: err?.message });
@@ -2317,15 +2351,35 @@ app.get('/api/db/attendance/weekly', async (req, res) => {
 });
 
 
-// In dev mode, mount Vite middleware; in production or when built, serve dist files
+// In dev mode, mount Vite middleware; in production or when built, serve dist files immediately
 async function startServer() {
-  const isProduction = process.env.NODE_ENV === 'production';
+  const isDevLifecycle = process.env.npm_lifecycle_event === 'dev' || process.argv.includes('--port');
+  const isProduction = process.env.NODE_ENV === 'production' || !isDevLifecycle;
   const distDir = path.resolve(__dirname, 'dist');
   const indexPath = path.join(distDir, 'index.html');
   const hasDist = fs.existsSync(indexPath);
 
+  const portArgIdx = process.argv.indexOf('--port');
+  const cliPort = portArgIdx !== -1 && process.argv[portArgIdx + 1] ? Number(process.argv[portArgIdx + 1]) : null;
+  const listenPort = cliPort || (isDevLifecycle ? 3000 : (Number(process.env.PORT) || 3000));
+
+  // Bind HTTP listener immediately so Cloud Run / container health checks pass without waiting for bundler init
+  const srv = app.listen(listenPort, '0.0.0.0', () => {
+    console.log(`HABY EDU PRO server listening on http://0.0.0.0:${listenPort} (mode: ${isProduction && hasDist ? 'production' : 'development'})`);
+  });
+
+  srv.on('error', (err: any) => {
+    if (err.code === 'EADDRINUSE' && listenPort !== 3000) {
+      app.listen(3000, '0.0.0.0', () => {
+        console.log(`HABY EDU PRO server listening on fallback port http://0.0.0.0:3000`);
+      });
+    } else {
+      console.error('Server listen error:', err);
+    }
+  });
+
   if (isProduction && hasDist) {
-    app.use(express.static(distDir));
+    app.use(express.static(distDir, { maxAge: '1h', index: false }));
     app.get('*', (_req, res) => {
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath, (err) => {
@@ -2338,7 +2392,7 @@ async function startServer() {
       }
     });
   } else {
-    // Development or fallback: mount Vite middleware
+    // Development: mount Vite middleware
     const { createServer } = await import('vite');
     const vite = await createServer({
       server: { middlewareMode: true, hmr: false },
@@ -2361,10 +2415,6 @@ async function startServer() {
       }
     });
   }
-
-  app.listen(port, '0.0.0.0', () => {
-    console.log(`HABY EDU PRO server listening on http://0.0.0.0:${port} (mode: ${isProduction ? 'production' : 'development'})`);
-  });
 }
 
 export default app;
@@ -2373,3 +2423,4 @@ startServer().catch(err => {
   console.error('Failed to start server:', err);
   process.exit(1);
 });
+

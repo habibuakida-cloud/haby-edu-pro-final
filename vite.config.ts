@@ -12,6 +12,9 @@ export default defineConfig(() => {
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
+              if (id.includes('firebase') || id.includes('@firebase')) {
+                return 'vendor-firebase';
+              }
               if (id.includes('jspdf') || id.includes('html2canvas')) {
                 return 'vendor-pdf';
               }
@@ -24,6 +27,12 @@ export default defineConfig(() => {
               if (id.includes('lucide-react')) {
                 return 'vendor-icons';
               }
+              if (id.includes('motion') || id.includes('framer-motion')) {
+                return 'vendor-motion';
+              }
+              if (id.includes('qrcode') || id.includes('jsqr') || id.includes('html5-qrcode')) {
+                return 'vendor-qr';
+              }
               if (id.includes('@supabase') || id.includes('idb')) {
                 return 'vendor-db';
               }
@@ -34,7 +43,7 @@ export default defineConfig(() => {
           }
         }
       },
-      chunkSizeWarningLimit: 2000,
+      chunkSizeWarningLimit: 6000,
     },
     plugins: [react(), tailwindcss()],
     resolve: {

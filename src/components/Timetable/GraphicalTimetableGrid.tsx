@@ -39,9 +39,12 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
         Ratiba ya {selectedClass} - {selectedStream}
       </h2>
       <div className="overflow-x-auto">
-        <div className="grid grid-cols-[100px_repeat(7,1fr)] gap-2 min-w-[800px]">
+        <div 
+          style={{ gridTemplateColumns: `110px repeat(${DAYS_OF_WEEK.length}, minmax(110px, 1fr))` }}
+          className="grid gap-2 min-w-[800px]"
+        >
           {/* Header */}
-          <div className="font-bold text-slate-400 text-xs p-2">Siku / Muda</div>
+          <div className="font-bold text-slate-500 text-xs p-2.5 bg-slate-100 rounded-lg flex items-center justify-center">Siku / Muda</div>
           {DAYS_OF_WEEK.map(day => (
             <div key={day} className="font-black text-slate-900 text-xs text-center p-2 bg-slate-50 rounded-lg uppercase tracking-wider">
               {day.substring(0, 3)}

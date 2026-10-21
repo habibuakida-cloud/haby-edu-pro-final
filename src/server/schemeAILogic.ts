@@ -1,14 +1,15 @@
 import { GoogleGenAI } from '@google/genai';
 
-// Initialize Gemini client on server
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+function getAiClient() {
+  return new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY || 'PLACEHOLDER_KEY',
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
     }
-  }
-});
+  });
+}
 
 /**
  * Robust Gemini generation with automated fallback models to prevent 503 Service Unavailable errors.
@@ -19,6 +20,7 @@ async function generateWithFallback(config: {
   responseMimeType?: string;
   temperature?: number;
 }) {
+  const ai = getAiClient();
   const models = ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
   let lastError = null;
 

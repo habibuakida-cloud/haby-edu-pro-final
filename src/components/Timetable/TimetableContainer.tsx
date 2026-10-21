@@ -222,6 +222,7 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   const [aiModalOpen, setAiModalOpen] = useState(false);
   const [saveSnapshotModalOpen, setSaveSnapshotModalOpen] = useState(false);
   const [snapshotTitle, setSnapshotTitle] = useState('Term 1 Master Timetable');
+  const [showExtraCurricularBar, setShowExtraCurricularBar] = useState(false);
 
   const handleSaveSnapshot = () => {
     if (!snapshotTitle.trim()) {
@@ -832,642 +833,484 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         }
       `}</style>
 
-      {/* Sub Navigation */}
-      <div className="bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs flex flex-wrap items-center justify-between gap-2 no-print">
-        <div className="flex flex-wrap gap-1 items-center flex-1">
-        <button
-          type="button"
-          onClick={() => setActiveTab('general')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'general'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Calendar className="w-4 h-4" />
-          General Timetable
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('class')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'class'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Layers className="w-4 h-4" />
-          Class Timetable
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('teacher')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'teacher'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Clock className="w-4 h-4" />
-          Teacher Timetable
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('master')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'master'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Plus className="w-4 h-4" />
-          Master Assignment
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('journal')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'journal'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <BookOpen className="w-4 h-4" />
-          <span>Shajara ya Darasa (Class Journal)</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('generalEntry')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'generalEntry'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <FileSpreadsheet className="w-4 h-4" />
-          <span>General Manual Entry</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('teacherEntry')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'teacherEntry'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Edit3 className="w-4 h-4" />
-          <span>Teacher Entry Form</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('saved')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'saved'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Save className="w-4 h-4" />
-          <span>Ratiba Zilizohifadhiwa (Saved)</span>
-          <span className="px-1.5 py-0.2 bg-blue-100 text-blue-800 text-[10px] rounded-full font-bold">
-            {(savedTimetableRecords || []).length}
-          </span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('policies')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'policies'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Sliders className="w-4 h-4" />
-          <span>Sera za Shule (Policies)</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('constraints')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'constraints'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Sliders className="w-4 h-4 text-amber-500" />
-          <span>Sheria na Ukaguzi (Audit)</span>
-          {constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount > 0 ? (
-            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-2xs animate-pulse flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
-              <span>{constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount} Hitilafu</span>
-            </span>
-          ) : (
-            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
-              {constraintValidationReport.overallComplianceScore}%
-            </span>
-          )}
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('allocations')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'allocations'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <BookOpen className="w-4 h-4" />
-          <span>Mgawanyo wa Masomo (Allocations)</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('teacherAssignments')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'teacherAssignments'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>Upangaji wa Walimu (Assignments)</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('settings')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'settings'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <Palette className="w-4 h-4" />
-          <span>Mipangilio (Settings)</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('graphical')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'graphical'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          <LayoutGrid className="w-4 h-4" />
-          Graphical View
-        </button>
-
-        <button
-          type="button"
-          onClick={() => setActiveTab('integrity')}
-          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
-            activeTab === 'integrity'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          }`}
-        >
-          {integrityReport.criticalCount > 0 ? (
-            <ShieldAlert className="w-4 h-4 text-rose-500" />
-          ) : (
-            <ShieldCheck className="w-4 h-4 text-emerald-500" />
-          )}
-          <span>Integrity Report</span>
-          <span className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
-            integrityReport.criticalCount > 0
-              ? 'bg-rose-100 text-rose-700'
-              : integrityReport.warningCount > 0
-              ? 'bg-amber-100 text-amber-700'
-              : 'bg-emerald-100 text-emerald-700'
-          }`}>
-            {integrityReport.score}% Score
-          </span>
-        </button>
-        </div>
-
-        <div className="flex items-center gap-2 pr-1 shrink-0 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setAiModalOpen(true)}
-            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold text-xs rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95 border border-indigo-400"
-            title="Tumia Msaidizi wa AI kujaza ratiba kulingana na idadi ya vipindi na walimu waliosajiliwa"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-            <span>⚡ Jaza na AI (AI Timetable)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIntegrityReportModalOpen(true)}
-            className="px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
-            title="Kagua na utatue migongano yote ya walimu (Resolve Clashes)"
-          >
-            <ShieldAlert className="w-3.5 h-3.5" />
-            <span>Tatua Migongano ({integrityReport.criticalCount || totalConflicts})</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              if (window.confirm("Je, una uhakika unataka kusafisha (kuweka upya) ratiba yote ya masomo? Mabadiliko haya yatafuta vipindi vyote vilivyopo kwenye ratiba.")) {
-                onUpdateAssignments([]);
-                alert("Ratiba imesafishwa na kuwekwa upya kikamilifu! Unaweza kutumia '⚡ Tengeneza Ratiba' kutengeneza mpya.");
-              }
-            }}
-            className="px-3 py-2 bg-slate-100 hover:bg-rose-50 hover:text-rose-700 text-slate-700 font-bold text-xs rounded-lg flex items-center gap-1.5 border border-slate-200 shadow-2xs transition-all cursor-pointer active:scale-95"
-            title="Safisha na uweke upya masomo yote kwenye ratiba"
-          >
-            <RefreshCw className="w-3.5 h-3.5" />
-            <span>Weka Upya (Reset)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => handlePrintTimetable()}
-            className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-lg flex items-center gap-2 shadow-xs transition-all cursor-pointer active:scale-95 border border-blue-500"
-            title="Print Master Timetable using dedicated print CSS"
-            data-testid="print-timetable-button"
-          >
-            <Printer className="w-4 h-4" />
-            <span>Print Timetable</span>
-          </button>
-        </div>
-      </div>
-
-      {/* Autonomous Remedial Info Banner */}
-      <div className="bg-amber-50/80 border border-amber-200/80 rounded-xl p-3 text-xs text-amber-950 font-semibold flex items-center justify-between gap-3 no-print">
-        <div className="flex items-center gap-2.5">
-          <Sparkles className="w-4 h-4 text-amber-600 shrink-0" />
-          <span>
-            <strong>Ratiba Kuu ya Shule (General Timetable):</strong> Inasimamia masomo ya kawaida (08:00 - 14:00). Masomo ya Ziada (Remedial) yana mfumo wake huru unaojitegemea (<strong>REMEDIAL PROGRAM -&gt; Remedial Timetable</strong>) na hayatoki au kuingiliana na ratiba hii.
-          </span>
-        </div>
-      </div>
-
-      {/* Conflict Bar Alert (if any teacher is double-booked or conflicts exist) */}
-      {(totalConflicts > 0 || integrityReport.criticalCount > 0) && (
-        <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-rose-900 shadow-xs animate-in fade-in flex-wrap gap-3 no-print">
-          <div className="flex items-center gap-3">
-            <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
-            <div className="flex flex-col">
-              <span className="text-sm font-bold flex items-center gap-2">
-                <span>Timetable Integrity Conflicts Detected</span>
-                <span className="text-xs font-black px-2 py-0.5 bg-rose-600 text-white rounded-full">
-                  {integrityReport.criticalCount || totalConflicts} Clashes
-                </span>
-                {integrityReport.warningCount > 0 && (
-                  <span className="text-xs font-bold px-2 py-0.5 bg-amber-500 text-white rounded-full">
-                    {integrityReport.warningCount} Warnings
-                  </span>
-                )}
-              </span>
-              <span className="text-[11px] opacity-90 font-medium">
-                {integrityReport.criticalCount || totalConflicts} period slot(s) have teacher clashes (double-booked teachers) or policy violations. Clashing slots are highlighted in red below.
-              </span>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIntegrityReportModalOpen(true)}
-              className="px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition-colors shadow-xs flex items-center gap-1.5 cursor-pointer"
-            >
-              <ShieldAlert className="w-3.5 h-3.5" />
-              <span>Integrity Audit Ledger</span>
-            </button>
-            <button
-              onClick={handleResolveConflicts}
-              className="px-3 py-1.5 bg-white text-rose-600 border border-rose-200 rounded-lg text-xs font-black hover:bg-rose-50 transition-colors shadow-sm flex items-center gap-1.5 cursor-pointer"
-            >
-              <RefreshCw className="w-3.5 h-3.5" />
-              <span>Resolve Clashes</span>
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* MANUAL TIMETABLE BUILDER HEADER */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 shadow-xs space-y-3 no-print">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs">
-          <div className="flex items-start gap-2.5">
-            <div className="p-2.5 bg-blue-600 text-white rounded-xl shrink-0 mt-0.5 sm:mt-0 shadow-xs">
-              <Calendar className="w-5 h-5" />
+      {/* 1. UNIFIED COMMAND HEADER & GLOBAL ACTIONS */}
+      <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4 no-print">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          {/* Title & Live Status Badges */}
+          <div className="flex items-center gap-3.5">
+            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-indigo-800 text-white flex items-center justify-center shadow-sm shrink-0">
+              <Calendar className="w-6 h-6" />
             </div>
             <div>
-              <span className="font-extrabold text-slate-900 block text-sm flex items-center gap-2">
-                <span>Ratiba ya Kufundisha (Teaching Timetable Builder)</span>
-                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 text-[10px] font-mono font-bold">
-                  {assignments.length} Vipindi Vilivyopangwa
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
+                  Ratiba ya Masomo (School Timetable)
+                </h2>
+                <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold font-mono">
+                  {assignments.length} Vipindi
                 </span>
-              </span>
-              <span className="text-slate-600 text-[11px] block mt-0.5">
-                Bofya kisanduku (slot) chochote kwenye jedwali chini kumpangia mwalimu, somo, na mkondo au bofya kitufe cha "Panga Kipindi".
-              </span>
+                {integrityReport.criticalCount > 0 || totalConflicts > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setIntegrityReportModalOpen(true)}
+                    className="px-2.5 py-0.5 rounded-full bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
+                    title="Bofya kukagua na kutatua migongano ya walimu"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+                    <span>{integrityReport.criticalCount || totalConflicts} Migongano</span>
+                  </button>
+                ) : (
+                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold flex items-center gap-1">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>Zero Migongano ✓</span>
+                  </span>
+                )}
+                <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
+                  Ulinganifu {integrityReport.score}%
+                </span>
+              </div>
+              <p className="text-xs text-slate-500 font-medium mt-0.5">
+                Upangaji na usimamizi wa ratiba ya masomo, walimu, na vipindi maalum
+              </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2 shrink-0 flex-wrap">
-            <button
-              type="button"
-              onClick={() => handlePrintTimetable(true)}
-              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95 border border-slate-700"
-              title="Print Master Timetable with official letterhead and stamp layout"
-              data-testid="print-master-timetable-header-btn"
-            >
-              <Printer className="w-3.5 h-3.5 text-blue-400" />
-              <span>Print Timetable</span>
-            </button>
-
+          {/* Global Primary Action Toolbar */}
+          <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               onClick={() => setAiModalOpen(true)}
-              className="px-4 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl font-black text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95 border border-indigo-400"
+              className="px-3.5 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95 border border-indigo-400"
+              title="Tumia Msaidizi wa AI kujaza ratiba kiotomatiki kulingana na sera na walimu"
             >
               <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
-              <span>Jaza Ratiba Yote na AI</span>
+              <span>⚡ Jaza na AI</span>
             </button>
 
             <button
               type="button"
               onClick={() => {
                 setEditingSlot({
-                  className: selectedClassFilter,
-                  stream: getStreamsForClass(selectedClassFilter)[0] || 'STREAM A',
+                  className: selectedGeneralClass !== 'All' ? selectedGeneralClass : 'Form 1',
+                  stream: getStreamsForClass(selectedGeneralClass !== 'All' ? selectedGeneralClass : 'Form 1')[0] || 'STREAM A',
                   day: 'Monday',
                   period: periodSettings[0] ? `${periodSettings[0].name} (${periodSettings[0].start}-${periodSettings[0].end})` : 'Period 1 (08:00-08:40)'
                 });
               }}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs flex items-center gap-1.5 shadow-xs cursor-pointer transition active:scale-95"
+              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+              title="Panga kipindi cha somo kwa mikono"
             >
-              <Plus className="w-3.5 h-3.5" />
-              <span>Panga Kipindi cha Mkono</span>
+              <Plus className="w-3.5 h-3.5 text-blue-400" />
+              <span>Panga Somo</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowExtraCurricularBar(prev => !prev)}
+              className={`px-3 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer border ${
+                showExtraCurricularBar
+                  ? 'bg-amber-100 text-amber-900 border-amber-300'
+                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+              }`}
+              title="Fungua orodha ya shughuli maalum (Baraza, Dini, Chakula, Michezo, nk.)"
+            >
+              <Coffee className="w-3.5 h-3.5 text-amber-600" />
+              <span>Shughuli Maalum</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleSavePermanentlyToDatabase}
+              disabled={isSavingDb}
+              className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer ${
+                saveSuccessNotice
+                  ? 'bg-emerald-600 text-white animate-pulse'
+                  : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+              }`}
+              title="Hifadhi mabadiliko ya ratiba kudumu kwenye database (Cloud SQL & Firestore)"
+            >
+              {saveSuccessNotice ? (
+                <>
+                  <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                  <span>Imehifadhiwa! ✓</span>
+                </>
+              ) : isSavingDb ? (
+                <>
+                  <Zap className="w-3.5 h-3.5 animate-spin" />
+                  <span>Inahifadhi...</span>
+                </>
+              ) : (
+                <>
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Hifadhi DB</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handlePrintTimetable()}
+              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer border border-blue-500"
+              title="Chapisha (Print) Ratiba ya Masomo"
+              data-testid="print-timetable-button"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print</span>
             </button>
           </div>
         </div>
-      </div>
 
-      {/* Quick Add Extra-Curricular Bar (Editable Times) */}
-      <div className="bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white p-4 rounded-xl shadow-md border border-slate-800 no-print">
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="p-1 rounded-md bg-amber-500/20 text-amber-400">
-                <Sparkles className="w-4 h-4" />
-              </span>
-              <h4 className="text-sm font-bold text-white">
-                Extra-Curricular & Special Periods (Fully Editable Times)
-              </h4>
-            </div>
-            <p className="text-xs text-slate-300 mt-1">
-              Select any activity to set custom start & end times, duration, day, and room. Choose school-wide or specific stream.
-            </p>
-          </div>
-
+        {/* 2. CATEGORIZED TAB NAVIGATION */}
+        <div className="pt-3 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          {/* Main Roster Views */}
           <div className="flex flex-wrap items-center gap-1.5">
             <button
               type="button"
-              onClick={() => setIntegrityReportModalOpen(true)}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white/10 hover:bg-white/20 text-white transition-all shadow-xs flex items-center gap-1.5 cursor-pointer border border-white/20"
+              onClick={() => setActiveTab('general')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'general'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+              }`}
             >
-              <ShieldCheck className="w-3.5 h-3.5 text-blue-300" />
-              <span>Integrity Audit ({integrityReport.score}%)</span>
+              <Calendar className="w-3.5 h-3.5" />
+              <span>Ratiba Kuu (Master)</span>
             </button>
 
             <button
               type="button"
-              onClick={() => handleOpenScheduleExtraCurricular()}
-              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-white text-slate-900 hover:bg-slate-100 transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+              onClick={() => setActiveTab('class')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'class'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+              }`}
             >
-              <Plus className="w-3.5 h-3.5 text-blue-600" />
-              <span>Schedule Custom Activity</span>
+              <Layers className="w-3.5 h-3.5" />
+              <span>Kwa Darasa (Class)</span>
             </button>
-            {EXTRA_CURRICULAR_ACTIVITIES.map(act => (
-              <button
-                key={act.id}
-                type="button"
-                onClick={() => handleOpenScheduleExtraCurricular(act)}
-                style={{ backgroundColor: act.color }}
-                className="px-2.5 py-1.5 rounded-lg text-xs font-bold text-white hover:brightness-110 active:scale-95 transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
-                title={`Schedule ${act.name} with editable times`}
-              >
-                {renderActivityIcon(act.icon, "w-3.5 h-3.5")}
-                <span>{act.name}</span>
-              </button>
-            ))}
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('teacher')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'teacher'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+              }`}
+            >
+              <Clock className="w-3.5 h-3.5" />
+              <span>Kwa Mwalimu (Teacher)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('graphical')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'graphical'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Mwonekano wa Grafu</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('journal')}
+              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+                activeTab === 'journal'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Shajara ya Darasa (Journal)</span>
+            </button>
+          </div>
+
+          {/* Secondary Settings & Setup Dropdown */}
+          <div className="flex items-center gap-2 self-start md:self-auto">
+            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">
+              Zana & Mipangilio:
+            </span>
+            <select
+              value={['settings', 'allocations', 'teacherAssignments', 'master', 'generalEntry', 'teacherEntry', 'saved', 'policies', 'constraints', 'integrity'].includes(activeTab) ? activeTab : 'more'}
+              onChange={(e) => {
+                if (e.target.value !== 'more') {
+                  setActiveTab(e.target.value as any);
+                }
+              }}
+              className="px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 cursor-pointer focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="more" disabled>⚙️ Chagua Zana / Mipangilio...</option>
+              <option value="settings">⏱️ Vipindi & Saa (Period Settings)</option>
+              <option value="allocations">📚 Mgawanyo wa Masomo (Allocations)</option>
+              <option value="teacherAssignments">👥 Upangaji wa Walimu (Assignments)</option>
+              <option value="master">✍️ Master Assignment</option>
+              <option value="generalEntry">📝 General Manual Entry</option>
+              <option value="teacherEntry">📋 Fomu ya Mwalimu (Teacher Entry)</option>
+              <option value="saved">💾 Ratiba Zilizohifadhiwa ({savedTimetableRecords.length})</option>
+              <option value="policies">📜 Sera za Shule (Policies)</option>
+              <option value="constraints">⚖️ Sheria & Ukaguzi (Audit)</option>
+              <option value="integrity">🛡️ Integrity Audit Report ({integrityReport.score}%)</option>
+            </select>
           </div>
         </div>
+
+        {/* Secondary Sub-Bar if in Settings / Setup Mode */}
+        {['settings', 'allocations', 'teacherAssignments', 'master', 'generalEntry', 'teacherEntry', 'saved', 'policies', 'constraints', 'integrity'].includes(activeTab) && (
+          <div className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-wrap items-center justify-between gap-2">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              <span className="font-bold text-slate-500 mr-1">Mipangilio Inayotumika:</span>
+              <button
+                type="button"
+                onClick={() => setActiveTab('settings')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                Vipindi & Saa
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('allocations')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'allocations' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                Mgawanyo
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('teacherAssignments')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'teacherAssignments' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                Walimu
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('master')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'master' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                Master Entry
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('policies')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'policies' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                Sera
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('constraints')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'constraints' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                Ukaguzi
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('saved')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'saved' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                Snapshots ({savedTimetableRecords.length})
+              </button>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('general')}
+              className="px-3 py-1 text-xs font-bold text-blue-700 hover:bg-blue-50 rounded-lg flex items-center gap-1 cursor-pointer"
+            >
+              <span>← Rudi kwenye Ratiba Kuu</span>
+            </button>
+          </div>
+        )}
+
+        {/* Expandable Extra-Curricular Quick Bar */}
+        {showExtraCurricularBar && (
+          <div className="p-3.5 bg-gradient-to-r from-slate-900 via-blue-950 to-indigo-950 text-white rounded-xl shadow-xs border border-slate-800 animate-in fade-in space-y-2">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span className="font-bold">Upangaji wa Shughuli Maalum & Mapumziko:</span>
+                <span className="text-slate-300 text-[11px] hidden md:inline">Bofya shughuli kupanga muda na vyumba</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleOpenScheduleExtraCurricular()}
+                className="px-3 py-1 rounded-lg text-xs font-bold bg-white text-slate-900 hover:bg-slate-100 transition shadow-2xs flex items-center gap-1.5 cursor-pointer self-start sm:self-auto"
+              >
+                <Plus className="w-3.5 h-3.5 text-blue-600" />
+                <span>Panga Shughuli Nyingine</span>
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              {EXTRA_CURRICULAR_ACTIVITIES.map(act => (
+                <button
+                  key={act.id}
+                  type="button"
+                  onClick={() => handleOpenScheduleExtraCurricular(act)}
+                  style={{ backgroundColor: act.color }}
+                  className="px-2.5 py-1 rounded-lg text-[11px] font-bold text-white hover:brightness-110 active:scale-95 transition-all shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  title={`Panga ${act.name} kwenye ratiba`}
+                >
+                  {renderActivityIcon(act.icon, "w-3 h-3")}
+                  <span>{act.name}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* Conflict Bar Alert (if any teacher is double-booked or conflicts exist) */}
+      {(totalConflicts > 0 || integrityReport.criticalCount > 0) && (
+        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-rose-900 shadow-xs flex-wrap gap-3 no-print">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            <div className="text-xs">
+              <strong className="font-bold">Migongano ya Walimu Imegundulika: </strong>
+              <span>
+                Kuna vipindi {integrityReport.criticalCount || totalConflicts} ambapo mwalimu mmoja amepangwa madarasa mawili kwa wakati mmoja.
+              </span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIntegrityReportModalOpen(true)}
+              className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition shadow-xs flex items-center gap-1 cursor-pointer"
+            >
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>Kagua Migongano</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleResolveConflicts}
+              className="px-3 py-1 bg-white text-rose-600 border border-rose-200 rounded-lg text-xs font-black hover:bg-rose-50 transition shadow-xs flex items-center gap-1 cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Tatua Kiotomatiki</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ======================================================== */}
       {/* 1. GENERAL TIMETABLE TAB                                */}
       {/* ======================================================== */}
       {activeTab === 'general' && (
         <div className="space-y-6">
-          {/* Action Bar */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 no-print">
+          {/* Action & Filter Bar */}
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/90 shadow-xs flex flex-wrap items-center justify-between gap-3 no-print">
+            {/* Filter controls */}
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">Class:</span>
-              <select
-                value={selectedGeneralClass}
-                onChange={e => {
-                  setSelectedGeneralClass(e.target.value);
-                  setSelectedGeneralStream('All');
-                }}
-                className="px-3 py-1.5 text-xs font-bold border border-blue-300 rounded-lg bg-blue-50/70 text-blue-900 focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                title="Select Class to display timetable"
-              >
-                <option value="All">🏫 All Classes (Whole School)</option>
-                <optgroup label="NURSERY LEVEL">
-                  {NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                </optgroup>
-                <optgroup label="PRIMARY LEVEL (Std 1 - 7)">
-                  {PRIMARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                </optgroup>
-                <optgroup label="SECONDARY LEVEL (Form 1 - 6)">
-                  {SECONDARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                </optgroup>
-              </select>
-
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Stream:</span>
-              <select
-                value={selectedGeneralStream}
-                onChange={e => setSelectedGeneralStream(e.target.value)}
-                className="px-3 py-1.5 text-xs font-bold border border-emerald-300 rounded-lg bg-emerald-50/70 text-emerald-900 focus:ring-2 focus:ring-emerald-500 cursor-pointer"
-                title="Select Stream"
-              >
-                <option value="All">
-                  {selectedGeneralClass === 'All' ? 'All Streams' : `All Streams (${getStreamsForClass(selectedGeneralClass).join(', ')})`}
-                </option>
-                {selectedGeneralClass !== 'All' ? (
-                  getStreamsForClass(selectedGeneralClass).map(st => (
-                    <option key={st} value={st}>{st}</option>
-                  ))
-                ) : (
-                  Array.from(new Set(DEFAULT_CLASSES.flatMap(c => getStreamsForClass(c)))).map(st => (
-                    <option key={st} value={st}>{st}</option>
-                  ))
-                )}
-              </select>
-
-              <span className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Day:</span>
-              <select
-                value={selectedDayFilter}
-                onChange={e => setSelectedDayFilter(e.target.value)}
-                className="px-3 py-1.5 text-xs font-semibold border border-slate-300 rounded-lg bg-white cursor-pointer"
-              >
-                <option value="All">All Days</option>
-                {DAYS_OF_WEEK.map(d => (
-                  <option key={d} value={d}>{d}</option>
-                ))}
-              </select>
-
-              <div className="text-xs text-slate-500 hidden xl:flex items-center gap-1 ml-2">
-                <Move className="w-3.5 h-3.5 text-blue-500" />
-                <span>Drag slots to reschedule • Click any slot to edit</span>
+              <div className="flex items-center gap-1.5 bg-blue-50/70 border border-blue-200 px-2.5 py-1 rounded-xl">
+                <span className="text-[11px] font-bold text-blue-900 uppercase">Darasa:</span>
+                <select
+                  value={selectedGeneralClass}
+                  onChange={e => {
+                    setSelectedGeneralClass(e.target.value);
+                    setSelectedGeneralStream('All');
+                  }}
+                  className="text-xs font-bold bg-transparent text-blue-950 focus:outline-hidden cursor-pointer"
+                  title="Chagua darasa au shule nzima"
+                >
+                  <option value="All">🏫 All Classes (Whole School)</option>
+                  <optgroup label="NURSERY LEVEL">
+                    {NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </optgroup>
+                  <optgroup label="PRIMARY LEVEL (Std 1 - 7)">
+                    {PRIMARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </optgroup>
+                  <optgroup label="SECONDARY LEVEL (Form 1 - 6)">
+                    {SECONDARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                  </optgroup>
+                </select>
               </div>
-            </div>
 
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200 mr-2">
+              <div className="flex items-center gap-1.5 bg-emerald-50/70 border border-emerald-200 px-2.5 py-1 rounded-xl">
+                <span className="text-[11px] font-bold text-emerald-900 uppercase">Mkondo:</span>
+                <select
+                  value={selectedGeneralStream}
+                  onChange={e => setSelectedGeneralStream(e.target.value)}
+                  className="text-xs font-bold bg-transparent text-emerald-950 focus:outline-hidden cursor-pointer"
+                  title="Chagua mkondo wa darasa"
+                >
+                  <option value="All">
+                    {selectedGeneralClass === 'All' ? 'All Streams' : `All Streams (${getStreamsForClass(selectedGeneralClass).join(', ')})`}
+                  </option>
+                  {selectedGeneralClass !== 'All' ? (
+                    getStreamsForClass(selectedGeneralClass).map(st => (
+                      <option key={st} value={st}>{st}</option>
+                    ))
+                  ) : (
+                    Array.from(new Set(DEFAULT_CLASSES.flatMap(c => getStreamsForClass(c)))).map(st => (
+                      <option key={st} value={st}>{st}</option>
+                    ))
+                  )}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-xl">
+                <span className="text-[11px] font-bold text-slate-600 uppercase">Siku:</span>
+                <select
+                  value={selectedDayFilter}
+                  onChange={e => setSelectedDayFilter(e.target.value)}
+                  className="text-xs font-semibold bg-transparent text-slate-800 focus:outline-hidden cursor-pointer"
+                >
+                  <option value="All">Siku Zote (All Days)</option>
+                  {DAYS_OF_WEEK.map(d => (
+                    <option key={d} value={d}>{d}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Orientation toggle */}
+              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
                 <button
+                  type="button"
                   onClick={() => setPrintOrientation('portrait')}
-                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${
-                    printOrientation === 'portrait' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-700'
+                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                    printOrientation === 'portrait' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
                   Portrait
                 </button>
                 <button
+                  type="button"
                   onClick={() => setPrintOrientation('landscape')}
-                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${
-                    printOrientation === 'landscape' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-700'
+                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                    printOrientation === 'landscape' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
                   }`}
                 >
                   Landscape
                 </button>
               </div>
+            </div>
 
+            {/* Quick Export & Tool Actions */}
+            <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
                 onClick={() => setHighlightConstraintsInRed(!highlightConstraintsInRed)}
-                className={`px-3 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer border ${
+                className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border ${
                   highlightConstraintsInRed
-                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300 ring-2 ring-rose-500/20'
-                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
+                    ? 'bg-rose-50 text-rose-700 border-rose-300'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
                 }`}
-                title="Toggle red violation highlights on timetable grid for Max Lessons, Double Periods & Availability breaches"
+                title="Washa au zima viashiria vya hitilafu kwenye jedwali"
               >
-                <ShieldAlert className={`w-3.5 h-3.5 ${highlightConstraintsInRed ? 'text-rose-600 animate-pulse' : 'text-slate-400'}`} />
-                <span>Violations ({constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount})</span>
-                <span className={`w-2 h-2 rounded-full ${highlightConstraintsInRed ? 'bg-rose-600 animate-ping' : 'bg-slate-300'}`} />
-              </button>
-
-              <button
-                onClick={() => setIntegrityReportModalOpen(true)}
-                className={`px-3 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer border ${
-                  integrityReport.criticalCount > 0
-                    ? 'bg-rose-50 hover:bg-rose-100 text-rose-700 border-rose-300'
-                    : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-300'
-                }`}
-                title="Cross-reference timetable against institutional policies and teacher availability"
-              >
-                {integrityReport.criticalCount > 0 ? (
-                  <ShieldAlert className="w-3.5 h-3.5 text-rose-600" />
-                ) : (
-                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
-                )}
-                <span>Integrity Report ({integrityReport.score}%)</span>
-                {integrityReport.criticalCount > 0 && (
-                  <span className="w-2 h-2 rounded-full bg-rose-600 animate-ping" />
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setActiveTab('journal')}
-                className="px-3.5 py-2 text-xs font-black bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-slate-950 rounded-lg flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                title="Fungua Shajara ya Darasa (Class Journal)"
-              >
-                <BookOpen className="w-3.5 h-3.5" />
-                <span>Shajara ya Darasa (Class Journal)</span>
-              </button>
-
-
-
-              <button
-                onClick={() => {
-                  const scopeLabel = selectedGeneralClass === 'All' ? 'Whole School' : selectedGeneralClass;
-                  const streamLabel = selectedGeneralStream !== 'All' ? selectedGeneralStream : '';
-                  handleShareTimetableWhatsApp(`General Timetable - ${scopeLabel} ${streamLabel}`.trim());
-                }}
-                className="px-3 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
-                title="Send Timetable details to teachers and parents on WhatsApp"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>WhatsApp</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSnapshotTitle(`Master Timetable — ${new Date().toLocaleDateString()}`);
-                  setSaveSnapshotModalOpen(true);
-                }}
-                className="px-3.5 py-2 text-xs font-black bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-300 rounded-lg flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
-                title="Hifadhi toleo la sasa la ratiba hii kwenye mkusanyiko wa Ratiba Zilizohifadhiwa (Snapshots)"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Hifadhi Ratiba (Snapshot)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleSavePermanentlyToDatabase}
-                disabled={isSavingDb}
-                className={`px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 shadow-sm transition-all cursor-pointer ${
-                  saveSuccessNotice
-                    ? 'bg-emerald-600 text-white animate-pulse'
-                    : 'bg-emerald-700 hover:bg-emerald-800 text-white'
-                }`}
-                title="Hifadhi Ratiba yote kudumu kwenye Database (SQL & Firestore) isipotee ukilogout"
-              >
-                {saveSuccessNotice ? (
-                  <>
-                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
-                    <span>Imehifadhiwa Kudumu! ✓</span>
-                  </>
-                ) : isSavingDb ? (
-                  <>
-                    <Zap className="w-3.5 h-3.5 animate-spin" />
-                    <span>Inahifadhi...</span>
-                  </>
-                ) : (
-                  <>
-                    <Save className="w-3.5 h-3.5" />
-                    <span>Hifadhi Kudumu (Save DB)</span>
-                  </>
-                )}
+                <ShieldAlert className={`w-3.5 h-3.5 ${highlightConstraintsInRed ? 'text-rose-600' : 'text-slate-400'}`} />
+                <span>Hitilafu ({constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount})</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleExportExcel}
-                className="px-3 py-2 text-xs font-bold bg-white text-emerald-800 border border-emerald-300 rounded-lg hover:bg-emerald-50 flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
-                title="Pakua Ratiba Kuu kwenye Excel (.xlsx) ikiwa imepangwa na kusanifiwa kikamilifu"
+                className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                title="Pakua Ratiba Kuu kwenye Excel (.xlsx)"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Pakua Excel (.xlsx)</span>
+                <span>Excel</span>
               </button>
 
               <button
@@ -1484,25 +1327,55 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     selectedClass: selectedGeneralClass,
                     selectedStream: selectedGeneralStream,
                     selectedDay: selectedDayFilter,
-                    orientation: 'landscape'
+                    orientation: printOrientation
                   });
                 }}
-                className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
-                title="Generate high-quality, formatted PDF export of the master timetable with all columns fitting in A4 landscape using jsPDF"
+                className="px-2.5 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                title="Pakua PDF ya A4"
               >
-                <Download className="w-3.5 h-3.5 text-white" />
-                <span>Download PDF (A4)</span>
+                <Download className="w-3.5 h-3.5" />
+                <span>PDF (A4)</span>
               </button>
 
               <button
                 type="button"
-                onClick={() => handlePrintTimetable(true)}
-                className="px-3.5 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
-                title="Print Master Timetable with dedicated print CSS layout"
-                data-testid="print-master-timetable-action-btn"
+                onClick={() => {
+                  const scopeLabel = selectedGeneralClass === 'All' ? 'Whole School' : selectedGeneralClass;
+                  const streamLabel = selectedGeneralStream !== 'All' ? selectedGeneralStream : '';
+                  handleShareTimetableWhatsApp(`General Timetable - ${scopeLabel} ${streamLabel}`.trim());
+                }}
+                className="px-2.5 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                title="Tuma ratiba kupitia WhatsApp"
               >
-                <Printer className="w-3.5 h-3.5" />
-                <span>Print Timetable</span>
+                <Share2 className="w-3.5 h-3.5" />
+                <span>WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setSnapshotTitle(`Master Timetable — ${new Date().toLocaleDateString()}`);
+                  setSaveSnapshotModalOpen(true);
+                }}
+                className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                title="Hifadhi toleo la sasa la ratiba (Snapshot)"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Snapshot</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (window.confirm("Je, una uhakika unataka kusafisha na kuweka upya vipindi vyote vya ratiba hii?")) {
+                    onUpdateAssignments([]);
+                  }
+                }}
+                className="px-2 py-1.5 text-xs font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl flex items-center gap-1 cursor-pointer transition"
+                title="Weka upya (Reset) vipindi vyote"
+              >
+                <RefreshCw className="w-3 h-3" />
+                <span>Reset</span>
               </button>
             </div>
           </div>
@@ -1644,7 +1517,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                             <table className="w-full text-left border-collapse">
                               <thead>
                                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] text-slate-600 font-bold uppercase tracking-wider">
-                                  <th className="p-2.5 w-32 border-r border-slate-200">Stream</th>
+                                  <th className="p-2.5 w-32 border-r border-slate-200 sticky left-0 z-20 bg-slate-100 shadow-2xs font-extrabold text-slate-700">Stream</th>
                                   {dayPeriods.map(p => {
                                     const periodExtra = getExtraCurricularInfo(p.name);
                                     const isBreakfast = p.name.toLowerCase().includes('breakfast');
@@ -1715,7 +1588,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                 {streams.map(stream => {
                                   return (
                                     <tr key={stream} className="border-b border-slate-100 hover:bg-slate-50/50">
-                                      <td className="p-2.5 border-r border-slate-200 font-bold text-xs bg-slate-50/70">
+                                      <td className="p-2.5 border-r border-slate-200 font-bold text-xs sticky left-0 z-10 bg-slate-50 shadow-2xs">
                                         <span
                                           style={{
                                             backgroundColor: formTheme.lightBg,

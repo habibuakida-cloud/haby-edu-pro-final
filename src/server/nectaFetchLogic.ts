@@ -20,15 +20,16 @@ export interface NectaFetchResult {
   error?: string;
 }
 
-// Initialize Gemini on server for intelligent fallback parsing
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY,
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
+function getAiClient() {
+  return new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY || 'PLACEHOLDER_KEY',
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
     }
-  }
-});
+  });
+}
 
 /**
  * Clean HTML tags and entities to plain text
@@ -288,6 +289,7 @@ Return ONLY a valid JSON object matching this structure:
 }
 `;
 
+    const ai = getAiClient();
     const models = ['gemini-3.5-flash', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-latest'];
     let response = null;
     let lastErr = null;

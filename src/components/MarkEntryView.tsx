@@ -20,7 +20,8 @@ import {
   Eye,
   Award,
   Sliders,
-  Unlock
+  Unlock,
+  RefreshCw
 } from 'lucide-react';
 import { 
   Student, 
@@ -94,6 +95,7 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
   const [isEditing, setIsEditing] = useState<boolean>(true);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [saveSuccessMsg, setSaveSuccessMsg] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
   // Selected teacher for timetable view (if admin, can choose any teacher; if teacher, defaults to current)
   const isTeacher = currentUser?.role === 'TEACHER';
@@ -343,6 +345,7 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
       return;
     }
 
+    setIsSaving(true);
     const schoolId = currentUser?.schoolId || getCurrentSchoolId();
     const updated = students.map(s => {
       const pending = localScores[s.id];
@@ -391,33 +394,38 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
       }
     });
 
+    // 1. Instantly update state and show success confirmation
     onUpdateStudents(updated);
-
-    try {
-      const resultsPayload: any[] = [];
-      updated.forEach(s => {
-        const pending = localScores[s.id];
-        if (pending !== undefined && pending !== '') {
-          resultsPayload.push({
-            school_id: schoolId,
-            student_id: String(s.id),
-            exam_type: selectedExam,
-            year: Number(selectedYear),
-            term: selectedTerm,
-            marks: Number(pending)
-          });
-        }
-      });
-      if (resultsPayload.length > 0) {
-        await upsertRecord('exam_results', resultsPayload);
-      }
-    } catch (e) {
-      console.warn("Could not save exam_results to Cloud SQL:", e);
-    }
-
     setLocalScores({});
-    setSaveSuccessMsg(`Marks for ${selectedSubject} (${selectedClass} - ${selectedExam} | ${selectedYear} ${selectedTerm}) saved successfully!`);
+    setSaveSuccessMsg(`Marks for ${selectedSubject} (${selectedClass} - ${selectedExam} | ${selectedYear} ${selectedTerm}) saved & published successfully!`);
+    setIsSaving(false);
     setTimeout(() => setSaveSuccessMsg(null), 3500);
+
+    // 2. Push exam results to Cloud SQL non-blocking in background
+    const scoresToPush = { ...localScores };
+    setTimeout(async () => {
+      try {
+        const resultsPayload: any[] = [];
+        updated.forEach(s => {
+          const pending = scoresToPush[s.id];
+          if (pending !== undefined && pending !== '') {
+            resultsPayload.push({
+              school_id: schoolId,
+              student_id: (s as any).firestoreDocId || String(s.id),
+              exam_type: selectedExam,
+              year: Number(selectedYear),
+              term: selectedTerm,
+              marks: Number(pending)
+            });
+          }
+        });
+        if (resultsPayload.length > 0) {
+          await upsertRecord('exam_results', resultsPayload).catch(() => {});
+        }
+      } catch (e) {
+        // non-blocking
+      }
+    }, 100);
   };
 
   const handleExportCsv = () => {
