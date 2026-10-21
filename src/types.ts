@@ -62,6 +62,11 @@ export interface Student {
   primaryGrade?: 'A' | 'B' | 'C' | 'D' | 'E';
   passStatus?: 'AMEFAULU' | 'HAJAFAULU' | string;
   gpa?: number;
+  classRank?: number | string;
+  streamRank?: number | string;
+  overallRank?: number | string;
+  percentile?: number;
+  meanScore?: number;
   reportCardData?: StudentReportCardData;
   passportPhoto?: string; // base64 / URL for passport size photo
   registeredAt?: string;

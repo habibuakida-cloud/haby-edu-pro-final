@@ -36,7 +36,8 @@ import {
   Edit3,
   LayoutGrid,
   Save,
-  CheckCircle2
+  CheckCircle2,
+  Settings
 } from 'lucide-react';
 import { 
   TimetableAssignment, 
@@ -190,8 +191,11 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   }, [initialTab]);
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('All');
   const [selectedClassFilter, setSelectedClassFilter] = useState<string>('Form 1');
+  const [selectedClassStreamFilter, setSelectedClassStreamFilter] = useState<string>('All');
   const [selectedGeneralClass, setSelectedGeneralClass] = useState<string>('Form 1');
   const [selectedGeneralStream, setSelectedGeneralStream] = useState<string>('All');
+  const [selectedLevelFilter, setSelectedLevelFilter] = useState<'ALL' | 'SECONDARY' | 'PRIMARY' | 'NURSERY'>('SECONDARY');
+  const [activeWholeSchoolDay, setActiveWholeSchoolDay] = useState<string>('Monday');
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<number>(teachers?.[0]?.id || 0);
 
   React.useEffect(() => {
@@ -836,41 +840,46 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       {/* 1. UNIFIED COMMAND HEADER & GLOBAL ACTIONS */}
       <div className="bg-white border border-slate-200/90 rounded-2xl p-4 sm:p-5 shadow-xs space-y-4 no-print">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          {/* Title & Live Status Badges */}
+          {/* Title & Live Status */}
           <div className="flex items-center gap-3.5">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-blue-600 via-indigo-600 to-indigo-800 text-white flex items-center justify-center shadow-sm shrink-0">
-              <Calendar className="w-6 h-6" />
+            <div className="w-11 h-11 rounded-xl bg-slate-900 text-white flex items-center justify-center shadow-xs shrink-0">
+              <Calendar className="w-5 h-5 text-blue-400" />
             </div>
             <div>
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg sm:text-xl font-black text-slate-900 tracking-tight">
-                  Ratiba ya Masomo (School Timetable)
+                  Ratiba ya Masomo
                 </h2>
-                <span className="px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-xs font-bold font-mono">
-                  {assignments.length} Vipindi
-                </span>
-                {integrityReport.criticalCount > 0 || totalConflicts > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => setIntegrityReportModalOpen(true)}
-                    className="px-2.5 py-0.5 rounded-full bg-rose-100 hover:bg-rose-200 text-rose-800 border border-rose-300 text-xs font-bold flex items-center gap-1 cursor-pointer transition active:scale-95"
-                    title="Bofya kukagua na kutatua migongano ya walimu"
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
-                    <span>{integrityReport.criticalCount || totalConflicts} Migongano</span>
-                  </button>
-                ) : (
-                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 text-xs font-bold flex items-center gap-1">
-                    <CheckCircle className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>Zero Migongano ✓</span>
-                  </span>
-                )}
-                <span className="hidden sm:inline-flex px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">
-                  Ulinganifu {integrityReport.score}%
-                </span>
+                <div className="flex items-center gap-2 text-xs text-slate-500 font-medium">
+                  <span>{assignments.length} Vipindi vilivyopangwa</span>
+                  <span aria-hidden="true">·</span>
+                  <span>Ulinganifu {integrityReport.score}%</span>
+                  {integrityReport.criticalCount > 0 || totalConflicts > 0 ? (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <button
+                        type="button"
+                        onClick={() => setIntegrityReportModalOpen(true)}
+                        className="text-rose-600 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                        title="Bofya kukagua migongano"
+                      >
+                        <AlertTriangle className="w-3.5 h-3.5 text-rose-600 inline" />
+                        <span>{integrityReport.criticalCount || totalConflicts} Migongano</span>
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span aria-hidden="true">·</span>
+                      <span className="text-emerald-600 font-semibold flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        <span>Zero Migongano</span>
+                      </span>
+                    </>
+                  )}
+                </div>
               </div>
               <p className="text-xs text-slate-500 font-medium mt-0.5">
-                Upangaji na usimamizi wa ratiba ya masomo, walimu, na vipindi maalum
+                Upangaji na usimamizi wa ratiba ya masomo, vipindi na walimu
               </p>
             </div>
           </div>
@@ -880,10 +889,10 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             <button
               type="button"
               onClick={() => setAiModalOpen(true)}
-              className="px-3.5 py-2 bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95 border border-indigo-400"
+              className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
               title="Tumia Msaidizi wa AI kujaza ratiba kiotomatiki kulingana na sera na walimu"
             >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
               <span>⚡ Jaza na AI</span>
             </button>
 
@@ -910,9 +919,9 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               className={`px-3 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer border ${
                 showExtraCurricularBar
                   ? 'bg-amber-100 text-amber-900 border-amber-300'
-                  : 'bg-amber-50 hover:bg-amber-100 text-amber-800 border-amber-200'
+                  : 'bg-white hover:bg-slate-50 text-slate-700 border-slate-200'
               }`}
-              title="Fungua orodha ya shughuli maalum (Baraza, Dini, Chakula, Michezo, nk.)"
+              title="Fungua shughuli maalum (Baraza, Dini, Chakula, Michezo)"
             >
               <Coffee className="w-3.5 h-3.5 text-amber-600" />
               <span>Shughuli Maalum</span>
@@ -924,15 +933,15 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               disabled={isSavingDb}
               className={`px-3.5 py-2 text-xs font-bold rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer ${
                 saveSuccessNotice
-                  ? 'bg-emerald-600 text-white animate-pulse'
+                  ? 'bg-emerald-600 text-white'
                   : 'bg-emerald-700 hover:bg-emerald-800 text-white'
               }`}
-              title="Hifadhi mabadiliko ya ratiba kudumu kwenye database (Cloud SQL & Firestore)"
+              title="Hifadhi mabadiliko ya ratiba kudumu kwenye database"
             >
               {saveSuccessNotice ? (
                 <>
                   <CheckCircle2 className="w-3.5 h-3.5 text-white" />
-                  <span>Imehifadhiwa! ✓</span>
+                  <span>Imehifadhiwa!</span>
                 </>
               ) : isSavingDb ? (
                 <>
@@ -950,168 +959,171 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             <button
               type="button"
               onClick={() => handlePrintTimetable()}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer border border-blue-500"
+              className="px-3.5 py-2 bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
               title="Chapisha (Print) Ratiba ya Masomo"
               data-testid="print-timetable-button"
             >
-              <Printer className="w-3.5 h-3.5" />
+              <Printer className="w-3.5 h-3.5 text-slate-600" />
               <span>Print</span>
             </button>
           </div>
         </div>
 
-        {/* 2. CATEGORIZED TAB NAVIGATION */}
-        <div className="pt-3 border-t border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Main Roster Views */}
-          <div className="flex flex-wrap items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => setActiveTab('general')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'general'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
-              }`}
-            >
-              <Calendar className="w-3.5 h-3.5" />
-              <span>Ratiba Kuu (Master)</span>
-            </button>
+        {/* 2. PRIMARY TAB NAVIGATION */}
+        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => setActiveTab('general')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'general'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+            }`}
+          >
+            <Calendar className="w-3.5 h-3.5" />
+            <span>Ratiba Kuu (Master)</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('class')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'class'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Kwa Darasa (Class)</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('class')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'class'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Kwa Darasa (Class)</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('teacher')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'teacher'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
-              }`}
-            >
-              <Clock className="w-3.5 h-3.5" />
-              <span>Kwa Mwalimu (Teacher)</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('teacher')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'teacher'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+            }`}
+          >
+            <Clock className="w-3.5 h-3.5" />
+            <span>Kwa Mwalimu (Teacher)</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('graphical')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'graphical'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
-              }`}
-            >
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Mwonekano wa Grafu</span>
-            </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('graphical')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'graphical'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+            }`}
+          >
+            <LayoutGrid className="w-3.5 h-3.5" />
+            <span>Mwonekano wa Grafu</span>
+          </button>
 
-            <button
-              type="button"
-              onClick={() => setActiveTab('journal')}
-              className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-                activeTab === 'journal'
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
-              }`}
-            >
-              <BookOpen className="w-3.5 h-3.5" />
-              <span>Shajara ya Darasa (Journal)</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('journal')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'journal'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+            }`}
+          >
+            <BookOpen className="w-3.5 h-3.5" />
+            <span>Shajara ya Darasa (Journal)</span>
+          </button>
 
-          {/* Secondary Settings & Setup Dropdown */}
-          <div className="flex items-center gap-2 self-start md:self-auto">
-            <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden sm:inline">
-              Zana & Mipangilio:
-            </span>
-            <select
-              value={['settings', 'allocations', 'teacherAssignments', 'master', 'generalEntry', 'teacherEntry', 'saved', 'policies', 'constraints', 'integrity'].includes(activeTab) ? activeTab : 'more'}
-              onChange={(e) => {
-                if (e.target.value !== 'more') {
-                  setActiveTab(e.target.value as any);
-                }
-              }}
-              className="px-3 py-1.5 text-xs font-bold rounded-xl border border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 cursor-pointer focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="more" disabled>⚙️ Chagua Zana / Mipangilio...</option>
-              <option value="settings">⏱️ Vipindi & Saa (Period Settings)</option>
-              <option value="allocations">📚 Mgawanyo wa Masomo (Allocations)</option>
-              <option value="teacherAssignments">👥 Upangaji wa Walimu (Assignments)</option>
-              <option value="master">✍️ Master Assignment</option>
-              <option value="generalEntry">📝 General Manual Entry</option>
-              <option value="teacherEntry">📋 Fomu ya Mwalimu (Teacher Entry)</option>
-              <option value="saved">💾 Ratiba Zilizohifadhiwa ({savedTimetableRecords.length})</option>
-              <option value="policies">📜 Sera za Shule (Policies)</option>
-              <option value="constraints">⚖️ Sheria & Ukaguzi (Audit)</option>
-              <option value="integrity">🛡️ Integrity Audit Report ({integrityReport.score}%)</option>
-            </select>
-          </div>
+          <button
+            type="button"
+            onClick={() => setActiveTab('settings')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              ['settings', 'allocations', 'teacherAssignments', 'master', 'generalEntry', 'teacherEntry', 'saved', 'policies', 'constraints', 'integrity'].includes(activeTab)
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>Mipangilio &amp; Zana</span>
+          </button>
         </div>
 
         {/* Secondary Sub-Bar if in Settings / Setup Mode */}
         {['settings', 'allocations', 'teacherAssignments', 'master', 'generalEntry', 'teacherEntry', 'saved', 'policies', 'constraints', 'integrity'].includes(activeTab) && (
           <div className="p-2.5 bg-slate-50 border border-slate-200/80 rounded-xl flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5 text-xs">
-              <span className="font-bold text-slate-500 mr-1">Mipangilio Inayotumika:</span>
+              <span className="font-bold text-slate-500 mr-1 text-[11px] uppercase">Zana &amp; Mipangilio:</span>
               <button
                 type="button"
                 onClick={() => setActiveTab('settings')}
                 className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'settings' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
               >
-                Vipindi & Saa
+                ⏱️ Vipindi &amp; Saa
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('allocations')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'allocations' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'allocations' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
               >
-                Mgawanyo
+                📚 Mgawanyo
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('teacherAssignments')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'teacherAssignments' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'teacherAssignments' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
               >
-                Walimu
+                👥 Walimu
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('master')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'master' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'master' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
               >
-                Master Entry
+                ✍️ Master Entry
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('generalEntry')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'generalEntry' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                📝 General Entry
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('teacherEntry')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'teacherEntry' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                📋 Fomu ya Mwalimu
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('policies')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'policies' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'policies' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
               >
-                Sera
+                📜 Sera
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('constraints')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'constraints' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'constraints' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
               >
-                Ukaguzi
+                ⚖️ Ukaguzi
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab('integrity')}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'integrity' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+              >
+                🛡️ Integrity ({integrityReport.score}%)
               </button>
               <button
                 type="button"
                 onClick={() => setActiveTab('saved')}
-                className={`px-2.5 py-1 rounded-lg font-bold transition ${activeTab === 'saved' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
+                className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'saved' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
               >
-                Snapshots ({savedTimetableRecords.length})
+                💾 Snapshots ({savedTimetableRecords.length})
               </button>
             </div>
             <button
@@ -1200,183 +1212,253 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       {activeTab === 'general' && (
         <div className="space-y-6">
           {/* Action & Filter Bar */}
-          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/90 shadow-xs flex flex-wrap items-center justify-between gap-3 no-print">
-            {/* Filter controls */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="flex items-center gap-1.5 bg-blue-50/70 border border-blue-200 px-2.5 py-1 rounded-xl">
-                <span className="text-[11px] font-bold text-blue-900 uppercase">Darasa:</span>
-                <select
-                  value={selectedGeneralClass}
-                  onChange={e => {
-                    setSelectedGeneralClass(e.target.value);
-                    setSelectedGeneralStream('All');
-                  }}
-                  className="text-xs font-bold bg-transparent text-blue-950 focus:outline-hidden cursor-pointer"
-                  title="Chagua darasa au shule nzima"
-                >
-                  <option value="All">🏫 All Classes (Whole School)</option>
-                  <optgroup label="NURSERY LEVEL">
-                    {NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </optgroup>
-                  <optgroup label="PRIMARY LEVEL (Std 1 - 7)">
-                    {PRIMARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </optgroup>
-                  <optgroup label="SECONDARY LEVEL (Form 1 - 6)">
-                    {SECONDARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
-                  </optgroup>
-                </select>
-              </div>
-
-              <div className="flex items-center gap-1.5 bg-emerald-50/70 border border-emerald-200 px-2.5 py-1 rounded-xl">
-                <span className="text-[11px] font-bold text-emerald-900 uppercase">Mkondo:</span>
-                <select
-                  value={selectedGeneralStream}
-                  onChange={e => setSelectedGeneralStream(e.target.value)}
-                  className="text-xs font-bold bg-transparent text-emerald-950 focus:outline-hidden cursor-pointer"
-                  title="Chagua mkondo wa darasa"
-                >
-                  <option value="All">
-                    {selectedGeneralClass === 'All' ? 'All Streams' : `All Streams (${getStreamsForClass(selectedGeneralClass).join(', ')})`}
-                  </option>
-                  {selectedGeneralClass !== 'All' ? (
-                    getStreamsForClass(selectedGeneralClass).map(st => (
-                      <option key={st} value={st}>{st}</option>
-                    ))
-                  ) : (
-                    Array.from(new Set(DEFAULT_CLASSES.flatMap(c => getStreamsForClass(c)))).map(st => (
-                      <option key={st} value={st}>{st}</option>
-                    ))
-                  )}
-                </select>
-              </div>
-
-              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-xl">
-                <span className="text-[11px] font-bold text-slate-600 uppercase">Siku:</span>
-                <select
-                  value={selectedDayFilter}
-                  onChange={e => setSelectedDayFilter(e.target.value)}
-                  className="text-xs font-semibold bg-transparent text-slate-800 focus:outline-hidden cursor-pointer"
-                >
-                  <option value="All">Siku Zote (All Days)</option>
-                  {DAYS_OF_WEEK.map(d => (
-                    <option key={d} value={d}>{d}</option>
+          <div className="bg-white p-3.5 sm:p-4 rounded-2xl border border-slate-200/90 shadow-xs space-y-3 no-print">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              {/* Level & Class Filters */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Level Selector */}
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-xl border border-slate-200 text-xs font-bold">
+                  {(['ALL', 'SECONDARY', 'PRIMARY', 'NURSERY'] as const).map(lvl => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => {
+                        setSelectedLevelFilter(lvl);
+                        if (lvl === 'SECONDARY' && !SECONDARY_CLASSES.includes(selectedGeneralClass)) {
+                          setSelectedGeneralClass('Form 1');
+                        } else if (lvl === 'PRIMARY' && !PRIMARY_CLASSES.includes(selectedGeneralClass)) {
+                          setSelectedGeneralClass('Standard 1');
+                        } else if (lvl === 'NURSERY' && !NURSERY_CLASSES.includes(selectedGeneralClass)) {
+                          setSelectedGeneralClass('Nursery 1');
+                        }
+                      }}
+                      className={`px-2.5 py-1 rounded-lg transition-all cursor-pointer ${
+                        selectedLevelFilter === lvl
+                          ? 'bg-white text-blue-700 shadow-xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      {lvl === 'ALL' ? 'Ngazi Zote' : lvl === 'SECONDARY' ? 'Sekondari' : lvl === 'PRIMARY' ? 'Msingi' : 'Awali'}
+                    </button>
                   ))}
-                </select>
+                </div>
+
+                {/* Class Dropdown */}
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase">Darasa:</span>
+                  <select
+                    value={selectedGeneralClass}
+                    onChange={e => {
+                      setSelectedGeneralClass(e.target.value);
+                      setSelectedGeneralStream('All');
+                    }}
+                    className="text-xs font-bold bg-transparent text-slate-900 focus:outline-hidden cursor-pointer"
+                  >
+                    <option value="All">🏫 Madarasa Yote (Whole School)</option>
+                    {(selectedLevelFilter === 'ALL' || selectedLevelFilter === 'SECONDARY') && (
+                      <optgroup label="SEKONDARI (Form 1 - 6)">
+                        {SECONDARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </optgroup>
+                    )}
+                    {(selectedLevelFilter === 'ALL' || selectedLevelFilter === 'PRIMARY') && (
+                      <optgroup label="MSINGI (Std 1 - 7)">
+                        {PRIMARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </optgroup>
+                    )}
+                    {(selectedLevelFilter === 'ALL' || selectedLevelFilter === 'NURSERY') && (
+                      <optgroup label="AWALI (Nursery)">
+                        {NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                      </optgroup>
+                    )}
+                  </select>
+                </div>
+
+                {/* Stream Dropdown */}
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase">Mkondo:</span>
+                  <select
+                    value={selectedGeneralStream}
+                    onChange={e => setSelectedGeneralStream(e.target.value)}
+                    className="text-xs font-bold bg-transparent text-slate-900 focus:outline-hidden cursor-pointer"
+                  >
+                    <option value="All">Mikondo Yote</option>
+                    {selectedGeneralClass !== 'All' ? (
+                      getStreamsForClass(selectedGeneralClass).map(st => (
+                        <option key={st} value={st}>{st}</option>
+                      ))
+                    ) : (
+                      Array.from(new Set(DEFAULT_CLASSES.flatMap(c => getStreamsForClass(c)))).map(st => (
+                        <option key={st} value={st}>{st}</option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                {/* Day Dropdown */}
+                <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-xl">
+                  <span className="text-[11px] font-bold text-slate-500 uppercase">Siku:</span>
+                  <select
+                    value={selectedDayFilter}
+                    onChange={e => setSelectedDayFilter(e.target.value)}
+                    className="text-xs font-bold bg-transparent text-slate-900 focus:outline-hidden cursor-pointer"
+                  >
+                    <option value="All">Siku Zote (All Days)</option>
+                    {DAYS_OF_WEEK.map(d => (
+                      <option key={d} value={d}>{d}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Orientation toggle */}
+                <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => setPrintOrientation('portrait')}
+                    className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                      printOrientation === 'portrait' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Portrait
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPrintOrientation('landscape')}
+                    className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
+                      printOrientation === 'landscape' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
+                    }`}
+                  >
+                    Landscape
+                  </button>
+                </div>
               </div>
 
-              {/* Orientation toggle */}
-              <div className="flex items-center bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+              {/* Quick Actions (Excel, PDF, WhatsApp, Snapshot) */}
+              <div className="flex flex-wrap items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={() => setPrintOrientation('portrait')}
-                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
-                    printOrientation === 'portrait' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                  }`}
+                  onClick={handleExportExcel}
+                  className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                  title="Pakua Ratiba Kuu kwenye Excel (.xlsx)"
                 >
-                  Portrait
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>Excel</span>
                 </button>
+
                 <button
                   type="button"
-                  onClick={() => setPrintOrientation('landscape')}
-                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all cursor-pointer ${
-                    printOrientation === 'landscape' ? 'bg-white text-blue-700 shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                  }`}
+                  onClick={() => {
+                    exportTimetablePDF({
+                      viewMode: 'general',
+                      assignments,
+                      teachers,
+                      periodSettings,
+                      streamSettings,
+                      schoolInfo,
+                      schoolName,
+                      selectedClass: selectedGeneralClass,
+                      selectedStream: selectedGeneralStream,
+                      selectedDay: selectedDayFilter,
+                      orientation: printOrientation
+                    });
+                  }}
+                  className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                  title="Pakua PDF ya A4"
                 >
-                  Landscape
+                  <Download className="w-3.5 h-3.5 text-rose-600" />
+                  <span>PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const scopeLabel = selectedGeneralClass === 'All' ? 'Whole School' : selectedGeneralClass;
+                    const streamLabel = selectedGeneralStream !== 'All' ? selectedGeneralStream : '';
+                    handleShareTimetableWhatsApp(`General Timetable - ${scopeLabel} ${streamLabel}`.trim());
+                  }}
+                  className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                  title="Tuma ratiba kupitia WhatsApp"
+                >
+                  <Share2 className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>WhatsApp</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSnapshotTitle(`Master Timetable — ${new Date().toLocaleDateString()}`);
+                    setSaveSnapshotModalOpen(true);
+                  }}
+                  className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                  title="Hifadhi snapshot ya toleo hili la ratiba"
+                >
+                  <Save className="w-3.5 h-3.5 text-slate-500" />
+                  <span>Snapshot</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setHighlightConstraintsInRed(!highlightConstraintsInRed)}
+                  className={`px-2 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1 transition-all cursor-pointer border ${
+                    highlightConstraintsInRed
+                      ? 'bg-rose-50 text-rose-700 border-rose-300'
+                      : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                  }`}
+                  title="Washa au zima viashiria vya hitilafu kwenye jedwali"
+                >
+                  <ShieldAlert className={`w-3.5 h-3.5 ${highlightConstraintsInRed ? 'text-rose-600' : 'text-slate-400'}`} />
+                  <span>Hitilafu ({constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount})</span>
                 </button>
               </div>
             </div>
 
-            {/* Quick Export & Tool Actions */}
-            <div className="flex flex-wrap items-center gap-1.5">
+            {/* Quick Class Pills for the selected level */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mr-1">Madarasa:</span>
               <button
                 type="button"
-                onClick={() => setHighlightConstraintsInRed(!highlightConstraintsInRed)}
-                className={`px-2.5 py-1.5 text-xs font-bold rounded-xl flex items-center gap-1.5 transition-all cursor-pointer border ${
-                  highlightConstraintsInRed
-                    ? 'bg-rose-50 text-rose-700 border-rose-300'
-                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                onClick={() => {
+                  setSelectedGeneralClass('All');
+                  setSelectedGeneralStream('All');
+                }}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  selectedGeneralClass === 'All'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200'
                 }`}
-                title="Washa au zima viashiria vya hitilafu kwenye jedwali"
               >
-                <ShieldAlert className={`w-3.5 h-3.5 ${highlightConstraintsInRed ? 'text-rose-600' : 'text-slate-400'}`} />
-                <span>Hitilafu ({constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount})</span>
+                🏫 Shule Nzima (All)
               </button>
-
-              <button
-                type="button"
-                onClick={handleExportExcel}
-                className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
-                title="Pakua Ratiba Kuu kwenye Excel (.xlsx)"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span>Excel</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  exportTimetablePDF({
-                    viewMode: 'general',
-                    assignments,
-                    teachers,
-                    periodSettings,
-                    streamSettings,
-                    schoolInfo,
-                    schoolName,
-                    selectedClass: selectedGeneralClass,
-                    selectedStream: selectedGeneralStream,
-                    selectedDay: selectedDayFilter,
-                    orientation: printOrientation
-                  });
-                }}
-                className="px-2.5 py-1.5 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
-                title="Pakua PDF ya A4"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>PDF (A4)</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const scopeLabel = selectedGeneralClass === 'All' ? 'Whole School' : selectedGeneralClass;
-                  const streamLabel = selectedGeneralStream !== 'All' ? selectedGeneralStream : '';
-                  handleShareTimetableWhatsApp(`General Timetable - ${scopeLabel} ${streamLabel}`.trim());
-                }}
-                className="px-2.5 py-1.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
-                title="Tuma ratiba kupitia WhatsApp"
-              >
-                <Share2 className="w-3.5 h-3.5" />
-                <span>WhatsApp</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setSnapshotTitle(`Master Timetable — ${new Date().toLocaleDateString()}`);
-                  setSaveSnapshotModalOpen(true);
-                }}
-                className="px-2.5 py-1.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
-                title="Hifadhi toleo la sasa la ratiba (Snapshot)"
-              >
-                <Save className="w-3.5 h-3.5" />
-                <span>Snapshot</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  if (window.confirm("Je, una uhakika unataka kusafisha na kuweka upya vipindi vyote vya ratiba hii?")) {
-                    onUpdateAssignments([]);
-                  }
-                }}
-                className="px-2 py-1.5 text-xs font-bold text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-xl flex items-center gap-1 cursor-pointer transition"
-                title="Weka upya (Reset) vipindi vyote"
-              >
-                <RefreshCw className="w-3 h-3" />
-                <span>Reset</span>
-              </button>
+              {(selectedLevelFilter === 'SECONDARY'
+                ? SECONDARY_CLASSES
+                : selectedLevelFilter === 'PRIMARY'
+                ? PRIMARY_CLASSES
+                : selectedLevelFilter === 'NURSERY'
+                ? NURSERY_CLASSES
+                : DEFAULT_CLASSES
+              ).map(cName => {
+                const isSelected = selectedGeneralClass === cName;
+                const hasLessons = (assignments || []).some(a => a && a.className === cName);
+                return (
+                  <button
+                    key={cName}
+                    type="button"
+                    onClick={() => {
+                      setSelectedGeneralClass(cName);
+                      setSelectedGeneralStream('All');
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                      isSelected
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                    }`}
+                  >
+                    <span>{cName}</span>
+                    {hasLessons && (
+                      <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-emerald-500'}`} />
+                    )}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -1467,7 +1549,20 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
                   {/* Day Grid: Shows selected class/stream or whole school */}
                   <div className="p-4 space-y-4">
-                    {(selectedGeneralClass === 'All' ? DEFAULT_CLASSES : [selectedGeneralClass]).map(className => {
+                    {(selectedGeneralClass === 'All'
+                      ? (selectedLevelFilter === 'SECONDARY'
+                          ? SECONDARY_CLASSES
+                          : selectedLevelFilter === 'PRIMARY'
+                          ? PRIMARY_CLASSES
+                          : selectedLevelFilter === 'NURSERY'
+                          ? NURSERY_CLASSES
+                          : DEFAULT_CLASSES.filter(c =>
+                              (assignments || []).some(a => a && a.className === c) ||
+                              ['Form 1', 'Form 2'].includes(c)
+                            )
+                        )
+                      : [selectedGeneralClass]
+                    ).map(className => {
                       const formTheme = getFormStreamTheme(className);
                       const allStreams = getStreamsForClass(className);
                       const streams = selectedGeneralStream === 'All'
@@ -1514,7 +1609,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
                           {/* Matrix Table */}
                           <div className="overflow-x-auto">
-                            <table className="w-full text-left border-collapse">
+                            <table className="w-full text-left border-collapse min-w-[760px]">
                               <thead>
                                 <tr className="bg-slate-50 border-b border-slate-200 text-[11px] text-slate-600 font-bold uppercase tracking-wider">
                                   <th className="p-2.5 w-32 border-r border-slate-200 sticky left-0 z-20 bg-slate-100 shadow-2xs font-extrabold text-slate-700">Stream</th>
@@ -1966,42 +2061,74 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             </div>
           </div>
 
-          {/* Quick Stream Tabs for the selected level */}
-          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 shadow-xs space-y-2 no-print">
-            <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-slate-600 uppercase tracking-wider flex items-center gap-1.5">
+          {/* Clean Class & Stream Navigation */}
+          <div className="bg-white border border-slate-200/90 rounded-2xl p-4 shadow-xs space-y-3 no-print">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
                 <Layers className="w-3.5 h-3.5 text-blue-600" />
-                <span>Quick Stream Navigator:</span>
+                <span>Chagua Darasa na Mkondo wa Kutazama:</span>
               </span>
               <span className="text-[11px] text-slate-500">
-                Click any stream below to view its weekly timetable instantly
+                Inaonyesha ratiba ya wiki kwa kila mkondo na vipindi vyake
               </span>
             </div>
 
-            <div className="flex flex-wrap gap-1.5 pt-1">
-              {DEFAULT_CLASSES.flatMap(cName => {
-                const sList = getStreamsForClass(cName);
-                return sList.map(sName => ({
-                  className: cName,
-                  stream: sName,
-                  label: `${cName.replace('Standard ', 'Std ').replace('Form ', 'F')}${sName.replace('STREAM ', '').replace('Stream ', '')}`
-                }));
-              }).map(item => {
-                const isSelected = selectedClassFilter === item.className;
+            {/* Class Pill Selectors */}
+            <div className="flex flex-wrap items-center gap-1.5">
+              {DEFAULT_CLASSES.map(cName => {
+                const isSelected = selectedClassFilter === cName;
+                const hasLessons = (assignments || []).some(a => a && a.className === cName);
                 return (
                   <button
-                    key={`${item.className}_${item.stream}`}
-                    onClick={() => setSelectedClassFilter(item.className)}
-                    className={`px-2.5 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    key={cName}
+                    type="button"
+                    onClick={() => {
+                      setSelectedClassFilter(cName);
+                      setSelectedClassStreamFilter('All');
+                    }}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                       isSelected
                         ? 'bg-blue-600 text-white shadow-xs'
-                        : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100 hover:border-slate-300'
+                        : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
                     }`}
                   >
-                    {item.label}
+                    <span>{cName}</span>
+                    {hasLessons && (
+                      <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? 'bg-white' : 'bg-emerald-500'}`} />
+                    )}
                   </button>
                 );
               })}
+            </div>
+
+            {/* Stream Filter for selected class */}
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wide mr-1">Mkondo:</span>
+              <button
+                type="button"
+                onClick={() => setSelectedClassStreamFilter('All')}
+                className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                  selectedClassStreamFilter === 'All'
+                    ? 'bg-emerald-600 text-white shadow-xs'
+                    : 'bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100'
+                }`}
+              >
+                Mikondo Yote ({getStreamsForClass(selectedClassFilter).length})
+              </button>
+              {getStreamsForClass(selectedClassFilter).map(st => (
+                <button
+                  key={st}
+                  type="button"
+                  onClick={() => setSelectedClassStreamFilter(st)}
+                  className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer ${
+                    selectedClassStreamFilter === st
+                      ? 'bg-emerald-600 text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {st}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -2053,9 +2180,10 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               </div>
             </div>
             {(() => {
-              const streams = getStreamsForClass(selectedClassFilter);
-              const activeStreams = streams && streams.length > 0 ? streams : ['STREAM A'];
-              return activeStreams.map(stream => (
+              const allStreams = getStreamsForClass(selectedClassFilter);
+              const activeStreams = (selectedClassStreamFilter === 'All' ? allStreams : [selectedClassStreamFilter]).filter(Boolean);
+              const listToRender = activeStreams.length > 0 ? activeStreams : ['STREAM A'];
+              return listToRender.map(stream => (
                 <div key={stream} className="mb-6">
                   <ClassTimetable 
                     className={selectedClassFilter} 

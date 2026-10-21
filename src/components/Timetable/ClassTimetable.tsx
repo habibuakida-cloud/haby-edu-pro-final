@@ -307,9 +307,9 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
                   Each column has the Period Name and EXACT TIME (Muda) on top horizontally! */}
               <div className="overflow-x-auto p-2 sm:p-3 bg-slate-50/50 print:p-1 print:bg-white print:overflow-visible">
                 <div 
-                  className="grid gap-2 sm:gap-2.5 min-w-[680px] sm:min-w-0 w-full print:w-full print:min-w-0 print:gap-1"
+                  className="grid gap-2 sm:gap-2.5 w-full print:w-full print:min-w-0 print:gap-1"
                   style={{
-                    gridTemplateColumns: `repeat(${dayPeriods.length}, minmax(0, 1fr))`
+                    gridTemplateColumns: `repeat(${dayPeriods.length}, minmax(115px, 1fr))`
                   }}
                 >
                   {dayPeriods.map((period, pIdx) => {
