@@ -1259,19 +1259,75 @@ app.post('/api/db/school-subscriptions', async (req, res) => {
 
 // Cloud SQL Connection Health Status & Full Table Diagnostics
 app.get('/api/db/status', async (_req, res) => {
+  const start = performance.now();
   try {
-    const result = await db.select().from(schema.schools).limit(1);
+    const [
+      studentsCnt,
+      teachersCnt,
+      classesCnt,
+      subjectsCnt,
+      examsCnt,
+      timetableCnt,
+      parentsCnt,
+      examResultsCnt,
+      periodSettingsCnt,
+      streamSettingsCnt,
+      usersCnt,
+      activityLogsCnt,
+      schoolSnap
+    ] = await Promise.all([
+      db.execute(sql`SELECT count(*)::int as c FROM students`),
+      db.execute(sql`SELECT count(*)::int as c FROM teachers`),
+      db.execute(sql`SELECT count(*)::int as c FROM classes`),
+      db.execute(sql`SELECT count(*)::int as c FROM subjects`),
+      db.execute(sql`SELECT count(*)::int as c FROM exams`),
+      db.execute(sql`SELECT count(*)::int as c FROM timetable_assignments`),
+      db.execute(sql`SELECT count(*)::int as c FROM parents`),
+      db.execute(sql`SELECT count(*)::int as c FROM exam_results`),
+      db.execute(sql`SELECT count(*)::int as c FROM period_settings`),
+      db.execute(sql`SELECT count(*)::int as c FROM stream_settings`),
+      db.execute(sql`SELECT count(*)::int as c FROM users`),
+      db.execute(sql`SELECT count(*)::int as c FROM activity_logs`),
+      db.execute(sql`SELECT updated_at FROM school_data LIMIT 1`),
+    ]);
+
+    const latencyMs = Math.round(performance.now() - start);
+    const lastSyncTimestamp = schoolSnap.rows[0]?.updated_at || new Date().toISOString();
+
     res.json({
       success: true,
       status: 'connected',
-      count: result.length,
+      latencyMs,
+      engine: 'PostgreSQL 18.6 (Cloud SQL / Drizzle ORM)',
       totalTablesRegistered: Object.keys(TABLE_KEY_MAP).length,
+      lastSyncTimestamp,
+      counts: {
+        students: Number(studentsCnt.rows[0]?.c || 0),
+        teachers: Number(teachersCnt.rows[0]?.c || 0),
+        classes: Number(classesCnt.rows[0]?.c || 0),
+        subjects: Number(subjectsCnt.rows[0]?.c || 0),
+        exams: Number(examsCnt.rows[0]?.c || 0),
+        timetableAssignments: Number(timetableCnt.rows[0]?.c || 0),
+        parents: Number(parentsCnt.rows[0]?.c || 0),
+        examResults: Number(examResultsCnt.rows[0]?.c || 0),
+        periodSettings: Number(periodSettingsCnt.rows[0]?.c || 0),
+        streamSettings: Number(streamSettingsCnt.rows[0]?.c || 0),
+        users: Number(usersCnt.rows[0]?.c || 0),
+        activityLogs: Number(activityLogsCnt.rows[0]?.c || 0),
+      },
+      serverTime: new Date().toISOString()
     });
   } catch (err: any) {
     console.error('Cloud SQL test connection error:', err);
-    res.status(500).json({ success: false, status: 'error', error: err?.message || String(err) });
+    res.status(500).json({ 
+      success: false, 
+      status: 'error', 
+      latencyMs: Math.round(performance.now() - start),
+      error: err?.message || String(err) 
+    });
   }
 });
+
 
 app.get('/api/db/diagnostics', async (req, res) => {
   const { schoolId } = req.query as { schoolId?: string };

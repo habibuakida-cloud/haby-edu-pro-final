@@ -4,7 +4,8 @@ import {
   FileCode, ExternalLink, Users, KeyRound, UserPlus, Trash2, Eye, EyeOff, Shield, Globe, 
   Activity, Power, PowerOff, AlertCircle, Info, Search, Filter, History, FileSpreadsheet, 
   UserCheck, FileText, Layers, ArrowUpDown, CheckCircle, ChevronDown, Sparkles, Calendar,
-  LogIn, Copy, CheckCheck, BookOpen, Key, Edit, Github, Zap, Rocket, Printer, MessageSquare
+  LogIn, Copy, CheckCheck, BookOpen, Key, Edit, Github, Zap, Rocket, Printer, MessageSquare,
+  Database
 } from 'lucide-react';
 import { 
   SchoolInfo, PeriodSetting, TimetableAssignment, UserAccount, Student, Teacher,
@@ -20,6 +21,7 @@ import { normalizeStreamName, getNextLogicalStream } from '../utils/classStreamU
 import { db } from '../lib/firebaseClient';
 import { supabase } from '../lib/dbClient';
 import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
+import { DatabaseStatusView } from './DatabaseStatusView';
 import { TermCalendarView } from './Calendar/TermCalendarView';
 import { AcademicCalendarView } from './Calendar/AcademicCalendarView';
 import { useAuth } from '../context/AuthContext';
