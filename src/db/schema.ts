@@ -187,6 +187,9 @@ export const schoolData = pgTable('school_data', {
   teachers: jsonb('teachers').default([]),
   exams: jsonb('exams').default([]),
   examinationRecords: jsonb('examination_records').default([]),
+  disciplineRecords: jsonb('discipline_records').default([]),
+  dutyRosterData: jsonb('duty_roster_data').default({}),
+  academicTermDates: jsonb('academic_term_dates').default({}),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
@@ -643,4 +646,121 @@ export const examResults = pgTable('exam_results', {
 }, (table) => ({
   uniqueConstraint: unique('unique_exam_result').on(table.studentId, table.subjectId, table.examType, table.year, table.term),
 }));
+
+// 14. ACTIVITY LOGS & SMS WALLET / BILLING TABLES
+export const activityLogs = pgTable('activity_logs', {
+  id: text('id').primaryKey(),
+  schoolId: text('school_id').notNull(),
+  userId: text('user_id'),
+  userName: text('user_name'),
+  userEmail: text('user_email'),
+  userRole: text('user_role'),
+  category: text('category').default('General'),
+  action: text('action').default('view'),
+  title: text('title'),
+  description: text('description'),
+  timestamp: text('timestamp'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const smsWallet = pgTable('sms_wallet', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: text('school_id').notNull().unique(),
+  balance: integer('balance').default(500),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const smsLogs = pgTable('sms_logs', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: text('school_id').notNull(),
+  studentCno: text('student_cno'),
+  phone: text('phone'),
+  message: text('message'),
+  status: text('status').default('SENT'),
+  error: text('error'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const smsPaymentHistory = pgTable('sms_payment_history', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: text('school_id').notNull(),
+  packageName: text('package_name'),
+  amount: numeric('amount').default('0'),
+  smsAdded: integer('sms_added').default(0),
+  provider: text('provider'),
+  phone: text('phone'),
+  status: text('status').default('SUCCESS'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const paymentVerificationRequests = pgTable('payment_verification_requests', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: text('school_id').notNull(),
+  packageName: text('package_name'),
+  amount: numeric('amount').default('0'),
+  smsAdded: integer('sms_added').default(0),
+  phone: text('phone'),
+  transactionRef: text('transaction_ref'),
+  status: text('status').default('PENDING'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// 15. TEACHER DUTY ROSTER SYSTEM (MFUMO WA ZAMU YA WALIMU)
+export const dutyStreams = pgTable('duty_streams', {
+  id: text('id').primaryKey(),
+  schoolId: text('school_id').notNull(),
+  streamName: text('stream_name').notNull(),
+  totalStudents: integer('total_students').default(0),
+  classTeacher: text('class_teacher'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const dutyWeeklyAssignments = pgTable('duty_weekly_assignments', {
+  id: text('id').primaryKey(),
+  schoolId: text('school_id').notNull(),
+  weekStart: text('week_start').notNull(),
+  weekEnd: text('week_end').notNull(),
+  weekLabel: text('week_label').notNull(),
+  teacherIds: jsonb('teacher_ids').default([]),
+  teacherNames: jsonb('teacher_names').default([]),
+  notes: text('notes'),
+  assignedBy: text('assigned_by').default('Discipline Master'),
+  status: text('status').default('Active'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const dutyDailyReports = pgTable('duty_daily_reports', {
+  id: text('id').primaryKey(),
+  schoolId: text('school_id').notNull(),
+  weekAssignmentId: text('week_assignment_id'),
+  weekStart: text('week_start'),
+  weekEnd: text('week_end'),
+  weekLabel: text('week_label'),
+  reportDate: text('report_date').notNull(),
+  dayName: text('day_name'),
+  teacherId: text('teacher_id'),
+  teacherName: text('teacher_name').notNull(),
+  allWeekTeachers: jsonb('all_week_teachers').default([]),
+  streamAttendance: jsonb('stream_attendance').default([]),
+  totalSchoolRoll: integer('total_school_roll').default(0),
+  totalPresent: integer('total_present').default(0),
+  totalAbsent: integer('total_absent').default(0),
+  totalPermitted: integer('total_permitted').default(0),
+  totalSickPua: integer('total_sick_pua').default(0),
+  totalUnexcused: integer('total_unexcused').default(0),
+  environmentRating: integer('environment_rating').default(8),
+  environmentNotes: text('environment_notes'),
+  generalDiscipline: text('general_discipline'),
+  teachersPresent: integer('teachers_present').default(0),
+  teachersAbsent: integer('teachers_absent').default(0),
+  teacherAttendanceNotes: text('teacher_attendance_notes'),
+  keyEvents: text('key_events'),
+  bellSchedule: text('bell_schedule'),
+  recommendations: text('recommendations'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 

@@ -36,17 +36,25 @@ import {
   Pipette,
   Copy
 } from 'lucide-react';
-import { Student, SchoolInfo } from '../types';
+import { Student, SchoolInfo, ExaminationRecord } from '../types';
 import { 
   NURSERY_CLASSES, 
   PRIMARY_CLASSES, 
   SECONDARY_CLASSES 
 } from '../constants/defaults';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
+import {
+  generateStudentQrCardText,
+  computeStudentAttendanceSummary,
+  computeStudentExamSummaries
+} from '../utils/studentQrUtils';
 
 interface StudentIDViewProps {
   students: Student[];
   schoolInfo: SchoolInfo;
+  dailyAttendance?: Record<string, Record<number, 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'>>;
+  examinationRecords?: ExaminationRecord[];
+  onOpenVerifyPortal?: (regNo: string) => void;
 }
 
 export interface IdCardThemePreset {
@@ -201,7 +209,10 @@ export interface BackPageSettings {
 
 export const StudentIDView: React.FC<StudentIDViewProps> = ({
   students,
-  schoolInfo
+  schoolInfo,
+  dailyAttendance = {},
+  examinationRecords = [],
+  onOpenVerifyPortal
 }) => {
   const [searchReg, setSearchReg] = useState<string>('');
   const [selectedStudent, setSelectedStudent] = useState<Student | null>(students[0] || null);
@@ -324,6 +335,10 @@ export const StudentIDView: React.FC<StudentIDViewProps> = ({
   const getStudentProfileUrl = (st: Student) => {
     const baseUrl = typeof window !== 'undefined' ? `${window.location.origin}${window.location.pathname}` : '';
     return `${baseUrl}?verifyStudent=${encodeURIComponent(st.regNo)}`;
+  };
+
+  const getStudentRichQrPayload = (st: Student) => {
+    return generateStudentQrCardText(st, schoolInfo, dailyAttendance, examinationRecords);
   };
 
   // Language preset switcher
@@ -512,9 +527,9 @@ export const StudentIDView: React.FC<StudentIDViewProps> = ({
               title="Scan or click to view Digital Profile Record"
             >
               <QRCodeSVG 
-                value={getStudentProfileUrl(student)} 
+                value={getStudentRichQrPayload(student)} 
                 size={40} 
-                level="M" 
+                level="L" 
                 bgColor="#ffffff"
                 fgColor="#0f172a"
               />
@@ -1419,8 +1434,8 @@ export const StudentIDView: React.FC<StudentIDViewProps> = ({
 
       {/* Digital Profile Record Preview Modal */}
       {previewModalStudent && (
-        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative animate-in fade-in zoom-in-95">
+        <div className="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 space-y-4 shadow-2xl relative animate-in fade-in zoom-in-95 my-8 max-h-[90vh] overflow-y-auto">
             <button 
               onClick={() => setPreviewModalStudent(null)}
               className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition cursor-pointer"
@@ -1428,75 +1443,137 @@ export const StudentIDView: React.FC<StudentIDViewProps> = ({
               <X className="w-5 h-5" />
             </button>
 
-            <div className="text-center border-b border-slate-100 pb-4">
-              <div className="w-12 h-12 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto mb-2 font-bold shadow-xs">
-                <ShieldCheck className="w-7 h-7" />
+            <div className="text-center border-b border-slate-100 pb-3">
+              <div className="w-11 h-11 bg-emerald-100 text-emerald-700 rounded-full flex items-center justify-center mx-auto mb-1.5 font-bold shadow-xs">
+                <ShieldCheck className="w-6 h-6" />
               </div>
-              <h3 className="text-base font-black text-slate-900 uppercase tracking-tight">Verified Digital Profile Record</h3>
-              <p className="text-xs text-slate-500 mt-0.5">Scanned QR Code Digital Verification for Candidate</p>
+              <h3 className="text-base font-black text-slate-900 uppercase tracking-tight">Verified Digital Profile &amp; QR Record</h3>
+              <p className="text-xs text-slate-500 mt-0.5">Includes Student Identity, Attendance Summary &amp; Multi-Examination Results</p>
             </div>
 
-            <div className="flex items-center gap-4 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
-              <div className="w-16 h-20 bg-slate-200 rounded-xl overflow-hidden shrink-0 border border-slate-300 flex items-center justify-center">
-                {previewModalStudent.passportPhoto ? (
-                  <img src={previewModalStudent.passportPhoto} alt={previewModalStudent.name} className="w-full h-full object-cover" />
-                ) : (
-                  <User className="w-8 h-8 text-slate-400" />
-                )}
+            <div className="flex items-center justify-between gap-4 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+              <div className="flex items-center gap-3.5 min-w-0">
+                <div className="w-16 h-20 bg-slate-200 rounded-xl overflow-hidden shrink-0 border border-slate-300 flex items-center justify-center">
+                  {previewModalStudent.passportPhoto ? (
+                    <img src={previewModalStudent.passportPhoto} alt={previewModalStudent.name} className="w-full h-full object-cover" />
+                  ) : (
+                    <User className="w-8 h-8 text-slate-400" />
+                  )}
+                </div>
+                <div className="space-y-1 min-w-0">
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-900 font-mono font-bold text-[10px] rounded border border-blue-200 inline-block">
+                    {previewModalStudent.regNo}
+                  </span>
+                  <h4 className="font-black text-slate-900 text-base leading-snug truncate">{previewModalStudent.name}</h4>
+                  <p className="text-xs font-semibold text-slate-600">{previewModalStudent.className} {previewModalStudent.stream || 'A'} • {previewModalStudent.level}</p>
+                  <p className="text-[11px] font-mono text-blue-900 font-bold">Parent: {previewModalStudent.parentPhone || previewModalStudent.phone || '0754 000 111'}</p>
+                </div>
               </div>
-              <div className="space-y-1 min-w-0">
-                <span className="px-2 py-0.5 bg-blue-100 text-blue-900 font-mono font-bold text-[10px] rounded border border-blue-200 inline-block">
-                  {previewModalStudent.regNo}
-                </span>
-                <h4 className="font-black text-slate-900 text-base leading-snug truncate">{previewModalStudent.name}</h4>
-                <p className="text-xs font-semibold text-slate-600">{previewModalStudent.className} {previewModalStudent.stream || 'A'} • {previewModalStudent.level}</p>
+
+              <div className="p-2 bg-white border border-slate-200 rounded-xl shrink-0 flex flex-col items-center shadow-2xs">
+                <QRCodeSVG
+                  value={getStudentRichQrPayload(previewModalStudent)}
+                  size={84}
+                  level="L"
+                  includeMargin={false}
+                />
+                <span className="text-[8px] font-mono font-black text-emerald-700 mt-1 uppercase">Scan with Phone</span>
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-2.5 text-xs">
-              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase block">Gender</span>
-                <p className="font-bold text-slate-800 mt-0.5">{previewModalStudent.gender || 'Not specified'}</p>
-              </div>
-              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                <span className="text-[10px] font-bold text-slate-400 uppercase block">Date of Birth</span>
-                <p className="font-mono font-bold text-slate-800 mt-0.5">{previewModalStudent.dob || '2010-01-01'}</p>
-              </div>
-              <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 col-span-2">
-                <span className="text-[10px] font-bold text-slate-400 uppercase block">Parent / Guardian Contact</span>
-                <p className="font-mono font-bold text-blue-900 mt-0.5">{previewModalStudent.parentPhone || previewModalStudent.phone || '0754 000 111'}</p>
-              </div>
-            </div>
+            {/* Attendance & Multi-Examination Results inside Scanned Record */}
+            {(() => {
+              const attSummary = computeStudentAttendanceSummary(previewModalStudent, dailyAttendance);
+              const examList = computeStudentExamSummaries(previewModalStudent, examinationRecords);
+              return (
+                <div className="space-y-3">
+                  {/* Attendance Summary */}
+                  <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black text-emerald-950 uppercase tracking-wider flex items-center gap-1.5">
+                        <Calendar className="w-3.5 h-3.5 text-emerald-600" />
+                        <span>Attendance Record (Mahudhurio)</span>
+                      </span>
+                      <span className="px-2.5 py-0.5 bg-emerald-600 text-white rounded-full text-[10px] font-black font-mono">
+                        {attSummary.attendanceRate}% Rate
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2 text-center text-xs">
+                      <div className="bg-white p-2 rounded-xl border border-emerald-100">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase block">Present</span>
+                        <span className="font-mono font-black text-emerald-700">{attSummary.presentDays}d</span>
+                      </div>
+                      <div className="bg-white p-2 rounded-xl border border-rose-100">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase block">Absent</span>
+                        <span className="font-mono font-black text-rose-700">{attSummary.absentDays}d</span>
+                      </div>
+                      <div className="bg-white p-2 rounded-xl border border-amber-100">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase block">Late</span>
+                        <span className="font-mono font-black text-amber-700">{attSummary.lateDays}d</span>
+                      </div>
+                      <div className="bg-white p-2 rounded-xl border border-blue-100">
+                        <span className="text-[9px] font-bold text-slate-500 uppercase block">Excused</span>
+                        <span className="font-mono font-black text-blue-700">{attSummary.excusedDays}d</span>
+                      </div>
+                    </div>
+                  </div>
 
-            <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center justify-between text-xs text-emerald-900 font-bold">
-              <span className="flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
-                Official Active Candidate Status
-              </span>
-              <span className="text-[9px] bg-emerald-200 text-emerald-900 px-2 py-0.5 rounded uppercase font-black">VERIFIED</span>
-            </div>
+                  {/* Multi-Examination Results */}
+                  <div className="bg-purple-50/60 border border-purple-200 rounded-2xl p-3.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black text-purple-950 uppercase tracking-wider flex items-center gap-1.5">
+                        <Award className="w-3.5 h-3.5 text-purple-600" />
+                        <span>Results of Different Examinations ({examList.length})</span>
+                      </span>
+                      <span className="text-[10px] font-bold text-purple-700">NECTA Scale</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {examList.map(ex => (
+                        <div key={ex.id} className="bg-white p-2.5 rounded-xl border border-purple-100 flex items-center justify-between text-xs shadow-2xs">
+                          <div className="min-w-0 pr-2">
+                            <div className="font-black text-slate-900 truncate text-[11px]">{ex.examName}</div>
+                            <div className="text-[10px] text-slate-500 font-medium">
+                              Rank: <strong className="text-slate-700">#{ex.positionInClass}/{ex.totalCandidates}</strong> • Div: <strong className="text-purple-700">{ex.division} ({ex.points} pts)</strong>
+                            </div>
+                          </div>
+                          <div className="text-right shrink-0">
+                            <span className="font-mono font-black text-xs text-blue-900 block">{ex.averageMarks}%</span>
+                            <span className="text-[9px] font-black px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800">
+                              Grade {ex.overallGrade}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
-            <div className="p-3 bg-slate-100 rounded-xl text-[10px] font-mono text-slate-600 break-all select-all flex items-center justify-between gap-2">
-              <span className="truncate">{getStudentProfileUrl(previewModalStudent)}</span>
-              <button 
+            <div className="flex flex-wrap items-center gap-2 pt-1">
+              {onOpenVerifyPortal && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const reg = previewModalStudent.regNo;
+                    setPreviewModalStudent(null);
+                    onOpenVerifyPortal(reg);
+                  }}
+                  className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition cursor-pointer flex items-center justify-center gap-1.5 shadow-xs"
+                >
+                  <ExternalLink className="w-4 h-4" />
+                  <span>Open Full Student Verification Portal</span>
+                </button>
+              )}
+
+              <button
                 type="button"
-                onClick={() => {
-                  navigator.clipboard.writeText(getStudentProfileUrl(previewModalStudent));
-                  alert("Digital Profile Verification URL copied to clipboard!");
-                }}
-                className="px-2.5 py-1 bg-slate-800 text-white rounded font-sans font-bold text-[10px] shrink-0 cursor-pointer hover:bg-slate-900"
+                onClick={() => setPreviewModalStudent(null)}
+                className="py-2.5 px-5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition cursor-pointer"
               >
-                Copy Link
+                Close
               </button>
             </div>
-
-            <button
-              type="button"
-              onClick={() => setPreviewModalStudent(null)}
-              className="w-full py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition cursor-pointer"
-            >
-              Close Digital Record
-            </button>
           </div>
         </div>
       )}

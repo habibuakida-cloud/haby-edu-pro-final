@@ -352,3 +352,42 @@ export function getFormStreamTheme(className: string) {
     accent: '#374151'
   };
 }
+
+/**
+ * Returns clean concise abbreviation for subjects (e.g. Basic Mathematics -> MATH, English Language -> ENG)
+ */
+export function getSubjectShortName(subjectName?: string): string {
+  if (!subjectName) return '—';
+  const norm = subjectName.trim();
+  const lower = norm.toLowerCase();
+  
+  if (lower.includes('basic mathematics') || lower.includes('mathematics') || lower === 'math') return 'MATH';
+  if (lower.includes('advanced mathematics') || lower.includes('pure mathematics')) return 'ADV.MATH';
+  if (lower.includes('english language') || lower === 'english') return 'ENG';
+  if (lower.includes('literature')) return 'LIT';
+  if (lower.includes('kiswahili')) return 'KISW';
+  if (lower.includes('biology')) return 'BIO';
+  if (lower.includes('chemistry')) return 'CHEM';
+  if (lower.includes('physics')) return 'PHYS';
+  if (lower.includes('geography')) return 'GEO';
+  if (lower.includes('history')) return 'HIST';
+  if (lower.includes('civics')) return 'CIV';
+  if (lower.includes('computer') || lower.includes('ict')) return 'ICT';
+  if (lower.includes('book keeping') || lower.includes('book-keeping')) return 'B/KEEP';
+  if (lower.includes('commerce')) return 'COMM';
+  if (lower.includes('economics')) return 'ECON';
+  if (lower.includes('agriculture')) return 'AGRI';
+  if (lower.includes('religion') || lower.includes('dini') || lower.includes('islamic') || lower.includes('christian')) return 'REL';
+  if (lower.includes('general studies')) return 'GS';
+  if (lower.includes('sports') || lower.includes('games')) return 'SPORTS';
+  if (lower.includes('debates')) return 'DEBATE';
+  if (lower.includes('library') || lower.includes('study')) return 'LIBRARY';
+  if (lower.includes('weekly test') || lower.includes('test')) return 'TEST';
+
+  if (norm.length <= 6) return norm.toUpperCase();
+  const words = norm.split(/\s+/);
+  if (words.length > 1) {
+    return words.map(w => w[0]).join('').toUpperCase();
+  }
+  return norm.substring(0, 4).toUpperCase();
+}

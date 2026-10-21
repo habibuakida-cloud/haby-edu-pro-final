@@ -34,7 +34,8 @@ import {
   SlidersHorizontal,
   ChevronRight,
   Info,
-  CalendarDays
+  CalendarDays,
+  QrCode
 } from 'lucide-react';
 import { Student, SchoolInfo, UserAccount } from '../../types';
 import { HabyEduProLogo } from '../common/HabyEduProLogo';
@@ -47,6 +48,7 @@ interface SmartAttendanceModuleProps {
   onSaveDailyAttendance?: (date: string, records: Record<number, 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'>) => void;
   onNavigateToResults?: () => void;
   onNavigateToDiscipline?: (student?: Student) => void;
+  onOpenQrModal?: (student?: Student) => void;
 }
 
 export interface DetailedAttendanceLog {
@@ -84,7 +86,8 @@ export const SmartAttendanceModule: React.FC<SmartAttendanceModuleProps> = ({
   dailyAttendance = {},
   onSaveDailyAttendance,
   onNavigateToResults,
-  onNavigateToDiscipline
+  onNavigateToDiscipline,
+  onOpenQrModal
 }) => {
   const canEdit = currentUser?.role === 'HEADMASTER' || currentUser?.role === 'ACADEMIC' || currentUser?.role === 'TEACHER';
 
@@ -883,6 +886,17 @@ export const SmartAttendanceModule: React.FC<SmartAttendanceModuleProps> = ({
                 <CheckCircle2 className="w-3.5 h-3.5" />
                 <span>Hifadhi Mahudhurio</span>
               </button>
+
+              {onOpenQrModal && (
+                <button
+                  type="button"
+                  onClick={() => onOpenQrModal()}
+                  className="px-3.5 py-1.5 text-xs font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-lg transition cursor-pointer flex items-center gap-1.5 shadow-xs"
+                >
+                  <QrCode className="w-3.5 h-3.5" />
+                  <span>Generate QR Code</span>
+                </button>
+              )}
             </div>
           </div>
         )}
@@ -1165,6 +1179,18 @@ export const SmartAttendanceModule: React.FC<SmartAttendanceModuleProps> = ({
                             <UserCheck className="w-3.5 h-3.5" />
                             <span>Ruhusa (E)</span>
                           </button>
+
+                          {onOpenQrModal && (
+                            <button
+                              type="button"
+                              onClick={() => onOpenQrModal(st)}
+                              className="px-2.5 py-1.5 text-xs font-bold rounded-lg bg-purple-600 text-white hover:bg-purple-700 transition-all flex items-center gap-1 cursor-pointer ml-1 shadow-2xs"
+                              title="Generate Student QR Code (Attendance + Exam Results)"
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                              <span>QR</span>
+                            </button>
+                          )}
                         </div>
 
                         {/* If Absent: Reason Selector */}

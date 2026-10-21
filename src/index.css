@@ -3,8 +3,17 @@
 @layer utilities {
   @media print {
     @page {
-      size: auto;
+      size: landscape;
+      margin: 6mm 6mm;
+    }
+
+    @page portrait-page {
+      size: portrait;
       margin: 8mm 8mm;
+    }
+
+    .print-portrait {
+      page: portrait-page;
     }
 
     *, *::before, *::after {

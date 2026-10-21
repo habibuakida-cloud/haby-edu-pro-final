@@ -1,3 +1,5 @@
+import { supabase } from './dbClient';
+
 export interface RemedialTimetableEntry {
   id?: string;
   class_name: string;
@@ -81,6 +83,12 @@ export const saveRemedialTimetableEntry = async (schoolId: string, entry: Remedi
   }
   setLocalRemedial(schoolId, entries);
 
+  try {
+    await supabase.from('remedial_timetable').upsert(fullEntry);
+  } catch (e) {
+    console.warn('Error saving remedial_timetable to DB:', e);
+  }
+
   return { data: fullEntry, error: null };
 };
 
@@ -99,10 +107,17 @@ export const saveRemedialTimetableBatch = async (schoolId: string, entries: Reme
   });
 
   setLocalRemedial(schoolId, [...preparedEntries, ...current]);
+
+  try {
+    await supabase.from('remedial_timetable').upsert(preparedEntries);
+  } catch (e) {
+    console.warn('Error saving remedial_timetable batch to DB:', e);
+  }
+
   return { data: preparedEntries, error: null };
 };
 
-export const clearRemedialTimetable = async (schoolId: string, className?: string, streamName?: string) => {
+export const clearRemedialTimetable = async (schoolId: string, className?: string, _streamName?: string) => {
   let entries = getLocalRemedial(schoolId);
   if (className && className !== 'ALL') {
     entries = entries.filter(e => e.class_name.toLowerCase() !== className.toLowerCase());
@@ -110,12 +125,52 @@ export const clearRemedialTimetable = async (schoolId: string, className?: strin
     entries = [];
   }
   setLocalRemedial(schoolId, entries);
+
+  try {
+    const delQuery = supabase.from('remedial_timetable').delete().eq('school_id', schoolId);
+    if (className && className !== 'ALL') {
+      await delQuery.eq('class_name', className);
+    } else {
+      await delQuery;
+    }
+  } catch (e) {}
+
   return { success: true };
 };
 
 export const getRemedialTimetable = async (schoolId: string, className?: string) => {
-  const entries = getLocalRemedial(schoolId);
-  if (className && className !== 'All') {
+  let entries = getLocalRemedial(schoolId);
+  try {
+    const { data, error } = await supabase
+      .from('remedial_timetable')
+      .select('*')
+      .eq('school_id', schoolId);
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const mapped: RemedialTimetableEntry[] = data.map((d: any) => {
+        const pt = d.period_time || d.periodTime || '16:00-17:00';
+        const [st, et] = pt.includes('-') ? pt.split('-') : ['16:00', '17:00'];
+        return {
+          id: String(d.id),
+          class_name: d.class_name || d.className || 'Form 1',
+          stream: d.stream || 'A',
+          subject: d.subject || '',
+          teacher_name: d.teacher_name || d.teacherName || '',
+          date: d.date || '',
+          day_of_week: d.day_of_week || d.dayOfWeek || 'Monday',
+          start_time: st,
+          end_time: et,
+          period_time: pt,
+          term: d.term || 'Term 1',
+          school_id: d.school_id || d.schoolId || schoolId,
+          created_at: d.created_at || d.createdAt || ''
+        };
+      });
+      setLocalRemedial(schoolId, mapped);
+      entries = mapped;
+    }
+  } catch (e) {}
+
+  if (className && className !== 'All' && className !== 'ALL') {
     return { data: entries.filter((d: any) => d.class_name.toLowerCase() === className.toLowerCase()), error: null };
   }
   return { data: entries, error: null };
@@ -125,28 +180,77 @@ export const deleteRemedialTimetableEntry = async (schoolId: string, id: string)
   let entries = getLocalRemedial(schoolId);
   entries = entries.filter(e => e.id !== id);
   setLocalRemedial(schoolId, entries);
+
+  try {
+    await supabase.from('remedial_timetable').delete().eq('id', id);
+  } catch (e) {}
+
   return { success: true };
 };
 
 export const markRemedialAttendance = async (schoolId: string, record: any) => {
-  return { success: true };
+  const payload = {
+    ...record,
+    id: record.id || `${schoolId}_${record.date || new Date().toISOString().split('T')[0]}_${record.period_time || '16:00'}_${record.class_name || 'Form1'}`,
+    school_id: schoolId,
+    marked_at: new Date().toISOString()
+  };
+  try {
+    await supabase.from('remedial_attendance').upsert(payload);
+  } catch (e) {
+    console.warn('Error saving remedial_attendance:', e);
+  }
+  return { success: true, data: payload };
 };
 
 export const getRemedialAttendance = async (schoolId: string, date: string) => {
-  return { data: [], error: null };
+  try {
+    let q = supabase.from('remedial_attendance').select('*').eq('school_id', schoolId);
+    if (date) q = q.eq('date', date);
+    const { data, error } = await q;
+    return { data: data || [], error };
+  } catch (e) {
+    return { data: [], error: e };
+  }
 };
 
 export const getRemedialPaymentSettings = async (schoolId: string) => {
-  return { data: [], error: null };
+  try {
+    const { data, error } = await supabase
+      .from('remedial_payment_settings')
+      .select('*')
+      .eq('school_id', schoolId);
+    return { data: data || [], error };
+  } catch (e) {
+    return { data: [], error: e };
+  }
 };
 
 export const saveRemedialPaymentSetting = async (schoolId: string, setting: any) => {
-  return { data: setting, error: null };
+  const payload = {
+    ...setting,
+    id: setting.id || `rps_${schoolId}_${setting.class_name || setting.className || 'ALL'}`,
+    school_id: schoolId
+  };
+  try {
+    await supabase.from('remedial_payment_settings').upsert(payload);
+  } catch (e) {}
+  return { data: payload, error: null };
 };
 
-export const getRemedialAnalysis = async (schoolId: string, startDate: string, endDate: string, className?: string) => {
-  return { data: [], error: null };
+export const getRemedialAnalysis = async (schoolId: string, _startDate: string, _endDate: string, className?: string) => {
+  try {
+    let q = supabase.from('remedial_attendance').select('*').eq('school_id', schoolId);
+    if (className && className !== 'All' && className !== 'ALL') {
+      q = q.eq('class_name', className);
+    }
+    const { data, error } = await q;
+    return { data: data || [], error };
+  } catch (e) {
+    return { data: [], error: e };
+  }
 };
 
 export const saveRemedialTimetable = saveRemedialTimetableEntry;
+
 

@@ -1,4 +1,4 @@
-import { 
+import type { 
   AppData, 
   UserAccount, 
   Student, 
@@ -8,7 +8,7 @@ import {
   ExaminationRecord, 
   PromotionHistory, 
   TransferHistory 
-} from '../types';
+} from '../types.ts';
 
 export const DEFAULT_SCHOOL_LOGO = `data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200"><defs><linearGradient id="shieldGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%231e3a8a"/><stop offset="100%" stop-color="%230f172a"/></linearGradient><linearGradient id="goldGrad" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="%23fbbf24"/><stop offset="100%" stop-color="%23d97706"/></linearGradient></defs><circle cx="100" cy="100" r="94" fill="none" stroke="%23d97706" stroke-width="4"/><circle cx="100" cy="100" r="88" fill="%23ffffff" stroke="%231e3a8a" stroke-width="2"/><path d="M 100 24 C 135 24 165 42 165 78 C 165 125 125 158 100 174 C 75 158 35 125 35 78 C 35 42 65 24 100 24 Z" fill="url(%23shieldGrad)" stroke="%23fbbf24" stroke-width="3"/><path d="M 100 42 L 100 115 M 100 48 Q 120 40 142 46 L 142 104 Q 120 98 100 108 Q 80 98 58 104 L 58 46 Q 80 40 100 48 Z" fill="%23ffffff" stroke="%23fbbf24" stroke-width="2"/><circle cx="100" cy="115" r="7" fill="%23ef4444"/><polygon points="100,126 102,132 108,132 103,136 105,142 100,138 95,142 97,136 92,132 98,132" fill="%23fbbf24"/><text x="100" y="160" font-family="Arial, sans-serif" font-weight="900" font-size="10" fill="%23fbbf24" text-anchor="middle" letter-spacing="1">EXCELLENCE</text></svg>`;
 
@@ -1013,6 +1013,25 @@ export const DEFAULT_APP_DATA: AppData = {
   lessonPlans: [],
   savedTimetableRecords: [],
   savedInvigilationRecords: [],
-  subjectPaperConfigs: {}
+  subjectPaperConfigs: {},
+  academicTermDates: {},
+  communicationTemplates: [
+    {
+      id: 'default-results-sms',
+      name: 'Matokeo ya Mtihani (SMS)',
+      type: 'SMS',
+      category: 'Results',
+      content: 'Ndugu Mzazi, matokeo ya {studentName} {examName} {year}: DIV {division}, AGGT {marks}. Masomo: {subjects}. - {schoolName}',
+      isDefault: true
+    },
+    {
+      id: 'default-results-whatsapp',
+      name: 'Matokeo ya Mtihani (WhatsApp)',
+      type: 'WhatsApp',
+      category: 'Results',
+      content: '*MATOKEO YA MTIHANI*\n\nNdugu Mzazi, haya ni matokeo ya mwanao *{studentName}* kwa mtihani wa *{examName}* mwaka *{year}*:\n\n*Division:* {division}\n*Points:* {marks}\n\n*Masomo:*\n{subjects}\n\nAsante,\n*{schoolName}*',
+      isDefault: true
+    }
+  ]
 };
 

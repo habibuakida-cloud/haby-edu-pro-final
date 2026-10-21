@@ -665,7 +665,11 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
                   onChange={e => setSelectedTerm(e.target.value)}
                   className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
                 >
-                  {['Term 1', 'Term 2', 'Term 3'].map(t => <option key={t} value={t}>{t}</option>)}
+                  {['Term 1', 'Term 2'].map(t => (
+                    <option key={t} value={t}>
+                      {t === 'Term 1' ? 'Term 1 (Muhula I)' : 'Term 2 (Muhula II)'}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="flex items-center gap-1.5">

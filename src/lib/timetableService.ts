@@ -1,5 +1,6 @@
 import { TimetableAssignment } from '../types';
 import { isSameClass } from '../utils/reportCardUtils';
+import { supabase } from './dbClient';
 
 export function normalizeStreamName(s?: string): string {
   if (!s) return '';
@@ -46,6 +47,33 @@ export async function fetchTimetable(options: FetchTimetableOptions = {}): Promi
     if (raw) {
       const parsed = JSON.parse(raw);
       allAssignments = parsed.timetableAssignments || [];
+    }
+
+    if (allAssignments.length === 0) {
+      try {
+        const { data: dbAssigns } = await supabase
+          .from('timetable_assignments')
+          .select('*')
+          .eq('school_id', schoolId);
+        if (Array.isArray(dbAssigns) && dbAssigns.length > 0) {
+          allAssignments = dbAssigns.map((a: any) => ({
+            id: a.id,
+            className: a.className || a.class_name || '',
+            stream: a.stream || 'A',
+            day: a.day || 'Monday',
+            period: a.period || '',
+            periodName: a.periodName || a.period_name || '',
+            teacherId: a.teacherId ?? a.teacher_id ?? 0,
+            teacherName: a.teacherName || a.teacher_name || '',
+            subject: a.subject || '',
+            room: a.room || 'Classroom',
+            activityType: a.activityType || a.activity_type || 'academic',
+            customNote: a.customNote || a.custom_note || '',
+            isLocked: Boolean(a.isLocked ?? a.is_locked),
+            allocationMode: a.allocationMode || a.allocation_mode || 'manual'
+          }));
+        }
+      } catch (e) {}
     }
 
     const filtered = allAssignments.filter(a => {
@@ -130,8 +158,23 @@ export async function saveTimetableAssignments(
       }
     }
 
+    try {
+      const rows = nextAssignments.map((a, idx) => ({
+        ...a,
+        id: a.id ? String(a.id) : `ta_${sid}_${idx}`,
+        school_id: sid,
+        schoolId: sid
+      }));
+      if (rows.length > 0) {
+        await supabase.from('timetable_assignments').upsert(rows);
+      }
+    } catch (e) {
+      console.warn('Error syncing timetable_assignments to DB:', e);
+    }
+
     return { success: true, data: nextAssignments };
   } catch (err: any) {
     return { success: false, data: assignments };
   }
 }
+

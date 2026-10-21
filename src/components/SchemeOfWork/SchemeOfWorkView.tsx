@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { SchemeOfWork, SchemeOfWorkItem, TeachingLogBookEntry } from '../../types/schemeOfWork';
 import { CurriculumType } from '../../types/lessonPlan';
-import { SchoolInfo, UserAccount, Teacher } from '../../types';
+import { SchoolInfo, UserAccount, Teacher, AcademicTermDates } from '../../types';
 import { generateAutoSchemeOfWork } from '../../utils/schemeOfWorkGenerator';
 import { HabyEduProLogo } from '../common/HabyEduProLogo';
 import { 
@@ -36,6 +36,7 @@ interface SchemeOfWorkViewProps {
   schemesOfWork?: SchemeOfWork[];
   onSaveSchemeOfWork?: (scheme: SchemeOfWork) => void;
   onNavigateToLessonPlan?: (subject: string, className: string, topic: string) => void;
+  academicTermDates?: AcademicTermDates;
 }
 
 export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
@@ -51,7 +52,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
   const [selectedClass, setSelectedClass] = useState<string>('Form 3');
   const [selectedStream, setSelectedStream] = useState<string>('All Streams');
   const [curriculumType, setCurriculumType] = useState<CurriculumType>('NEW_CBC_2023');
-  const [selectedTerm, setSelectedTerm] = useState<'Term 1' | 'Term 2' | 'Term 3'>('Term 1');
+  const [selectedTerm, setSelectedTerm] = useState<'Term 1' | 'Term 2' | 'Full Year'>('Term 1');
   const [academicYear, setAcademicYear] = useState<string>('2026');
   const [periodsPerWeek, setPeriodsPerWeek] = useState<number>(4);
 
@@ -471,7 +472,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
             >
               <option value="Term 1">Term 1</option>
               <option value="Term 2">Term 2</option>
-              <option value="Term 3">Term 3</option>
+              <option value="Full Year">Full Year (Mwaka Mzima)</option>
             </select>
           </div>
 

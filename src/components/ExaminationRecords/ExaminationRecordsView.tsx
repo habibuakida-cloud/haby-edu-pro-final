@@ -666,9 +666,8 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
             >
               <option value="All">All Terms</option>
-              <option value="Term 1">Term 1</option>
-              <option value="Term 2">Term 2</option>
-              <option value="Term 3">Term 3</option>
+              <option value="Term 1">Term 1 (Muhula wa 1)</option>
+              <option value="Term 2">Term 2 (Muhula wa 2)</option>
             </select>
           </div>
 

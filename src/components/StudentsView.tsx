@@ -3618,6 +3618,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         onClose={() => setIsQrScannerOpen(false)}
         students={students}
         schoolInfo={schoolInfo}
+        dailyAttendance={dailyAttendance}
+        examinationRecords={examinationRecords}
         onViewStudentProfile={st => {
           setViewingRecordStudent(st);
           setIsQrScannerOpen(false);

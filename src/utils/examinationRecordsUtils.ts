@@ -181,3 +181,44 @@ export function buildExaminationRecord(
     createdAt: new Date().toISOString()
   };
 }
+
+/**
+ * Returns a normalized canonical category for any exam name or type string.
+ * Strictly separates Midterm, Terminal, Annual, Weekly, Monthly, and Mock exams.
+ */
+export function getExamNormalizedCategory(nameOrType?: string): string {
+  if (!nameOrType) return '';
+  const s = nameOrType.trim().toLowerCase();
+  if (s.includes('midterm') || s.includes('mid-term') || s.includes('mid term')) return 'midterm';
+  if (s.includes('terminal') || s.includes('term 1 final') || s.includes('term i final') || s.includes('term 2 final') || s.includes('term ii final')) return 'terminal';
+  if (s.includes('annual') || s.includes('end of year') || s.includes('mwisho wa mwaka')) return 'annual';
+  if (s.includes('weekly') || s.includes('wiki')) return 'weekly';
+  if (s.includes('monthly') || s.includes('mwezi')) return 'monthly';
+  if (s.includes('pre-mock') || s.includes('premock')) return 'premock';
+  if (s.includes('mock')) return 'mock';
+  if (s.includes('sfna')) return 'sfna';
+  if (s.includes('psle')) return 'psle';
+  if (s.includes('ftna')) return 'ftna';
+  if (s.includes('csee') || s.includes('necta')) return 'csee';
+  if (s.includes('acsee')) return 'acsee';
+  return s.replace(/[^a-z0-9]/g, '');
+}
+
+/**
+ * Checks if two exam names or types belong to the same category.
+ * Prevents Midterm marks from showing up when Terminal or Annual is selected,
+ * and vice-versa.
+ */
+export function isMatchingExamType(examA?: string, examB?: string): boolean {
+  if (!examA || !examB) return false;
+  const a = examA.trim().toLowerCase();
+  const b = examB.trim().toLowerCase();
+  if (a === 'all' || b === 'all') return true;
+  if (a === b) return true;
+
+  const catA = getExamNormalizedCategory(a);
+  const catB = getExamNormalizedCategory(b);
+  if (catA && catB && catA === catB) return true;
+
+  return false;
+}

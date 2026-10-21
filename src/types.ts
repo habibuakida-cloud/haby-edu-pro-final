@@ -133,6 +133,13 @@ export interface DisciplineRecord {
   actionTaken: string;
   reportedBy: string;
   status: 'Open' | 'Under Review' | 'Resolved';
+  dateIncident?: string;
+}
+
+export interface DailyRollCallRecord {
+  studentId?: number;
+  status?: string;
+  remarks?: string;
 }
 
 export interface PeriodSetting {
@@ -146,6 +153,8 @@ export interface PeriodSetting {
   isBreak?: boolean;
   className?: string; // e.g. "Darasa la 1", "Form 1", or "All Classes"
   streamName?: string; // e.g. "Mkondo A", "All Streams"
+  isLocked?: boolean;
+  activityType?: string;
 }
 
 export interface StreamSetting {
@@ -519,7 +528,7 @@ export interface ActivityLog {
 }
 
 export type AcademicCalendarType = 'JAN-DEC' | 'JULY-JUNE';
-export type ExamTerm = 'Term 1' | 'Term 2' | 'Term 3';
+export type ExamTerm = 'Term 1' | 'Term 2';
 export type RecordExamType = 'Monthly' | 'Midterm' | 'Terminal' | 'Annual';
 
 export interface ExaminationRecordSubjectInfo {
@@ -675,12 +684,149 @@ export interface AppData {
   savedInvigilationRecords?: SavedInvigilationRecord[];
   subjectPaperConfigs?: Record<string, 1 | 2 | 3>;
   qrScanLogs?: QrScanAttendanceRecord[];
+  dutyRosterData?: DutyRosterData;
   bubbleSettings?: {
     enabled: boolean;
     theme: string;
     density: 'low' | 'medium' | 'high';
   };
+  academicTermDates?: AcademicTermDates;
+  communicationTemplates?: CommunicationTemplate[];
+  calendarEvents?: CalendarEvent[];
 }
+
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  type: 'Holiday' | 'Term' | 'Exam' | 'Other';
+  startDate: string; // YYYY-MM-DD
+  endDate: string; // YYYY-MM-DD
+  color: string; // Tailwind color class or hex
+  description?: string;
+}
+
+export interface CommunicationTemplate {
+  id: string;
+  name: string;
+  type: 'SMS' | 'WhatsApp';
+  content: string; // e.g. "Habari {parentName}, matokeo ya {studentName} kwa mtihani wa {examName} ni {marks}."
+  category: 'Results' | 'Announcement' | 'Attendance' | 'Fees';
+  isDefault?: boolean;
+}
+
+export interface AcademicTermDates {
+  yearOpeningDate?: string;
+  midTerm1BreakStart?: string;
+  midTerm1BreakEnd?: string;
+  terminalBreakStart?: string;
+  terminalBreakEnd?: string;
+  midTerm2BreakStart?: string;
+  midTerm2BreakEnd?: string;
+  annualBreakStart?: string;
+  annualBreakEnd?: string;
+}
+
+export interface DutyStream {
+  id: string;
+  name: string; // e.g. "Form 1A", "Form 1B", "Form 2A", "Form 3 Science", "Form 4 Arts"
+  registeredBoys?: number;  // Wavulana Waliosajiliwa (B)
+  registeredGirls?: number; // Wasichana Waliosajiliwa (G)
+  totalStudents: number;    // Jumla Waliosajiliwa (T = B + G)
+  classTeacher?: string;
+}
+
+export interface DutyTeacher {
+  id: number | string;
+  name: string;
+  phone: string;
+  subject: string;
+}
+
+export interface DutyWeeklyAssignment {
+  id: string;
+  weekStart: string; // YYYY-MM-DD (Monday)
+  weekEnd: string;   // YYYY-MM-DD (Sunday)
+  weekLabel: string; // e.g. "21 Oct - 27 Oct 2024"
+  teacherIds: (number | string)[];
+  teacherNames: string[];
+  notes?: string;
+  assignedBy?: string;
+  createdAt: string;
+}
+
+export interface DutyStreamAttendanceRow {
+  streamId: string;
+  streamName: string;
+  registeredBoys?: number;  // B - Waliosajiliwa
+  registeredGirls?: number; // G - Waliosajiliwa
+  totalStudents: number;    // T - Jumla Waliosajiliwa
+  presentBoys?: number;     // B - Waliofika (Present)
+  presentGirls?: number;    // G - Waliofika (Present)
+  present: number;          // T - Jumla Waliofika (Present)
+  absentBoys?: number;      // B - Absent
+  absentGirls?: number;     // G - Absent
+  absent: number;           // T - Jumla Absent
+  permittedBoys?: number;   // B - Walioruhusiwa
+  permittedGirls?: number;  // G - Walioruhusiwa
+  permitted: number;        // T - Jumla Walioruhusiwa
+  sickBoys?: number;        // B - Wagonjwa / PUA
+  sickGirls?: number;       // G - Wagonjwa / PUA
+  sickPua: number;          // T - Jumla Wagonjwa / PUA
+  unexcused: number;        // Wasio na sababu
+  remarks: string;          // Maelezo
+}
+
+export interface DutyDailyReport {
+  id: string;
+  weekAssignmentId: string;
+  weekStart: string;
+  weekEnd: string;
+  weekLabel: string;
+  date: string; // YYYY-MM-DD
+  dayName: string; // Jumatatu, Jumanne, etc.
+  teacherId: number | string;
+  teacherName: string;
+  allWeekTeachers: string[];
+  streams: DutyStreamAttendanceRow[];
+  totals: {
+    registeredBoys?: number;
+    registeredGirls?: number;
+    totalStudents: number;
+    presentBoys?: number;
+    presentGirls?: number;
+    present: number;
+    absentBoys?: number;
+    absentGirls?: number;
+    absent: number;
+    permittedBoys?: number;
+    permittedGirls?: number;
+    permitted: number;
+    sickBoys?: number;
+    sickGirls?: number;
+    sickPua: number;
+    unexcused: number;
+  };
+  environmentRating: number; // 1-10
+  environmentNotes?: string;
+  generalDiscipline: string; // Nidhamu Jumla (Maelezo ya matukio ya utoro, fujo)
+  teachersPresent: number;
+  teachersAbsent: number;
+  teacherAttendanceNotes: string; // Mahudhurio ya Walimu (Waalimu waliofika / hawakufika)
+  keyEvents: string; // Matukio Muhimu ya Siku (kama ugonjwa wa ghafla, mgeni, mvua)
+  bellSchedule: string; // Kengele / Ratiba (Ilikuwaje?)
+  recommendations: string; // Mapendekezo kwa Discipline Master
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DutyRosterData {
+  streams: DutyStream[];
+  teachers: DutyTeacher[];
+  weeklyAssignments: DutyWeeklyAssignment[];
+  dailyReports: DutyDailyReport[];
+  updatedAt?: string;
+}
+
 
 export interface QrScanAttendanceRecord {
   id: string;

@@ -57,7 +57,7 @@ export const StudentYearlyProfileModal: React.FC<StudentYearlyProfileModalProps>
   schoolInfo,
   selectedYear
 }) => {
-  const [activeTermTab, setActiveTermTab] = useState<'Term 1' | 'Term 2' | 'Term 3'>('Term 1');
+  const [activeTermTab, setActiveTermTab] = useState<'Term 1' | 'Term 2'>('Term 1');
   const [selectedExamType, setSelectedExamType] = useState<string>('All');
   const thisYearChartRef = useRef<HTMLCanvasElement | null>(null);
   const lifeChartRef = useRef<HTMLCanvasElement | null>(null);
@@ -412,7 +412,7 @@ Hali: ${Number(annualAvg) >= 45 ? 'AMEFAULU / PASSED' : 'ANAHITAJI MAONGEZEKO'}`
             </div>
           </div>
 
-          {/* Tabs: Term 1, Term 2, Term 3 */}
+          {/* Tabs: Term 1, Term 2 */}
           <div className="space-y-3">
             <div className="flex items-center justify-between border-b border-slate-200 pb-2">
               <div className="flex items-center gap-2">
@@ -420,7 +420,7 @@ Hali: ${Number(annualAvg) >= 45 ? 'AMEFAULU / PASSED' : 'ANAHITAJI MAONGEZEKO'}`
                 <h3 className="text-sm font-black text-slate-900">Term-by-Term Examination Details</h3>
               </div>
               <div className="flex gap-1 bg-slate-100 p-1 rounded-xl">
-                {(['Term 1', 'Term 2', 'Term 3'] as const).map(term => (
+                {(['Term 1', 'Term 2'] as const).map(term => (
                   <button
                     key={term}
                     type="button"

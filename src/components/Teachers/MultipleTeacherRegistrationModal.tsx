@@ -18,6 +18,7 @@ import {
 import { Teacher, SchoolStaffRole, SchoolInfo } from '../../types';
 import { STAFF_ROLES_LIST, INVIGILATOR_COLORS, SUBJECT_LIST } from '../../constants/defaults';
 import { formatPhoneNumber, getTanzanianCarrier } from '../../utils/phoneUtils';
+import { computeTeacherInitial } from '../../utils/teacherInitials';
 import { escapeCSV, downloadFile } from '../../utils/export';
 
 interface MultipleTeacherRegistrationModalProps {
@@ -123,21 +124,9 @@ export const MultipleTeacherRegistrationModal: React.FC<MultipleTeacherRegistrat
     setRows(prev => prev.map(r => (r.id === id ? { ...r, ...patch } : r)));
   };
 
-  // Generate unique initial for teacher
+  // Generate unique initial for teacher (First letter of First Name + First letter of Last Name, e.g. Juma Hassan = JH)
   const generateUniqueInitial = (fullName: string, assignedInitials: Set<string>): string => {
-    const cleaned = fullName.replace(/^(mwl|mwalimu|tr|teacher|mr|mrs|ms|dr|prof)\.?\s+/i, '').trim();
-    const parts = cleaned.split(/\s+/).filter(Boolean);
-    let base = '';
-    if (parts.length >= 2) {
-      base = (parts[0][0] + parts[1][0]).toUpperCase();
-    } else if (parts.length === 1 && parts[0].length >= 2) {
-      base = parts[0].substring(0, 2).toUpperCase();
-    } else if (parts.length === 1) {
-      base = (parts[0][0] + 'T').toUpperCase();
-    } else {
-      base = 'TR';
-    }
-
+    const base = computeTeacherInitial(fullName);
     let result = base;
     let counter = 1;
     while (assignedInitials.has(result)) {

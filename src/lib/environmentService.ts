@@ -1,4 +1,4 @@
-import { db } from './dbClient';
+import { db, supabase } from './dbClient';
 import { collection, query, where, getDocs, doc, setDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import { EnvironmentEquipment, EquipmentUsageLog, EnvironmentOrder, SchoolPurchasedEquipment } from '../types';
 
@@ -6,11 +6,6 @@ const LOCAL_STORAGE_EQUIPMENT_KEY = 'haby_environment_equipment_';
 const LOCAL_STORAGE_USAGE_KEY = 'haby_equipment_usage_log_';
 const LOCAL_STORAGE_ORDERS_KEY = 'haby_environment_orders_';
 const LOCAL_STORAGE_PURCHASES_KEY = 'haby_school_purchases_';
-
-const isValidUuid = (id?: string) => {
-  if (!id) return false;
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id);
-};
 
 // Initial Starter Data for Environmental Equipment in Tanzanian Schools
 export const DEFAULT_ENVIRONMENT_EQUIPMENT: Omit<EnvironmentEquipment, 'id'>[] = [
@@ -140,6 +135,31 @@ export async function fetchEquipmentList(schoolId: string): Promise<EnvironmentE
   const localList = getLocalEquipment(schoolId);
 
   try {
+    const { data: sqlData, error: sqlErr } = await supabase
+      .from('environment_equipment')
+      .select('*')
+      .eq('school_id', schoolId)
+      .order('created_at', { ascending: false });
+    if (!sqlErr && Array.isArray(sqlData) && sqlData.length > 0) {
+      const formatted: EnvironmentEquipment[] = sqlData.map((data: any) => ({
+        id: String(data.id),
+        name: data.name || 'Kifaa Kisichojulikana',
+        category: data.category || 'Vinginevyo',
+        quantity: Number(data.quantity || 0),
+        condition: (data.condition || 'Nzuri') as any,
+        location: data.location || 'Stoo ya Mazingira',
+        purchase_date: data.purchase_date || data.purchaseDate || '',
+        added_by: data.added_by || data.addedBy || '',
+        school_id: data.school_id || data.schoolId || schoolId,
+        created_at: data.created_at || data.createdAt || new Date().toISOString(),
+        updated_at: data.updated_at || data.updatedAt || new Date().toISOString()
+      }));
+      setLocalEquipment(schoolId, formatted);
+      return formatted;
+    }
+  } catch (e) {}
+
+  try {
     const q = query(
       collection(db, 'environment_equipment'),
       where('school_id', '==', schoolId),
@@ -166,10 +186,9 @@ export async function fetchEquipmentList(schoolId: string): Promise<EnvironmentE
       setLocalEquipment(schoolId, formatted);
       return formatted;
     }
-    return localList;
-  } catch (err: any) {
-    return localList;
-  }
+  } catch (err: any) {}
+
+  return localList;
 }
 
 export async function saveEquipmentItem(
@@ -205,31 +224,38 @@ export async function saveEquipmentItem(
   }
   setLocalEquipment(schoolId, updatedList);
 
-  try {
-    const payload: Record<string, any> = {
-      id: itemId,
-      name: fullItem.name,
-      category: fullItem.category,
-      quantity: fullItem.quantity,
-      condition: fullItem.condition,
-      location: fullItem.location,
-      purchase_date: fullItem.purchase_date,
-      added_by: fullItem.added_by,
-      school_id: schoolId,
-      updated_at: now
-    };
+  const payload: Record<string, any> = {
+    id: itemId,
+    name: fullItem.name,
+    category: fullItem.category,
+    quantity: fullItem.quantity,
+    condition: fullItem.condition,
+    location: fullItem.location,
+    purchase_date: fullItem.purchase_date,
+    added_by: fullItem.added_by,
+    school_id: schoolId,
+    updated_at: now
+  };
 
+  try {
+    await supabase.from('environment_equipment').upsert(payload);
+  } catch (e) {}
+
+  try {
     await setDoc(doc(db, 'environment_equipment', itemId), payload, { merge: true });
-    return { data: fullItem, error: null };
-  } catch (err: any) {
-    return { data: fullItem, error: err };
-  }
+  } catch (err: any) {}
+
+  return { data: fullItem, error: null };
 }
 
 export async function deleteEquipmentItem(schoolId: string, id: string): Promise<boolean> {
   const currentList = getLocalEquipment(schoolId);
   const filtered = currentList.filter(e => String(e.id) !== String(id));
   setLocalEquipment(schoolId, filtered);
+
+  try {
+    await supabase.from('environment_equipment').delete().eq('id', id);
+  } catch (e) {}
 
   try {
     await deleteDoc(doc(db, 'environment_equipment', id));
@@ -240,6 +266,32 @@ export async function deleteEquipmentItem(schoolId: string, id: string): Promise
 export async function fetchUsageLogs(schoolId: string): Promise<EquipmentUsageLog[]> {
   if (!schoolId) return [];
   const localLogs = getLocalUsageLogs(schoolId);
+
+  try {
+    const { data: sqlData, error: sqlErr } = await supabase
+      .from('equipment_usage_log')
+      .select('*')
+      .eq('school_id', schoolId)
+      .order('created_at', { ascending: false });
+    if (!sqlErr && Array.isArray(sqlData) && sqlData.length > 0) {
+      const formatted: EquipmentUsageLog[] = sqlData.map((data: any) => ({
+        id: String(data.id),
+        equipment_id: String(data.equipment_id || data.equipmentId || ''),
+        equipment_name: data.equipment_name || '',
+        used_by: data.used_by || data.usedBy || 'Haijabainishwa',
+        quantity_used: Number(data.quantity_used || data.quantityUsed || 1),
+        purpose: data.purpose || 'Usafi wa Mazingira',
+        date_used: data.date_used || data.dateUsed || new Date().toISOString().split('T')[0],
+        returned_date: data.returned_date || data.returnedDate || null,
+        status: (data.status || 'Imetumika') as any,
+        notes: data.notes || '',
+        school_id: data.school_id || data.schoolId || schoolId,
+        created_at: data.created_at || data.createdAt || new Date().toISOString()
+      }));
+      setLocalUsageLogs(schoolId, formatted);
+      return formatted;
+    }
+  } catch (e) {}
 
   try {
     const q = query(
@@ -269,10 +321,9 @@ export async function fetchUsageLogs(schoolId: string): Promise<EquipmentUsageLo
       setLocalUsageLogs(schoolId, formatted);
       return formatted;
     }
-    return localLogs;
-  } catch (err) {
-    return localLogs;
-  }
+  } catch (err) {}
+
+  return localLogs;
 }
 
 export async function logUsageEntry(
@@ -312,26 +363,29 @@ export async function logUsageEntry(
     }
   }
 
-  try {
-    const payload: Record<string, any> = {
-      id: logId,
-      equipment_id: fullLog.equipment_id,
-      equipment_name: fullLog.equipment_name,
-      used_by: fullLog.used_by,
-      quantity_used: fullLog.quantity_used,
-      purpose: fullLog.purpose,
-      date_used: fullLog.date_used,
-      returned_date: fullLog.returned_date,
-      status: fullLog.status,
-      notes: fullLog.notes,
-      school_id: schoolId
-    };
+  const payload: Record<string, any> = {
+    id: logId,
+    equipment_id: fullLog.equipment_id,
+    equipment_name: fullLog.equipment_name,
+    used_by: fullLog.used_by,
+    quantity_used: fullLog.quantity_used,
+    purpose: fullLog.purpose,
+    date_used: fullLog.date_used,
+    returned_date: fullLog.returned_date,
+    status: fullLog.status,
+    notes: fullLog.notes,
+    school_id: schoolId
+  };
 
+  try {
+    await supabase.from('equipment_usage_log').upsert(payload);
+  } catch (e) {}
+
+  try {
     await setDoc(doc(db, 'equipment_usage_log', logId), payload, { merge: true });
-    return { data: fullLog, error: null };
-  } catch (err: any) {
-    return { data: fullLog, error: err };
-  }
+  } catch (err: any) {}
+
+  return { data: fullLog, error: null };
 }
 
 export async function returnEquipmentItem(
@@ -365,14 +419,19 @@ export async function returnEquipmentItem(
       saveEquipmentItem(schoolId, equipList[equipIndex]).catch(() => {});
     }
 
+    const payload: Record<string, any> = {
+      id: logId,
+      status: 'Imerudishwa',
+      returned_date: now.split('T')[0],
+      notes: currentLogs[logIndex].notes,
+      school_id: schoolId
+    };
+
     try {
-      const payload: Record<string, any> = {
-        id: logId,
-        status: 'Imerudishwa',
-        returned_date: now.split('T')[0],
-        notes: currentLogs[logIndex].notes,
-        school_id: schoolId
-      };
+      await supabase.from('equipment_usage_log').update(payload).eq('id', logId);
+    } catch (e) {}
+
+    try {
       await setDoc(doc(db, 'equipment_usage_log', logId), payload, { merge: true });
     } catch (e) {}
 
@@ -400,6 +459,34 @@ function setLocalOrders(schoolId: string, orders: EnvironmentOrder[]): void {
 export async function fetchEnvironmentOrders(schoolId: string): Promise<EnvironmentOrder[]> {
   if (!schoolId) return [];
   const local = getLocalOrders(schoolId);
+
+  try {
+    const { data: sqlData, error: sqlErr } = await supabase
+      .from('environment_orders')
+      .select('*')
+      .eq('school_id', schoolId)
+      .order('created_at', { ascending: false });
+    if (!sqlErr && Array.isArray(sqlData) && sqlData.length > 0) {
+      const formatted: EnvironmentOrder[] = sqlData.map((data: any) => ({
+        id: String(data.id),
+        student_id: data.student_id || data.studentId || '',
+        student_name: data.student_name || data.studentName || '',
+        class: data.class || '',
+        stream: data.stream || '',
+        equipment_name: data.equipment_name || data.equipmentName || '',
+        quantity_ordered: Number(data.quantity_ordered || data.quantityOrdered || 1),
+        order_date: data.order_date || data.orderDate || new Date().toISOString().split('T')[0],
+        status: (data.status || 'Imeagizwa') as any,
+        notes: data.notes || '',
+        ordered_by: data.ordered_by || data.orderedBy || '',
+        school_id: data.school_id || data.schoolId || schoolId,
+        created_at: data.created_at || data.createdAt || new Date().toISOString()
+      }));
+      setLocalOrders(schoolId, formatted);
+      return formatted;
+    }
+  } catch (e) {}
+
   try {
     const q = query(
       collection(db, 'environment_orders'),
@@ -429,10 +516,9 @@ export async function fetchEnvironmentOrders(schoolId: string): Promise<Environm
       setLocalOrders(schoolId, formatted);
       return formatted;
     }
-    return local;
-  } catch (err) {
-    return local;
-  }
+  } catch (err) {}
+
+  return local;
 }
 
 export async function saveEnvironmentOrder(
@@ -469,33 +555,40 @@ export async function saveEnvironmentOrder(
   }
   setLocalOrders(schoolId, updated);
 
-  try {
-    const payload: Record<string, any> = {
-      id,
-      student_id: fullOrder.student_id,
-      student_name: fullOrder.student_name,
-      class: fullOrder.class,
-      stream: fullOrder.stream,
-      equipment_name: fullOrder.equipment_name,
-      quantity_ordered: fullOrder.quantity_ordered,
-      order_date: fullOrder.order_date,
-      status: fullOrder.status,
-      notes: fullOrder.notes,
-      ordered_by: fullOrder.ordered_by,
-      school_id: schoolId
-    };
+  const payload: Record<string, any> = {
+    id,
+    student_id: fullOrder.student_id,
+    student_name: fullOrder.student_name,
+    class: fullOrder.class,
+    stream: fullOrder.stream,
+    equipment_name: fullOrder.equipment_name,
+    quantity_ordered: fullOrder.quantity_ordered,
+    order_date: fullOrder.order_date,
+    status: fullOrder.status,
+    notes: fullOrder.notes,
+    ordered_by: fullOrder.ordered_by,
+    school_id: schoolId
+  };
 
+  try {
+    await supabase.from('environment_orders').upsert(payload);
+  } catch (e) {}
+
+  try {
     await setDoc(doc(db, 'environment_orders', id), payload, { merge: true });
-    return { data: fullOrder, error: null };
-  } catch (err) {
-    return { data: fullOrder, error: err };
-  }
+  } catch (err) {}
+
+  return { data: fullOrder, error: null };
 }
 
 export async function deleteEnvironmentOrder(schoolId: string, orderId: string): Promise<boolean> {
   const current = getLocalOrders(schoolId);
   const updated = current.filter(o => String(o.id) !== String(orderId));
   setLocalOrders(schoolId, updated);
+
+  try {
+    await supabase.from('environment_orders').delete().eq('id', orderId);
+  } catch (e) {}
 
   try {
     await deleteDoc(doc(db, 'environment_orders', orderId));
@@ -524,6 +617,35 @@ function setLocalPurchases(schoolId: string, items: SchoolPurchasedEquipment[]):
 export async function fetchSchoolPurchasedEquipment(schoolId: string): Promise<SchoolPurchasedEquipment[]> {
   if (!schoolId) return [];
   const local = getLocalPurchases(schoolId);
+
+  try {
+    const { data: sqlData, error: sqlErr } = await supabase
+      .from('school_purchased_equipment')
+      .select('*')
+      .eq('school_id', schoolId)
+      .order('created_at', { ascending: false });
+    if (!sqlErr && Array.isArray(sqlData) && sqlData.length > 0) {
+      const formatted: SchoolPurchasedEquipment[] = sqlData.map((data: any) => ({
+        id: String(data.id),
+        equipment_name: data.equipment_name || data.equipmentName || '',
+        category: data.category || 'Kilimo',
+        quantity_bought: Number(data.quantity_bought || data.quantityBought || 1),
+        unit_price: Number(data.unit_price || data.unitPrice || 0),
+        total_cost: Number(data.total_cost || data.totalCost || (Number(data.quantity_bought || 1) * Number(data.unit_price || 0))),
+        supplier: data.supplier || '',
+        purchase_date: data.purchase_date || data.purchaseDate || new Date().toISOString().split('T')[0],
+        receipt_number: data.receipt_number || data.receiptNumber || '',
+        condition: (data.condition || 'Nzuri') as any,
+        storage_location: data.storage_location || data.storageLocation || '',
+        school_id: data.school_id || data.schoolId || schoolId,
+        added_by: data.added_by || data.addedBy || '',
+        created_at: data.created_at || data.createdAt || new Date().toISOString()
+      }));
+      setLocalPurchases(schoolId, formatted);
+      return formatted;
+    }
+  } catch (e) {}
+
   try {
     const q = query(
       collection(db, 'school_purchased_equipment'),
@@ -554,10 +676,9 @@ export async function fetchSchoolPurchasedEquipment(schoolId: string): Promise<S
       setLocalPurchases(schoolId, formatted);
       return formatted;
     }
-    return local;
-  } catch (err) {
-    return local;
-  }
+  } catch (err) {}
+
+  return local;
 }
 
 export async function saveSchoolPurchasedItem(
@@ -599,28 +720,31 @@ export async function saveSchoolPurchasedItem(
   }
   setLocalPurchases(schoolId, updated);
 
-  try {
-    const payload: Record<string, any> = {
-      id,
-      equipment_name: fullItem.equipment_name,
-      category: fullItem.category,
-      quantity_bought: fullItem.quantity_bought,
-      unit_price: fullItem.unit_price,
-      total_cost: fullItem.total_cost,
-      supplier: fullItem.supplier,
-      purchase_date: fullItem.purchase_date,
-      receipt_number: fullItem.receipt_number,
-      condition: fullItem.condition,
-      storage_location: fullItem.storage_location,
-      school_id: schoolId,
-      added_by: fullItem.added_by
-    };
+  const payload: Record<string, any> = {
+    id,
+    equipment_name: fullItem.equipment_name,
+    category: fullItem.category,
+    quantity_bought: fullItem.quantity_bought,
+    unit_price: fullItem.unit_price,
+    total_cost: fullItem.total_cost,
+    supplier: fullItem.supplier,
+    purchase_date: fullItem.purchase_date,
+    receipt_number: fullItem.receipt_number,
+    condition: fullItem.condition,
+    storage_location: fullItem.storage_location,
+    school_id: schoolId,
+    added_by: fullItem.added_by
+  };
 
+  try {
+    await supabase.from('school_purchased_equipment').upsert(payload);
+  } catch (e) {}
+
+  try {
     await setDoc(doc(db, 'school_purchased_equipment', id), payload, { merge: true });
-    return { data: fullItem, error: null };
-  } catch (err) {
-    return { data: fullItem, error: err };
-  }
+  } catch (err) {}
+
+  return { data: fullItem, error: null };
 }
 
 export async function deleteSchoolPurchasedItem(schoolId: string, itemId: string): Promise<boolean> {
@@ -629,8 +753,13 @@ export async function deleteSchoolPurchasedItem(schoolId: string, itemId: string
   setLocalPurchases(schoolId, updated);
 
   try {
+    await supabase.from('school_purchased_equipment').delete().eq('id', itemId);
+  } catch (e) {}
+
+  try {
     await deleteDoc(doc(db, 'school_purchased_equipment', itemId));
   } catch (e) {}
 
   return true;
 }
+

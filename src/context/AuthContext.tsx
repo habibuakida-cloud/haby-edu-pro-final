@@ -394,7 +394,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    if (typeof window!== 'undefined') {
+    if (typeof window !== 'undefined') {
+      const activeSchool = safeGetItem(window.localStorage, 'currentSchoolId') || safeGetItem(window.localStorage, 'schoolId');
+      if (activeSchool) {
+        safeSetItem(window.localStorage, 'haby_last_school_id', activeSchool);
+      }
       safeSetItem(window.sessionStorage, 'haby_explicit_logout', 'true');
       safeRemoveItem(window.sessionStorage, 'haby_demo_user');
       safeRemoveItem(window.localStorage, 'haby_auth_user');

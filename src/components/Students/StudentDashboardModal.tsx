@@ -52,6 +52,8 @@ import { exportRemedialTimetablePDF } from '../../utils/remedialPdfExport';
 import { fetchTimetable, isSameStream } from '../../lib/timetableService';
 import { isSameClass } from '../../utils/reportCardUtils';
 import { getSubjectColor } from '../../utils/colors';
+import { generateStudentQrCardText } from '../../utils/studentQrUtils';
+import { AttendanceQrModal } from '../Attendance/AttendanceQrModal';
 
 export interface StudentDashboardModalProps {
   isOpen: boolean;
@@ -86,6 +88,7 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
   const [isLoadingClassTimetable, setIsLoadingClassTimetable] = useState<boolean>(true);
   const [isLoadingRemedial, setIsLoadingRemedial] = useState<boolean>(true);
   const [selectedDayFilter, setSelectedDayFilter] = useState<string>('ALL');
+  const [showFullQrModal, setShowFullQrModal] = useState<boolean>(false);
 
   const loadTimetables = useCallback(async () => {
     if (!student) return;
@@ -436,12 +439,19 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
                 )}
               </div>
               
-              <div className="w-20 h-20 bg-white border border-slate-200 rounded-xl overflow-hidden shrink-0 flex items-center justify-center shadow-xs">
+              <div
+                onClick={() => setShowFullQrModal(true)}
+                className="w-24 h-24 bg-white border border-purple-200 hover:border-purple-500 rounded-xl overflow-hidden shrink-0 flex flex-col items-center justify-center shadow-xs cursor-pointer transition group p-1"
+                title="Click to expand Student QR Code (Attendance + Multi-Exam Results)"
+              >
                 <QRCodeCanvas 
-                  value={student.regNo || student.id.toString()}
-                  size={70}
-                  level="H"
+                  value={generateStudentQrCardText(student, schoolInfo, dailyAttendance, examinationRecords)}
+                  size={68}
+                  level="L"
                 />
+                <span className="text-[8px] font-black text-purple-700 group-hover:text-purple-900 uppercase mt-0.5">
+                  QR + Results
+                </span>
               </div>
 
               <div className="space-y-1">
@@ -946,6 +956,17 @@ export const StudentDashboardModal: React.FC<StudentDashboardModalProps> = ({
             Close Dashboard
           </button>
         </div>
+        {/* Full Student QR Modal (Attendance + Exam Results) */}
+        <AttendanceQrModal
+          isOpen={showFullQrModal}
+          onClose={() => setShowFullQrModal(false)}
+          students={allStudentsInClass.length > 0 ? allStudentsInClass : [student]}
+          initialStudent={student}
+          selectedClass={student.className}
+          schoolInfo={schoolInfo}
+          dailyAttendance={dailyAttendance}
+          examinationRecords={examinationRecords}
+        />
       </div>
     </div>
   );

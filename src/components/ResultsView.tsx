@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { 
   Award, 
   Printer, 
@@ -42,9 +42,10 @@ import {
   ShieldCheck,
   ToggleLeft,
   ToggleRight,
-  Archive
+  Archive,
+  MessageCircle
 } from 'lucide-react';
-import { Student, SchoolInfo, UserAccount, Exam, ExaminationRecord, Teacher, UsalRecord, ExamTerm, RecordExamType } from '../types';
+import { Student, SchoolInfo, UserAccount, Exam, ExaminationRecord, Teacher, UsalRecord, ExamTerm, RecordExamType, AcademicTermDates } from '../types';
 import { printReportCardDocument } from '../utils/export';
 import { exportGradeDistributionAndPerformancePDF } from '../utils/performancePdfExport';
 import { ReportCardDocument } from './ReportCard/ReportCardDocument';
@@ -56,7 +57,7 @@ import { USALModal } from './USAL/USALModal';
 import { ExamSettingsView } from './Exams/ExamSettingsView';
 import { ExamArchiveView } from './Results/ExamArchiveView';
 import { calculateNectaLevelResults } from '../utils/nectaRules';
-import { buildExaminationRecord } from '../utils/examinationRecordsUtils';
+import { buildExaminationRecord, isMatchingExamType, getExamNormalizedCategory } from '../utils/examinationRecordsUtils';
 import { 
   calculatePerformanceSummary, 
   generateCharacterFromPerformance, 
@@ -98,6 +99,8 @@ interface ResultsViewProps {
   onUpdateLedgerSubjectKeys?: (keys: string[]) => void;
   onUpdateExam?: (exam: Exam) => void;
   onUpdateExams?: (exams: Exam[]) => void;
+  academicTermDates?: AcademicTermDates;
+  communicationTemplates?: any[];
 }
 
 // Complete list of available Tanzanian subjects across Nursery, Primary, Secondary and High School
@@ -198,7 +201,9 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   ledgerSubjectKeys: initialLedgerSubjectKeys = [],
   onUpdateLedgerSubjectKeys,
   onUpdateExam,
-  onUpdateExams
+  onUpdateExams,
+  academicTermDates,
+  communicationTemplates = []
 }) => {
   const [activeTab, setActiveTab] = useState<'ledger' | 'dashboard' | 'reportcard' | 'comparison' | 'exam_settings' | 'archive'>('ledger');
   const [examSettingsSearch, setExamSettingsSearch] = useState<string>('');
@@ -268,6 +273,30 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
         : 'Mitihani yote imefungwa (Locked) kuzuia uingizaji au mabadiliko ya alama!'
     );
     setTimeout(() => setExamSettingsToast(null), 4500);
+  };
+
+  const generateResultsMessage = (student: Student, summary: any, type: 'SMS' | 'WhatsApp' = 'SMS') => {
+    const subjectsStr = Object.entries(summary.effectiveMarks)
+      .map(([s, g]) => `${s}-${g}`)
+      .join(', ');
+    
+    const template = communicationTemplates.find(t => t.type === type && t.category === 'Results');
+    if (template) {
+      return template.content
+        .replace(/{studentName}/g, student.name)
+        .replace(/{examName}/g, selectedExam)
+        .replace(/{year}/g, selectedYear)
+        .replace(/{division}/g, summary.division || summary.primaryGrade || '-')
+        .replace(/{marks}/g, String(summary.points || '-'))
+        .replace(/{subjects}/g, subjectsStr)
+        .replace(/{schoolName}/g, schoolInfo.name || 'HABY EDU PRO');
+    }
+
+    if (type === 'WhatsApp') {
+      return `*MATOKEO YA MTIHANI*\n\nNdugu Mzazi, haya ni matokeo ya mwanao *${student.name}* kwa mtihani wa *${selectedExam}* mwaka *${selectedYear}*:\n\n*Division:* ${summary.division || summary.primaryGrade || '-'}\n*Points:* ${summary.points || '-'}\n\n*Masomo:*\n${subjectsStr}\n\nAsante,\n*${schoolInfo.name || 'HABY EDU PRO'}*`;
+    }
+
+    return `Ndugu Mzazi, matokeo ya ${student.name} ${selectedExam} ${selectedYear}: DIV ${summary.division || summary.primaryGrade || '-'}, AGGT ${summary.points || '-'}. Masomo: ${subjectsStr}. - ${schoolInfo.name || 'HABY EDU PRO'}`;
   };
 
   const filteredExamSettings = useMemo(() => {
@@ -472,16 +501,190 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     }
   }, [students, selectedStudentReg]);
 
-  // Check if candidate has attempted at least 1 subject
-  const hasStudentAttemptedAnySubject = (student: Student, pending?: Record<string, any>): boolean => {
+  // Selected Exam Object matching current selection
+  const selectedExamObj = useMemo(() => {
+    return exams.find(e => 
+      e.name?.toLowerCase().trim() === selectedExam?.toLowerCase().trim() ||
+      e.type?.toLowerCase().trim() === selectedExam?.toLowerCase().trim() ||
+      String(e.id) === String(selectedExam) ||
+      (e.name && selectedExam && e.name.toLowerCase().includes(selectedExam.toLowerCase())) ||
+      (selectedExam && e.name && selectedExam.toLowerCase().includes(e.name.toLowerCase()))
+    );
+  }, [exams, selectedExam]);
+
+  // Exam key matching MarkEntryView strict isolation
+  const examKey = useMemo(() => {
+    if (selectedExamObj) {
+      return `${selectedExamObj.id}_${selectedYear}_${selectedTerm}`.toLowerCase();
+    }
+    return `${selectedExam}_${selectedYear}_${selectedTerm}`.toLowerCase().replace(/\s+/g, '_');
+  }, [selectedExamObj, selectedExam, selectedYear, selectedTerm]);
+
+  // Helper to extract student marks strictly for the currently selected exam session
+  const getExamMarksMap = useCallback((student: Student): Record<string, number> => {
+    // 1. Look in student.examMarks using strict keys
+    const marksFromExamMarks: Record<string, number> = {};
+    let foundInExamMarks = false;
+
+    if (student.examMarks) {
+      const candidateKeys = [
+        selectedExamObj ? `${selectedExamObj.id}_${selectedYear}_${selectedTerm}`.toLowerCase() : null,
+        `${selectedExam}_${selectedYear}_${selectedTerm}`.toLowerCase().replace(/\s+/g, '_'),
+        `${selectedExam}_${selectedYear}_${selectedTerm}`.toLowerCase(),
+        selectedExamType !== 'All' ? `${selectedExamType}_${selectedYear}_${selectedTerm}`.toLowerCase() : null,
+        `${getExamNormalizedCategory(selectedExam)}_${selectedYear}_${selectedTerm}`.toLowerCase(),
+        `${selectedExam}`.toLowerCase(),
+        `${getExamNormalizedCategory(selectedExam)}`.toLowerCase()
+      ].filter(Boolean) as string[];
+
+      for (const key of candidateKeys) {
+        if (student.examMarks[key] && Object.keys(student.examMarks[key]).length > 0) {
+          Object.assign(marksFromExamMarks, student.examMarks[key]);
+          foundInExamMarks = true;
+          break;
+        }
+      }
+    }
+
+    if (foundInExamMarks && Object.keys(marksFromExamMarks).length > 0) {
+      return marksFromExamMarks;
+    }
+
+    // 2. Look in examinationRecords for a record matching this student, year, term, and exam
+    if (examinationRecords && examinationRecords.length > 0) {
+      const rec = examinationRecords.find(r => 
+        r.studentId === student.id &&
+        (selectedYear === 'All' || r.academicYear === selectedYear) &&
+        (selectedTerm === 'All' || r.term === selectedTerm) &&
+        (isMatchingExamType(r.examType, selectedExam) || (selectedExamType !== 'All' && isMatchingExamType(r.examType, selectedExamType)))
+      );
+      if (rec && rec.subjects) {
+        const fromRec: Record<string, number> = {};
+        Object.entries(rec.subjects).forEach(([sub, info]) => {
+          if (info && typeof info.marks === 'number') {
+            fromRec[sub] = info.marks;
+          }
+        });
+        if (Object.keys(fromRec).length > 0) {
+          return fromRec;
+        }
+      }
+    }
+
+    // 3. Fallback to student.marks ONLY IF the selected exam is Midterm (the initial default sample dataset)
+    const isDefaultMidtermSession = isMatchingExamType(selectedExam, 'Midterm') && 
+      (selectedYear === '2026' || !selectedYear) && 
+      (selectedTerm === 'Term 1' || !selectedTerm);
+
+    if (isDefaultMidtermSession && student.marks && Object.keys(student.marks).length > 0) {
+      return { ...student.marks };
+    }
+
+    // Return empty for Terminal, Annual, Weekly, or other unpopulated exams to ensure strict isolation
+    return {};
+  }, [selectedExamObj, selectedExam, selectedExamType, selectedYear, selectedTerm, examinationRecords]);
+
+  // Compute a candidate's effective marks, total, average, division and points strictly for the selected exam
+  const getCandidateExamSummary = useCallback((student: Student) => {
+    // Collect effective marks (including pending unsaved cell edits)
+    const pending = pendingMarks[student.id];
+    const baseMarks = getExamMarksMap(student);
+    const effectiveMarks: Record<string, number> = { ...baseMarks };
+
+    if (pending) {
+      activeLedgerSubjects.forEach(sub => {
+        if (pending[sub.key] !== undefined) {
+          if (pending[sub.key] === '') {
+            delete effectiveMarks[sub.fullName];
+            delete effectiveMarks[sub.key];
+            if (sub.key === 'B.MATH') delete effectiveMarks['Mathematics'];
+          } else {
+            effectiveMarks[sub.fullName] = Number(pending[sub.key]);
+          }
+        }
+      });
+    }
+
+    const cleanedMarks = cleanAndFilterMarksForClass(effectiveMarks, student.className || selectedClass, student.level);
+    const validScores = Object.values(cleanedMarks).filter(v => typeof v === 'number' && !isNaN(v as number)) as number[];
+    const hasAttempted = validScores.length > 0;
+
+    if (!hasAttempted) {
+      return {
+        hasAttempted: false,
+        total: undefined as number | undefined,
+        average: undefined as string | undefined,
+        division: undefined as string | undefined,
+        primaryGrade: undefined as string | undefined,
+        points: undefined as number | undefined,
+        remarks: 'Candidate did not sit / No marks recorded',
+        effectiveMarks: {} as Record<string, number>
+      };
+    }
+
+    // If no pending edits, check if an examinationRecord exists for official saved totals
+    if (!pending && examinationRecords && examinationRecords.length > 0) {
+      const rec = examinationRecords.find(r => 
+        r.studentId === student.id &&
+        (selectedYear === 'All' || r.academicYear === selectedYear) &&
+        (selectedTerm === 'All' || r.term === selectedTerm) &&
+        (isMatchingExamType(r.examType, selectedExam) || (selectedExamType !== 'All' && isMatchingExamType(r.examType, selectedExamType)))
+      );
+      if (rec && rec.totalMarks !== undefined) {
+        return {
+          hasAttempted: true,
+          total: rec.totalMarks,
+          average: String(rec.averageMarks),
+          division: rec.division,
+          primaryGrade: rec.overallGrade,
+          points: rec.points ?? undefined,
+          remarks: rec.teacherRemarks || 'Good progress',
+          effectiveMarks
+        };
+      }
+    }
+
+    // Dynamic calculation from effectiveMarks
+    const total = validScores.reduce((a, b) => a + b, 0);
+    const avg = validScores.length > 0 ? (total / validScores.length).toFixed(1) : undefined;
+
+    if (isClassPrimary) {
+      const pRes = calculatePrimaryScoreResult(cleanedMarks);
+      return {
+        hasAttempted: true,
+        total,
+        average: avg,
+        division: pRes.overallGrade,
+        primaryGrade: pRes.overallGrade,
+        points: undefined,
+        remarks: (pRes as any).remarks || pRes.passStatus,
+        effectiveMarks
+      };
+    } else {
+      const olevel = calculateNectaLevelResults(cleanedMarks, student.className || selectedClass);
+      return {
+        hasAttempted: true,
+        total: olevel.total,
+        average: validScores.length > 0 ? String(olevel.average) : undefined,
+        division: olevel.division,
+        primaryGrade: undefined,
+        points: olevel.points,
+        remarks: olevel.remarks,
+        effectiveMarks
+      };
+    }
+  }, [pendingMarks, getExamMarksMap, activeLedgerSubjects, selectedClass, examinationRecords, selectedYear, selectedTerm, selectedExam, selectedExamType, isClassPrimary]);
+
+  // Check if candidate has attempted at least 1 subject in this specific exam session
+  const hasStudentAttemptedAnySubject = useCallback((student: Student, pending?: Record<string, any>): boolean => {
     if (pending) {
       const hasPending = Object.values(pending).some(v => v !== '' && v !== undefined && v !== null && !isNaN(Number(v)));
       if (hasPending) return true;
     }
-    if (!student.marks) return false;
-    const validScores = Object.values(student.marks).filter(v => v !== undefined && v !== null && typeof v === 'number' && !isNaN(v));
+    const marksMap = getExamMarksMap(student);
+    const validScores = Object.values(marksMap).filter(v => v !== undefined && v !== null && typeof v === 'number' && !isNaN(v));
     return validScores.length > 0;
-  };
+  }, [getExamMarksMap]);
 
   // Base list of all candidates in this class and stream (unfiltered by search/status for accurate stats)
   const allClassCandidates = useMemo(() => {
@@ -513,7 +716,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
 
       return matchSearch && matchStatus;
     });
-  }, [allClassCandidates, searchQuery, statusFilter, pendingMarks]);
+  }, [allClassCandidates, searchQuery, statusFilter, pendingMarks, hasStudentAttemptedAnySubject]);
 
   // Multi-select handlers
   const handleToggleSelectAll = () => {
@@ -534,39 +737,49 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     if (pendingMarks[student.id] && pendingMarks[student.id][subjectKey] !== undefined) {
       return pendingMarks[student.id][subjectKey];
     }
-    if (!student.marks) return '';
+
+    const marksMap = getExamMarksMap(student);
+    if (!marksMap || Object.keys(marksMap).length === 0) return '';
 
     // Direct match on fullName or key
-    if (student.marks[subjectFullName] !== undefined) return student.marks[subjectFullName];
-    if (student.marks[subjectKey] !== undefined) return student.marks[subjectKey];
+    if (marksMap[subjectFullName] !== undefined) return marksMap[subjectFullName];
+    if (marksMap[subjectKey] !== undefined) return marksMap[subjectKey];
+
+    // Case-insensitive match
+    const lowerFull = subjectFullName.toLowerCase().trim();
+    const lowerKey = subjectKey.toLowerCase().trim();
+    for (const [k, v] of Object.entries(marksMap)) {
+      const lk = k.toLowerCase().trim();
+      if (lk === lowerFull || lk === lowerKey) return v;
+    }
 
     // Deduplicated alias matching for Secondary
-    if (subjectKey === 'B.MATH') {
-      return student.marks['Basic Mathematics'] ?? student.marks['Mathematics'] ?? student.marks['Maths'] ?? '';
+    if (subjectKey === 'B.MATH' || lowerFull.includes('basic math') || lowerFull.includes('mathematics')) {
+      return marksMap['Basic Mathematics'] ?? marksMap['Mathematics'] ?? marksMap['Maths'] ?? '';
     }
-    if (subjectKey === 'ENG') {
-      return student.marks['English Language'] ?? student.marks['English'] ?? '';
+    if (subjectKey === 'ENG' || lowerFull === 'english language') {
+      return marksMap['English Language'] ?? marksMap['English'] ?? '';
     }
-    if (subjectKey === 'KIS') {
-      return student.marks['Kiswahili'] ?? student.marks['KISW'] ?? '';
+    if (subjectKey === 'KIS' || lowerFull === 'kiswahili') {
+      return marksMap['Kiswahili'] ?? marksMap['KISW'] ?? '';
     }
-    if (subjectKey === 'HISABATI') {
-      return student.marks['Hisabati (Mathematics)'] ?? student.marks['Hisabati'] ?? student.marks['Mathematics (Hisabati)'] ?? '';
+    if (subjectKey === 'HISABATI' || lowerFull.includes('hisabati')) {
+      return marksMap['Hisabati (Mathematics)'] ?? marksMap['Hisabati'] ?? marksMap['Mathematics (Hisabati)'] ?? '';
     }
     if (subjectKey === 'ENG.PRI') {
-      return student.marks['English Language (Primary)'] ?? student.marks['English Language'] ?? '';
+      return marksMap['English Language (Primary)'] ?? marksMap['English Language'] ?? '';
     }
-    if (subjectKey === 'SAYANSI') {
-      return student.marks['Sayansi na Teknolojia'] ?? student.marks['Science and Technology (Sayansi na Teknolojia)'] ?? student.marks['Science'] ?? '';
+    if (subjectKey === 'SAYANSI' || lowerFull.includes('sayansi')) {
+      return marksMap['Sayansi na Teknolojia'] ?? marksMap['Science and Technology (Sayansi na Teknolojia)'] ?? marksMap['Science'] ?? '';
     }
-    if (subjectKey === 'JAMII') {
-      return student.marks['Maarifa ya Jamii'] ?? student.marks['Social Studies (Maarifa ya Jamii)'] ?? student.marks['Social Studies'] ?? '';
+    if (subjectKey === 'JAMII' || lowerFull.includes('maarifa ya jamii')) {
+      return marksMap['Maarifa ya Jamii'] ?? marksMap['Social Studies (Maarifa ya Jamii)'] ?? marksMap['Social Studies'] ?? '';
     }
-    if (subjectKey === 'URAIA') {
-      return student.marks['Uraia na Maadili'] ?? student.marks['Civic and Moral Education (Uraia na Maadili)'] ?? '';
+    if (subjectKey === 'URAIA' || lowerFull.includes('uraia')) {
+      return marksMap['Uraia na Maadili'] ?? marksMap['Civic and Moral Education (Uraia na Maadili)'] ?? '';
     }
     if (subjectKey === 'MIKONDO' || subjectKey === 'MIKONDO.PRI') {
-      return student.marks['Mikondo'] ?? '';
+      return marksMap['Mikondo'] ?? '';
     }
 
     return '';
@@ -584,10 +797,15 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   };
 
   const handleCalculateAll = () => {
-    // Recompute total, average, division and ranking for all candidates in this class
+    // Recompute total, average, division and ranking for all candidates in this class for the selected exam
+    const currentYear = selectedYear || new Date().getFullYear().toString();
+    const termName = (selectedTerm || 'Term 1') as ExamTerm;
+    const examName = (selectedExam || 'Terminal') as RecordExamType;
+
     const updatedCandidates = classCandidates.map(s => {
       const p = pendingMarks[s.id] || {};
-      const rawMarks = { ...(s.marks || {}) };
+      const baseMarks = getExamMarksMap(s);
+      const rawMarks = { ...baseMarks };
 
       activeLedgerSubjects.forEach(sub => {
         if (p[sub.key] !== undefined) {
@@ -605,16 +823,22 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
         }
       });
 
-      const newMarks = cleanAndFilterMarksForClass(rawMarks, s.className || selectedClass, s.level);
-      const scores = Object.values(newMarks).filter(v => typeof v === 'number' && !isNaN(v as number)) as number[];
+      const cleanedMarks = cleanAndFilterMarksForClass(rawMarks, s.className || selectedClass, s.level);
+      const scores = Object.values(cleanedMarks).filter(v => typeof v === 'number' && !isNaN(v as number)) as number[];
       
       // Official NECTA National Evaluation Rules according to class level (Std IV, Std VII, Form II, Form IV, Form VI)
-      const nectaRes = calculateNectaLevelResults(newMarks, s.className || selectedClass);
+      const nectaRes = calculateNectaLevelResults(cleanedMarks, s.className || selectedClass);
+
+      // Store in examMarks under this exam's key
+      const examMarks = { ...(s.examMarks || {}) };
+      examMarks[examKey] = cleanedMarks;
 
       return {
         ...s,
-        marks: newMarks,
-        total: nectaRes.total,
+        examMarks,
+        // Update marks and stats
+        marks: (selectedExamObj?.isActive !== false) ? cleanedMarks : s.marks,
+        total: scores.length > 0 ? nectaRes.total : undefined,
         average: scores.length > 0 ? String(nectaRes.average) : undefined,
         primaryGrade: nectaRes.isPrimary ? (nectaRes.overallGrade as any) : undefined,
         passStatus: nectaRes.remarks,
@@ -650,11 +874,8 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
       finalStudents.forEach(s => onUpdateStudent(s));
     }
 
-    // Auto-save/upsert calculated results to Examination Records ledger
+    // Auto-save/upsert calculated results to Examination Records ledger specifically for this exam
     if (onAutoSaveExaminationRecords) {
-      const currentYear = selectedYear || new Date().getFullYear().toString();
-      const termName = (selectedTerm || 'Term 1') as ExamTerm;
-      const examName = (selectedExam || 'Terminal') as RecordExamType;
       const newExamRecords: ExaminationRecord[] = finalStudents
         .filter(s => updatedCandidates.some(u => u.id === s.id))
         .map(c => {
@@ -676,8 +897,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     }
 
     setPendingMarks({});
-    setSaveToast(`Calculated totals, averages, NECTA rankings & auto-saved to Examination Records ledger (${selectedTerm} - ${selectedYear}) for ${updatedCandidates.length} candidates!`);
-    setTimeout(() => setSaveToast(null), 4000);
+    setSaveToast(`Calculated totals, averages, NECTA rankings & saved to ${selectedExam} (${selectedTerm} - ${selectedYear}) for ${updatedCandidates.length} candidates!`);
   };
 
   const handleSaveMarks = () => {
@@ -1464,9 +1684,8 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
               onChange={e => setSelectedTerm(e.target.value)}
               className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 cursor-pointer"
             >
-              <option value="Term 1">Term 1</option>
-              <option value="Term 2">Term 2</option>
-              <option value="Term 3">Term 3</option>
+              <option value="Term 1">Term 1 (Muhula wa 1)</option>
+              <option value="Term 2">Term 2 (Muhula wa 2)</option>
             </select>
           </div>
 
@@ -2036,156 +2255,205 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                     </td>
                   </tr>
                 ) : (
-                  classCandidates.map((st, idx) => (
-                    <tr 
-                      key={st.id} 
-                      className={`hover:bg-blue-50/30 transition-colors ${
-                        selectedCandidateIds.includes(st.id) ? 'bg-blue-50/50' : ''
-                      }`}
-                    >
-                      <td className="p-2 border-r border-slate-200 text-center">
-                        <input
-                          type="checkbox"
-                          aria-label={`Select ${st.name}`}
-                          checked={selectedCandidateIds.includes(st.id)}
-                          onChange={() => handleToggleSelectCandidate(st.id)}
-                          className="cursor-pointer rounded text-blue-600 focus:ring-blue-500"
-                        />
-                      </td>
-                      <td className="p-2 border-r border-slate-200 font-mono font-bold text-slate-800 whitespace-nowrap">
-                        {st.regNo}
-                      </td>
-                      <td className="p-2 border-r border-slate-200 font-bold text-slate-900 whitespace-nowrap">
-                        <div className="flex items-center gap-1.5">
-                          <span>{st.name}</span>
-                          {!hasStudentAttemptedAnySubject(st, pendingMarks[st.id]) && (
-                            <span 
-                              className="px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 font-bold text-[9px] border border-rose-200" 
-                              title="Candidate did not sit / zero subject marks entered"
-                            >
-                              ABSENT
-                            </span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="p-2 border-r border-slate-200 text-center font-bold">
-                        <span className={st.gender === 'Female' ? 'text-pink-700' : 'text-blue-700'}>
-                          {st.gender ? (st.gender === 'Female' ? 'F' : 'M') : '-'}
-                        </span>
-                      </td>
-
-                      {/* Subject Scores */}
-                      {activeLedgerSubjects.map(sub => {
-                        const sc = getScore(st, sub.fullName, sub.key);
-                        return (
-                          <td key={sub.key} className="p-1 border-r border-slate-200 text-center font-mono">
-                            {isEditMarksMode ? (
-                              <input
-                                type="number"
-                                min="0"
-                                max="100"
-                                value={sc}
-                                onChange={e => handleCellChange(st.id, sub.key, e.target.value)}
-                                placeholder="-"
-                                className="w-11 px-1 py-0.5 text-center font-bold text-xs bg-white border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
-                              />
-                            ) : (
-                              <span className={`font-semibold ${sc !== '' ? 'text-slate-800' : 'text-slate-300'}`}>
-                                {sc !== '' ? sc : '-'}
+                  classCandidates.map((st, idx) => {
+                    const summary = getCandidateExamSummary(st);
+                    return (
+                      <tr 
+                        key={st.id} 
+                        className={`hover:bg-blue-50/30 transition-colors ${
+                          selectedCandidateIds.includes(st.id) ? 'bg-blue-50/50' : ''
+                        }`}
+                      >
+                        <td className="p-2 border-r border-slate-200 text-center">
+                          <input
+                            type="checkbox"
+                            aria-label={`Select ${st.name}`}
+                            checked={selectedCandidateIds.includes(st.id)}
+                            onChange={() => handleToggleSelectCandidate(st.id)}
+                            className="cursor-pointer rounded text-blue-600 focus:ring-blue-500"
+                          />
+                        </td>
+                        <td className="p-2 border-r border-slate-200 font-mono font-bold text-slate-800 whitespace-nowrap">
+                          {st.regNo}
+                        </td>
+                        <td className="p-2 border-r border-slate-200 font-bold text-slate-900 whitespace-nowrap">
+                          <div className="flex items-center gap-1.5">
+                            <span>{st.name}</span>
+                            {!summary.hasAttempted && (
+                              <span 
+                                className="px-1.5 py-0.2 rounded bg-rose-100 text-rose-700 font-bold text-[9px] border border-rose-200" 
+                                title="Candidate did not sit / zero subject marks entered"
+                              >
+                                ABSENT
                               </span>
                             )}
-                          </td>
-                        );
-                      })}
-
-                      {/* Summary Metrics */}
-                      <td className="p-2 border-r border-slate-200 text-center font-mono font-black text-slate-900 bg-slate-50/40">
-                        {hasStudentAttemptedAnySubject(st, pendingMarks[st.id]) ? (st.total ?? '-') : '-'}
-                      </td>
-                      <td className="p-2 border-r border-slate-200 text-center font-mono font-black text-blue-700 bg-slate-50/40">
-                        {hasStudentAttemptedAnySubject(st, pendingMarks[st.id]) ? (st.average ? `${st.average}%` : '-') : '-'}
-                      </td>
-                      <td className="p-2 border-r border-slate-200 text-center font-black bg-slate-50/40">
-                        {!hasStudentAttemptedAnySubject(st, pendingMarks[st.id]) ? (
-                          <span 
-                            className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200"
-                            title="Candidate did not sit any subject"
-                          >
-                            ABS
-                          </span>
-                        ) : isClassPrimary ? (
-                          (st.primaryGrade || st.division) ? (
-                            <span 
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                (st.primaryGrade || st.division) === 'A' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
-                                (st.primaryGrade || st.division) === 'B' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
-                                (st.primaryGrade || st.division) === 'C' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
-                                (st.primaryGrade || st.division) === 'D' ? 'bg-orange-100 text-orange-800 border border-orange-300' :
-                                'bg-rose-100 text-rose-800 border border-rose-300'
-                              }`}
-                            >
-                              Grade {st.primaryGrade || st.division}
-                            </span>
-                          ) : '-'
-                        ) : (
-                          st.division ? (
-                            <span 
-                              title={st.division === 'INCOMPLETE' ? 'Incomplete: Fewer than 7 subjects scored' : `Division ${st.division}`}
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
-                                st.division === 'I' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
-                                st.division === 'II' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
-                                st.division === 'III' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
-                                st.division === 'IV' ? 'bg-orange-100 text-orange-800 border border-orange-300' :
-                                st.division === 'INCOMPLETE' ? 'bg-purple-100 text-purple-800 border border-purple-300' :
-                                'bg-red-100 text-red-800 border border-red-300'
-                              }`}
-                            >
-                              {st.division === 'INCOMPLETE' ? 'INC' : `Div ${st.division}${((st as any).points || calculateOLevelDivision((pendingMarks[st.id] || st.marks || {}) as any).points) ? ` (Pts ${(st as any).points || calculateOLevelDivision((pendingMarks[st.id] || st.marks || {}) as any).points})` : ''}`}
-                            </span>
-                          ) : '-'
-                        )}
-                      </td>
-                      <td className="p-2 border-r border-slate-200 text-center font-mono font-bold text-slate-700 bg-slate-50/40">
-                        {hasStudentAttemptedAnySubject(st, pendingMarks[st.id]) ? (st.reportCardData?.positionInClass ?? idx + 1) : '-'}
-                      </td>
-                      {/* Annotatable Inline Teacher Remarks / Comments */}
-                      <td className="p-2 border-r border-slate-200 min-w-[210px]">
-                        <div className="space-y-1">
-                          <input
-                            type="text"
-                            placeholder="Add remark inline..."
-                            value={st.reportCardData?.classTeacherRemarks || ''}
-                            onChange={(e) => handleUpdateStudentRemarks(st.id, e.target.value)}
-                            className="w-full px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white focus:bg-amber-50 focus:border-amber-400 focus:ring-1 focus:ring-amber-300 outline-none font-medium transition"
-                            title="Click to edit teacher remark inline"
-                          />
-                          <div className="flex items-center gap-1 flex-wrap">
-                            {['Excellent', 'Very Good', 'Good Effort', 'Needs Improvement', 'Amefaulu'].map(badge => (
-                              <button
-                                key={badge}
-                                type="button"
-                                onClick={() => handleUpdateStudentRemarks(st.id, badge)}
-                                className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-900 border border-slate-200 cursor-pointer transition"
-                              >
-                                {badge}
-                              </button>
-                            ))}
                           </div>
-                        </div>
-                      </td>
-                      <td className="p-2 text-center">
-                        <button
-                          onClick={() => {
-                            setSelectedStudentReg(st.regNo);
-                            setActiveTab('reportcard');
-                          }}
-                          className="text-[10px] text-blue-600 hover:text-blue-800 font-bold underline cursor-pointer"
-                        >
-                          Report
-                        </button>
-                      </td>
-                    </tr>
-                  ))
+                        </td>
+                        <td className="p-2 border-r border-slate-200 text-center font-bold">
+                          <span className={st.gender === 'Female' ? 'text-pink-700' : 'text-blue-700'}>
+                            {st.gender ? (st.gender === 'Female' ? 'F' : 'M') : '-'}
+                          </span>
+                        </td>
+
+                        {/* Subject Scores */}
+                        {activeLedgerSubjects.map(sub => {
+                          const sc = summary.effectiveMarks[sub.key] ?? summary.effectiveMarks[sub.fullName] ?? '';
+                          return (
+                            <td key={sub.key} className="p-1 border-r border-slate-200 text-center font-mono">
+                              {isEditMarksMode ? (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max="100"
+                                  value={sc}
+                                  onChange={e => handleCellChange(st.id, sub.key, e.target.value)}
+                                  placeholder="-"
+                                  className="w-11 px-1 py-0.5 text-center font-bold text-xs bg-white border border-slate-300 rounded focus:ring-1 focus:ring-blue-500 outline-none"
+                                />
+                              ) : (
+                                <span className={`font-semibold ${sc !== '' ? 'text-slate-800' : 'text-slate-300'}`}>
+                                  {sc !== '' ? sc : '-'}
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+
+                        {/* Summary Metrics */}
+                        <td className="p-2 border-r border-slate-200 text-center font-mono font-black text-slate-900 bg-slate-50/40">
+                          {summary.hasAttempted ? (summary.total ?? '-') : '-'}
+                        </td>
+                        <td className="p-2 border-r border-slate-200 text-center font-mono font-black text-blue-700 bg-slate-50/40">
+                          {summary.hasAttempted ? (summary.average ? `${summary.average}%` : '-') : '-'}
+                        </td>
+                        <td className="p-2 border-r border-slate-200 text-center font-black bg-slate-50/40">
+                          {summary.hasAttempted ? (
+                            isClassPrimary ? (
+                              summary.primaryGrade ? (
+                                <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  summary.primaryGrade === 'A' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                                  summary.primaryGrade === 'B' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
+                                  summary.primaryGrade === 'C' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                                  summary.primaryGrade === 'D' ? 'bg-orange-100 text-orange-800 border border-orange-300' :
+                                  'bg-rose-100 text-rose-800 border border-rose-300'
+                                }`}>
+                                  Grade {summary.primaryGrade}
+                                </span>
+                              ) : '-'
+                            ) : (
+                              summary.division ? (
+                                <span title={`Division ${summary.division}`} className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                  summary.division === 'I' ? 'bg-emerald-100 text-emerald-800 border border-emerald-300' :
+                                  summary.division === 'II' ? 'bg-blue-100 text-blue-800 border border-blue-300' :
+                                  summary.division === 'III' ? 'bg-amber-100 text-amber-800 border border-amber-300' :
+                                  summary.division === 'IV' ? 'bg-orange-100 text-orange-800 border border-orange-300' :
+                                  summary.division === 'INCOMPLETE' ? 'bg-purple-100 text-purple-800 border border-purple-300' :
+                                  'bg-rose-100 text-rose-800 border border-rose-300'
+                                }`}>
+                                  Div {summary.division}
+                                </span>
+                              ) : '-'
+                            )
+                          ) : '-'}
+                        </td>
+                        <td className="p-2 border-r border-slate-200 text-center font-black bg-slate-50/40">
+                          {summary.hasAttempted ? (summary.points ?? '-') : '-'}
+                        </td>
+                        <td className="p-2 border-r border-slate-200 text-center font-mono font-bold text-slate-700 bg-slate-50/40">
+                          {hasStudentAttemptedAnySubject(st, pendingMarks[st.id]) ? (st.reportCardData?.positionInClass ?? idx + 1) : '-'}
+                        </td>
+                        {/* Annotatable Inline Teacher Remarks / Comments */}
+                        <td className="p-2 border-r border-slate-200 min-w-[210px]">
+                          <div className="space-y-1">
+                            <input
+                              type="text"
+                              placeholder="Add remark inline..."
+                              value={st.reportCardData?.classTeacherRemarks || ''}
+                              onChange={(e) => handleUpdateStudentRemarks(st.id, e.target.value)}
+                              className="w-full px-2.5 py-1 text-xs border border-slate-300 rounded-lg bg-white focus:bg-amber-50 focus:border-amber-400 focus:ring-1 focus:ring-amber-300 outline-none font-medium transition"
+                              title="Click to edit teacher remark inline"
+                            />
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {['Excellent', 'Very Good', 'Good Effort', 'Needs Improvement', 'Amefaulu'].map(badge => (
+                                <button
+                                  key={badge}
+                                  type="button"
+                                  onClick={() => handleUpdateStudentRemarks(st.id, badge)}
+                                  className="text-[9px] px-1.5 py-0.2 rounded bg-slate-100 hover:bg-amber-100 text-slate-600 hover:text-amber-900 border border-slate-200 cursor-pointer transition"
+                                >
+                                  {badge}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        </td>
+                        <td className="px-2 py-2 text-center flex items-center justify-center gap-1.5">
+                          <button
+                            onClick={() => {
+                              setSelectedStudentReg(st.regNo);
+                              setActiveTab('reportcard');
+                            }}
+                            className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition"
+                            title="View Report Card"
+                          >
+                            <FileText className="w-3.5 h-3.5" />
+                          </button>
+                          
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => {
+                                const parentPhone = st.parentPhone || st.phone || '';
+                                if (!parentPhone) {
+                                  alert('Namba ya mzazi haipo kwa mwanafunzi huyu. Tafadhali iongeze kwenye orodha ya wanafunzi.');
+                                  return;
+                                }
+                                const subjectsStr = Object.entries(summary.effectiveMarks)
+                                  .map(([s, g]) => `${s}-${g}`)
+                                  .join(', ');
+                                const msg = generateResultsMessage(st, summary, 'SMS');
+                                
+                                const cleanPhone = parentPhone.replace(/\D/g, '');
+                                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+                                const url = `sms:${cleanPhone}${isIOS ? '&' : '?'}body=${encodeURIComponent(msg)}`;
+                                window.location.href = url;
+                              }}
+                              className="p-1.5 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 rounded-lg transition"
+                              title="Tuma via SMS Simu"
+                            >
+                              <Smartphone className="w-3.5 h-3.5" />
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                const parentPhone = st.parentPhone || st.phone || '';
+                                if (!parentPhone) {
+                                  alert('Namba ya mzazi haipo kwa mwanafunzi huyu. Tafadhali iongeze kwenye orodha ya wanafunzi.');
+                                  return;
+                                }
+                                const subjectsStr = Object.entries(summary.effectiveMarks)
+                                  .map(([s, g]) => `${s}-${g}`)
+                                  .join(', ');
+                                const msg = generateResultsMessage(st, summary, 'WhatsApp');
+                                
+                                let cleanPhone = parentPhone.replace(/\D/g, '');
+                                if (cleanPhone.startsWith('0')) {
+                                  cleanPhone = '255' + cleanPhone.substring(1);
+                                } else if (cleanPhone.length === 9) {
+                                  cleanPhone = '255' + cleanPhone;
+                                }
+                                const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(msg)}`;
+                                window.open(url, '_blank');
+                              }}
+                              className="p-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg transition"
+                              title="Tuma via WhatsApp"
+                            >
+                              <MessageCircle className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })
                 )}
               </tbody>
             </table>
@@ -2751,6 +3019,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                 schoolInfo={schoolInfo}
                 orientation={reportOrientation}
                 allStudents={allClassCandidates}
+                academicTermDates={academicTermDates}
               />
             ))}
           </div>
@@ -2763,6 +3032,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                 schoolInfo={schoolInfo}
                 orientation={reportOrientation}
                 allStudents={allClassCandidates.length > 0 ? allClassCandidates : students}
+                academicTermDates={academicTermDates}
               />
             </div>
           )}
@@ -3463,6 +3733,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                     {classCandidates.map((st, i) => {
                       const pos = st.reportCardData?.positionInClass ?? i + 1;
                       const remarks = st.reportCardData?.classTeacherRemarks || 'Good progress and steady participation.';
+                      const summary = getCandidateExamSummary(st);
                       return (
                         <tr key={st.id} className={i % 2 === 0 ? 'bg-white' : 'bg-slate-50/50'}>
                           <td className="p-2 text-center font-black border-r border-slate-200">
@@ -3478,7 +3749,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                             {st.gender?.toLowerCase().startsWith('f') ? 'F' : 'M'}
                           </td>
                           {activeLedgerSubjects.slice(0, 8).map(sub => {
-                            const sc = getScore(st, sub.fullName, sub.key);
+                            const sc = summary.effectiveMarks[sub.key] ?? summary.effectiveMarks[sub.fullName] ?? '';
                             return (
                               <td key={sub.key} className="p-2 text-center border-r border-slate-200 font-mono font-bold">
                                 {sc !== '' ? sc : '-'}
@@ -3486,15 +3757,15 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                             );
                           })}
                           <td className="p-2 text-center font-black text-slate-900 border-r border-slate-200">
-                            {st.total ?? '-'}
+                            {summary.total ?? '-'}
                           </td>
                           <td className="p-2 text-center font-black text-blue-900 border-r border-slate-200">
-                            {st.average ? `${st.average}%` : '-'}
+                            {summary.average ? `${summary.average}%` : '-'}
                           </td>
                           <td className="p-2 text-center border-r border-slate-200 font-bold">
                             {isClassPrimary 
-                              ? (st.primaryGrade || st.division ? `Grade ${st.primaryGrade || st.division}` : '-')
-                              : (st.division ? `Div ${st.division}` : '-')}
+                              ? (summary.primaryGrade || summary.division ? `Grade ${summary.primaryGrade || summary.division}` : '-')
+                              : (summary.division ? `Div ${summary.division}` : '-')}
                           </td>
                           <td className="p-2 text-slate-800 text-xs italic">
                             {remarks}

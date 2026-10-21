@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AppData, Student, Teacher, Exam, InvigilationSession, PeriodSetting, StreamSetting, TimetableAssignment, Supervisor, SchoolInfo, UserAccount, SchoolStatus, ActivityLog, ActivityAction, ActivityCategory, DisciplineRecord, TeacherEvaluation, UsalRecord, ExaminationRecord } from './types';
-import { eq } from 'drizzle-orm';
-import * as schema from './db/schema';
 import { setCachedData, getCachedData } from './lib/idbService';
 import { DEFAULT_APP_DATA } from './constants/defaults';
 import { generateUsalRecordsForExam, ensureUsalRecordsForAllExams } from './utils/usalUtils';
@@ -19,6 +17,7 @@ import { TimetableContainer } from './components/Timetable/TimetableContainer';
 import { InvigilationContainer } from './components/InvigilationContainer';
 import { SettingsView } from './components/SettingsView';
 import { AttendanceView } from './components/AttendanceView';
+import { AttendanceScanView } from './components/Attendance/AttendanceScanView';
 import { MarkEntryView } from './components/MarkEntryView';
 import { StudentIDView } from './components/StudentIDView';
 import { SubscriptionData, getSchoolSubscription, initializeTrial, isSubscriptionValid } from './utils/SubscriptionService';
@@ -65,6 +64,7 @@ import {
   insertRecord,
   deleteRecord
 } from './lib/dbClient';
+import { computeTeacherInitial } from './utils/teacherInitials';
 import { 
   getSchoolData, 
   saveSchoolData, 
@@ -113,54 +113,71 @@ export default function App() {
   const { userAccount, loading: authLoading, logout } = useAuth();
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
   const [data, setData] = useState<AppData>(() => {
+    const schoolId = typeof window !== 'undefined' 
+      ? (localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID)
+      : DEFAULT_PRIMARY_SCHOOL_ID;
+
     if (typeof window !== 'undefined') {
       try {
-        const storedSchool = localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
-        const local = localStorage.getItem(`haby_school_data_snapshot_${storedSchool}`) || localStorage.getItem(`haby_school_data_${storedSchool}`);
-        console.log("App init: Loading from localStorage for school:", storedSchool, "Data found:", !!local);
+        const local = localStorage.getItem(`haby_school_data_snapshot_${schoolId}`) || localStorage.getItem(`haby_school_data_${schoolId}`);
+        console.log("App init: Loading from localStorage for school:", schoolId, "Data found:", !!local);
         if (local) {
           const parsed = JSON.parse(local);
           if (parsed && typeof parsed === 'object') {
             return { 
               ...DEFAULT_APP_DATA, 
               ...parsed,
-              schoolInfo: { ...DEFAULT_APP_DATA.schoolInfo, ...(parsed.schoolInfo || {}) }
+              schoolInfo: { ...DEFAULT_APP_DATA.schoolInfo, ...(parsed.schoolInfo || {}) },
+              communicationTemplates: parsed.communicationTemplates || DEFAULT_APP_DATA.communicationTemplates || []
             };
           }
         }
       } catch (e) { console.error("App init: Error loading from localStorage:", e); }
     }
-    console.log("App init: Using default app data");
+    
+    console.log("App init: Using default app data base. isDemo:", schoolId === DEFAULT_PRIMARY_SCHOOL_ID);
+    if (schoolId !== DEFAULT_PRIMARY_SCHOOL_ID) {
+      return {
+        ...DEFAULT_APP_DATA,
+        students: [],
+        teachers: [],
+        exams: [],
+        timetableAssignments: [],
+        examinationRecords: [],
+        disciplineRecords: [],
+        activityLogs: [],
+      };
+    }
     return DEFAULT_APP_DATA;
   });
 
+  const [verifyStudentRegNo, setVerifyStudentRegNo] = useState<string | null>(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      return urlParams.get('verifyStudent');
+    }
+    return null;
+  });
+
   useEffect(() => {
-    if (userAccount?.role === 'TEACHER' && activeView !== 'teacherportal') {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const view = urlParams.get('view');
+      if (view) {
+        setActiveView(view as ActiveView);
+        return;
+      }
+    }
+
+    if (userAccount?.role === 'TEACHER' && !sessionStorage.getItem('haby_teacher_viewed')) {
+      sessionStorage.setItem('haby_teacher_viewed', 'true');
       setActiveView('teacherportal');
     } else if ((userAccount?.isSuperAdmin || userAccount?.role === 'SUPER_ADMIN') && !sessionStorage.getItem('haby_superadmin_viewed')) {
       sessionStorage.setItem('haby_superadmin_viewed', 'true');
       setActiveView('multischool');
     }
-  }, [userAccount, activeView]);
+  }, [userAccount]);
 
-  if (typeof window !== 'undefined') {
-    const urlParams = new URLSearchParams(window.location.search);
-    const verifyReg = urlParams.get('verifyStudent');
-    if (verifyReg) {
-      return (
-        <VerifiedStudentProfileView 
-          regNo={verifyReg} 
-          students={data.students} 
-          schoolInfo={data.schoolInfo}
-          examinationRecords={data.examinationRecords}
-          exams={data.exams}
-          onBackToMain={() => {
-            window.location.href = window.location.pathname;
-          }} 
-        />
-      );
-    }
-  }
   const [dataLoading, setDataLoading] = useState(false);
   const [users, setUsers] = useState<UserAccount[]>([]);
   const [schoolStatus, setSchoolStatus] = useState<SchoolStatus>('ACTIVE');
@@ -226,6 +243,11 @@ export default function App() {
         examinationRecords: snapData.examinationRecords || [],
         examination_records: snapData.examinationRecords || [],
         parents: snapData.parents || [],
+        academic_term_dates: snapData.academicTermDates || {},
+        communicationTemplates: snapData.communicationTemplates || [],
+        communication_templates: snapData.communicationTemplates || [],
+        calendarEvents: snapData.calendarEvents || [],
+        calendar_events: snapData.calendarEvents || [],
         updated_at: new Date().toISOString()
       };
       
@@ -270,14 +292,20 @@ export default function App() {
 
       if (localSnap || localTimetable || localPeriods || localStreams || localTeacherAssignments) {
         const parsed = localSnap ? JSON.parse(localSnap) : {};
-        setData(prev => ({
-          ...prev,
-          ...parsed,
-          timetableAssignments: localTimetable ? JSON.parse(localTimetable) : (parsed.timetableAssignments || prev.timetableAssignments || []),
-          periodSettings: localPeriods ? JSON.parse(localPeriods) : (parsed.periodSettings || prev.periodSettings || []),
-          streamSettings: localStreams ? JSON.parse(localStreams) : (parsed.streamSettings || prev.streamSettings || []),
-          teacherAssignments: localTeacherAssignments ? JSON.parse(localTeacherAssignments) : (parsed.teacherAssignments || prev.teacherAssignments || [])
-        }));
+        setData(prev => {
+          const parsedStudents = Array.isArray(parsed.students) ? parsed.students : [];
+          const parsedTeachers = Array.isArray(parsed.teachers) ? parsed.teachers : [];
+          return {
+            ...prev,
+            ...parsed,
+            students: parsedStudents.length > (prev.students?.length || 0) ? parsedStudents : prev.students,
+            teachers: parsedTeachers.length > (prev.teachers?.length || 0) ? parsedTeachers : prev.teachers,
+            timetableAssignments: localTimetable ? JSON.parse(localTimetable) : (parsed.timetableAssignments || prev.timetableAssignments || []),
+            periodSettings: localPeriods ? JSON.parse(localPeriods) : (parsed.periodSettings || prev.periodSettings || []),
+            streamSettings: localStreams ? JSON.parse(localStreams) : (parsed.streamSettings || prev.streamSettings || []),
+            teacherAssignments: localTeacherAssignments ? JSON.parse(localTeacherAssignments) : (parsed.teacherAssignments || prev.teacherAssignments || [])
+          };
+        });
       }
     } catch (e) {
       console.warn("Immediate localStorage boot load error:", e);
@@ -285,14 +313,20 @@ export default function App() {
 
     getCachedData(schoolKey).then(cached => {
       if (cached && typeof cached === 'object') {
-        setData(prev => ({
-          ...prev,
-          ...cached,
-          timetableAssignments: cached.timetableAssignments && cached.timetableAssignments.length > 0 ? cached.timetableAssignments : prev.timetableAssignments,
-          periodSettings: cached.periodSettings && cached.periodSettings.length > 0 ? cached.periodSettings : prev.periodSettings,
-          streamSettings: cached.streamSettings && cached.streamSettings.length > 0 ? cached.streamSettings : prev.streamSettings,
-          teacherAssignments: cached.teacherAssignments && cached.teacherAssignments.length > 0 ? cached.teacherAssignments : prev.teacherAssignments
-        }));
+        setData(prev => {
+          const cachedStudents = Array.isArray(cached.students) ? cached.students : [];
+          const cachedTeachers = Array.isArray(cached.teachers) ? cached.teachers : [];
+          return {
+            ...prev,
+            ...cached,
+            students: cachedStudents.length > (prev.students?.length || 0) ? cachedStudents : prev.students,
+            teachers: cachedTeachers.length > (prev.teachers?.length || 0) ? cachedTeachers : prev.teachers,
+            timetableAssignments: cached.timetableAssignments && cached.timetableAssignments.length > 0 ? cached.timetableAssignments : prev.timetableAssignments,
+            periodSettings: cached.periodSettings && cached.periodSettings.length > 0 ? cached.periodSettings : prev.periodSettings,
+            streamSettings: cached.streamSettings && cached.streamSettings.length > 0 ? cached.streamSettings : prev.streamSettings,
+            teacherAssignments: cached.teacherAssignments && cached.teacherAssignments.length > 0 ? cached.teacherAssignments : prev.teacherAssignments
+          };
+        });
       }
     }).catch(e => console.warn("Initial IDB cache load error:", e));
 
@@ -362,25 +396,31 @@ export default function App() {
         const remoteData = { ...rawSchoolData } as Partial<AppData>;
         
         setData(prev => {
-          // Resolve students: prioritize Cloud SQL relational rows, snapshot array, or preserve prev state
+          // Resolve students: prioritize rich school_data snapshot when it has >= relational rows, then relational rows
+          const snapStudents = Array.isArray(rawSchoolData.students)
+            ? rawSchoolData.students
+            : Array.isArray(remoteData.students)
+            ? remoteData.students
+            : [];
           let resolvedStudents = prev.students;
-          if (supaStudents.length > 0) {
+          if (snapStudents.length >= supaStudents.length && snapStudents.length > 0) {
+            resolvedStudents = snapStudents;
+          } else if (supaStudents.length > 0) {
             resolvedStudents = supaStudents;
-          } else if (Array.isArray(rawSchoolData.students) && rawSchoolData.students.length > 0) {
-            resolvedStudents = rawSchoolData.students;
-          } else if (Array.isArray(remoteData.students) && remoteData.students.length > 0) {
-            resolvedStudents = remoteData.students;
           } else if (prev.students && prev.students.length > 0) {
             resolvedStudents = prev.students;
           }
 
+          const snapTeachers = Array.isArray(rawSchoolData.teachers)
+            ? rawSchoolData.teachers
+            : Array.isArray(remoteData.teachers)
+            ? remoteData.teachers
+            : [];
           let resolvedTeachers = prev.teachers;
-          if (supaTeachers.length > 0) {
+          if (snapTeachers.length >= supaTeachers.length && snapTeachers.length > 0) {
+            resolvedTeachers = snapTeachers;
+          } else if (supaTeachers.length > 0) {
             resolvedTeachers = supaTeachers;
-          } else if (Array.isArray(rawSchoolData.teachers) && rawSchoolData.teachers.length > 0) {
-            resolvedTeachers = rawSchoolData.teachers;
-          } else if (Array.isArray(remoteData.teachers) && remoteData.teachers.length > 0) {
-            resolvedTeachers = remoteData.teachers;
           } else if (prev.teachers && prev.teachers.length > 0) {
             resolvedTeachers = prev.teachers;
           }
@@ -496,6 +536,20 @@ export default function App() {
           const resolvedDailyAttendance = 
             rawSchoolData.dailyAttendance || rawSchoolData.daily_attendance || prev.dailyAttendance || {};
 
+          const resolvedDisciplineRecords =
+            (Array.isArray(rawSchoolData.disciplineRecords) && rawSchoolData.disciplineRecords.length > 0)
+              ? rawSchoolData.disciplineRecords
+              : (Array.isArray(rawSchoolData.discipline_records) && rawSchoolData.discipline_records.length > 0)
+                ? rawSchoolData.discipline_records
+                : (prev.disciplineRecords || []);
+
+          const resolvedDutyRosterData =
+            (rawSchoolData.dutyRosterData && typeof rawSchoolData.dutyRosterData === 'object' && Object.keys(rawSchoolData.dutyRosterData).length > 0)
+              ? rawSchoolData.dutyRosterData
+              : (rawSchoolData.duty_roster_data && typeof rawSchoolData.duty_roster_data === 'object' && Object.keys(rawSchoolData.duty_roster_data).length > 0)
+                ? rawSchoolData.duty_roster_data
+                : prev.dutyRosterData;
+
           const updatedState: AppData = {
             ...prev,
             ...remoteData,
@@ -517,6 +571,8 @@ export default function App() {
             institutionalPolicy: resolvedInstitutionalPolicy,
             journalRecords: resolvedJournalRecords,
             dailyAttendance: resolvedDailyAttendance,
+            disciplineRecords: resolvedDisciplineRecords,
+            dutyRosterData: resolvedDutyRosterData,
             parents: remoteData.parents || prev.parents,
             examinationRecords: remoteData.examinationRecords || prev.examinationRecords,
           };
@@ -546,44 +602,78 @@ export default function App() {
     console.log("App init loadFromDatabase...");
     loadFromDatabase(true);
 
+    // Ensure relational tables are synchronized with school_data snapshot in Cloud SQL only when needed
+    // Removed automatic sync-all on every refresh to prevent duplication issues
+
     // Real-time Firestore sync with the specific database instance
     testFirestoreConnection();
     const unsubStudents = subscribeToStudents(schoolId, (firestoreStudents) => {
+      if (!firestoreStudents) return;
       console.log(`[Firestore Live Sync] Received ${firestoreStudents.length} students from database`);
+      
       setData(prev => {
-        const mapped: Student[] = (firestoreStudents || []).map((fs, idx) => ({
-          id: Number(fs.id.replace(/\D/g, '')) || (idx + 1),
-          firestoreDocId: fs.id,
-          name: fs.name,
-          className: fs.className,
-          gender: (fs.gender as any) || '',
-          parentPhone: fs.parentPhone || '',
-          phone: fs.parentPhone || '',
-          feeStatus: (fs.feeStatus as any) || 'UNPAID',
-          school_id: fs.schoolId,
-          stream: fs.stream || '',
-          dob: fs.dob || '2010-01-01',
-          subjects: [],
-          regNo: (fs as any).regNo || `STD/${String(idx + 1).padStart(3, '0')}`
-        }));
-        return { ...prev, students: mapped };
+        // Build a fresh list from Firestore to avoid duplication
+        const mapped: Student[] = firestoreStudents.map((fs, idx) => {
+          const fsAny = fs as any;
+          const tailNum = Number(String(fs.id).split('_').pop());
+          const safeNumId = typeof fsAny.numericId === 'number' ? fsAny.numericId : (!isNaN(tailNum) && tailNum > 0 ? tailNum : 2001 + idx);
+          
+          return {
+            id: safeNumId,
+            firestoreDocId: fs.id,
+            name: fs.name || 'Student',
+            className: fs.className || 'Form 1',
+            gender: (fs.gender as any) || 'Male',
+            parentPhone: fs.parentPhone || '',
+            phone: fs.parentPhone || '',
+            feeStatus: (fs.feeStatus as any) || 'PAID',
+            school_id: fs.schoolId || schoolId,
+            stream: fs.stream || 'STREAM A',
+            dob: fs.dob || '2010-01-01',
+            subjects: fsAny.subjects || ['Basic Mathematics', 'English Language', 'Kiswahili', 'Biology', 'Chemistry', 'Physics', 'Geography', 'History', 'Civics'],
+            regNo: fsAny.regNo || `S.0123/${String(idx + 1).padStart(4, '0')}/2026`
+          };
+        });
+
+        const nextState = { ...prev, students: mapped };
+        try {
+          localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextState));
+          localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextState));
+        } catch (e) {}
+        return nextState;
       });
     });
 
     const unsubTeachers = subscribeToTeachers(schoolId, (firestoreTeachers) => {
+      if (!firestoreTeachers) return;
       console.log(`[Firestore Live Sync] Received ${firestoreTeachers.length} teachers from database`);
+      
       setData(prev => {
-        const mapped: Teacher[] = (firestoreTeachers || []).map((ft, idx) => ({
-          id: Number(ft.id.replace(/\D/g, '')) || (idx + 101),
-          firestoreDocId: ft.id,
-          name: ft.name,
-          phone: ft.phone || '',
-          email: ft.email || '',
-          subjects: ft.subject ? [ft.subject] : [],
-          initial: ft.name.slice(0, 2).toUpperCase(),
-          excludeInvigilation: false
-        }));
-        return { ...prev, teachers: mapped };
+        const mapped: Teacher[] = firestoreTeachers.map((ft, idx) => {
+          const ftAny = ft as any;
+          const tailNum = Number(String(ft.id).split('_').pop());
+          const safeNumId = typeof ftAny.numericId === 'number' ? ftAny.numericId : (!isNaN(tailNum) && tailNum > 0 ? tailNum : 1001 + idx);
+          
+          return {
+            id: safeNumId,
+            firestoreDocId: ft.id,
+            name: ft.name || 'Teacher',
+            gender: ftAny.gender || 'Male',
+            schoolRole: ftAny.schoolRole || 'Subject Teacher',
+            phone: ft.phone || '',
+            email: ft.email || '',
+            subjects: Array.isArray(ftAny.subjects) ? ftAny.subjects : (ft.subject ? [ft.subject] : ['Basic Mathematics']),
+            initial: (ft.name ? computeTeacherInitial(ft.name) : '') || ftAny.initial || 'TR',
+            excludeInvigilation: ftAny.excludeInvigilation ?? false
+          };
+        });
+
+        const nextState = { ...prev, teachers: mapped };
+        try {
+          localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextState));
+          localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextState));
+        } catch (e) {}
+        return nextState;
       });
     });
 
@@ -626,14 +716,18 @@ export default function App() {
 
     let nextData: AppData = {} as AppData;
     setData(prev => {
-      nextData = { ...prev, ...updates };
+      nextData = { 
+        ...prev, 
+        ...updates
+      };
       return nextData;
     });
 
-    // Immediately persist to localStorage and IndexedDB so any fast navigation or reload retains changes
+    // Persist lightweight snapshot to localStorage and full data to IndexedDB
     try {
-      localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextData));
-      localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextData));
+      const { usalRecords: _omitUsal, ...lightSnapshot } = nextData as any;
+      const serialized = JSON.stringify(lightSnapshot);
+      localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, serialized);
       if (nextData.timetableAssignments) {
         localStorage.setItem(`haby_timetable_assignments_${schoolId}`, JSON.stringify(nextData.timetableAssignments));
       }
@@ -741,16 +835,13 @@ export default function App() {
       }, 500);
   }, [userAccount]);
 
-  // Auto-ensure USAL records exist for all registered exams
+  // Auto-ensure USAL records exist in memory for all registered exams without blocking initial load
   useEffect(() => {
     try {
       if (Array.isArray(data.exams) && data.exams.length > 0 && Array.isArray(data.students) && data.students.length > 0) {
         const ensured = ensureUsalRecordsForAllExams(data.exams, data.students, data.teachers || [], data.usalRecords || []);
         if (ensured.length > (data.usalRecords || []).length) {
           setData(prev => ({ ...prev, usalRecords: ensured }));
-          if (userAccount?.schoolId) {
-            updateRemoteData({ usalRecords: ensured });
-          }
         }
       }
     } catch (err) {
@@ -840,6 +931,69 @@ export default function App() {
     return [newEntry, ...currentLogs].slice(0, 300);
   }, [userAccount, data.activityLogs]);
 
+  // Public & QR Scan Verification Views (accessible with or without login)
+  if (verifyStudentRegNo) {
+    return (
+      <VerifiedStudentProfileView
+        regNo={verifyStudentRegNo}
+        students={data.students}
+        schoolInfo={data.schoolInfo}
+        dailyAttendance={data.dailyAttendance || {}}
+        examinationRecords={data.examinationRecords}
+        exams={data.exams}
+        onMarkAttendance={(studentId, status) => {
+          const today = new Date().toISOString().split('T')[0];
+          const currentDaily = data.dailyAttendance || {};
+          const updatedDaily = {
+            ...currentDaily,
+            [today]: {
+              ...(currentDaily[today] || {}),
+              [studentId]: status
+            }
+          };
+          updateRemoteData({ dailyAttendance: updatedDaily });
+        }}
+        onBackToMain={() => {
+          setVerifyStudentRegNo(null);
+          if (typeof window !== 'undefined' && window.location.search.includes('verifyStudent')) {
+            window.history.replaceState({}, '', window.location.pathname);
+          }
+        }}
+      />
+    );
+  }
+
+  const isPublicScanUrl = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('view') === 'attendance-scan';
+  if (isPublicScanUrl && !userAccount) {
+    return (
+      <div className="min-h-screen bg-[#edf2f7] p-4 sm:p-6">
+        <AttendanceScanView
+          students={data.students}
+          schoolInfo={data.schoolInfo}
+          dailyAttendance={data.dailyAttendance || {}}
+          examinationRecords={data.examinationRecords || []}
+          onMarkAttendance={(date, studentId, status) => {
+            const currentDaily = data.dailyAttendance || {};
+            const updatedDaily = {
+              ...currentDaily,
+              [date]: {
+                ...(currentDaily[date] || {}),
+                [studentId]: status
+              }
+            };
+            updateRemoteData({ dailyAttendance: updatedDaily });
+          }}
+          onBack={() => {
+            if (typeof window !== 'undefined') {
+              window.history.replaceState({}, '', window.location.pathname);
+            }
+            setActiveView('attendance');
+          }}
+        />
+      </div>
+    );
+  }
+
   // Auth Guard
   // Parent Portal Bypass for login
   const isParentPortalHash = window.location.hash === '#parentportal' || window.location.pathname === '/parent/login';
@@ -888,8 +1042,13 @@ export default function App() {
   }
 
   // Non-blocking background sync indicator instead of blocking screen
-  if (dataLoading && false) {
-    // never block
+  if (dataLoading) {
+    return (
+      <div className="min-h-screen bg-[#0f2948] text-white flex flex-col items-center justify-center">
+        <div className="w-12 h-12 border-4 border-white/20 border-t-sky-400 rounded-full animate-spin mb-4" />
+        <h2 className="text-lg font-bold">Inapakia Data za Shule...</h2>
+      </div>
+    );
   }
 
   const handleUpdateStudents = (students: Student[]) => {
@@ -965,15 +1124,14 @@ export default function App() {
       }
     } catch (e) {}
 
-    const processedStudents = newStudents.map(s => {
-      const isUuid = typeof s.id === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s.id);
-      const validId = isUuid ? s.id : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        const r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-        return v.toString(16);
-      });
+    const baseId = Date.now();
+    const processedStudents = newStudents.map((s, idx) => {
+      const numId = typeof s.id === 'number' && s.id > 0 ? s.id : (baseId + idx);
+      const fsId = (s as any).firestoreDocId || `std_${schoolId}_${numId}`;
       return {
         ...s,
-        id: Number(s.id) || (Date.now() + Math.floor(Math.random() * 10000)),
+        id: numId,
+        firestoreDocId: fsId,
         school_id: schoolId
       };
     });
@@ -988,6 +1146,22 @@ export default function App() {
         const chunk = rowsToPush.slice(i, i + chunkSize);
         await supabase.from('students').upsert(chunk, { onConflict: 'id' });
       }
+      // Also sync to Firestore in background
+      Promise.all(
+        processedStudents.map(s =>
+          saveStudentToFirestore({
+            id: (s as any).firestoreDocId,
+            name: s.name,
+            className: s.className || 'Form 1',
+            gender: s.gender || 'Male',
+            parentPhone: s.parentPhone || s.phone || '',
+            feeStatus: (s.feeStatus as any) || 'PAID',
+            schoolId,
+            stream: s.stream || 'STREAM A',
+            dob: s.dob || '2010-01-01'
+          })
+        )
+      ).catch(() => {});
     } catch (e) {
       console.warn("Error bulk upserting students in Supabase:", e);
     }
@@ -1572,8 +1746,16 @@ export default function App() {
         saveStatus={saveStatus}
         onSelectView={view => setActiveView(view)}
         currentUser={userAccount}
-        onLogout={() => {
+        onLogout={async () => {
           if (window.confirm("Are you sure you want to logout?")) {
+            try {
+              const schoolId = userAccount?.schoolId || getCurrentSchoolId();
+              if (schoolId) {
+                await saveSchoolDataToSupabase(schoolId, data);
+              }
+            } catch (err) {
+              console.warn("Pre-logout save error:", err);
+            }
             logout();
           }
         }}
@@ -1663,6 +1845,10 @@ export default function App() {
               currentUser={userAccount}
               supabaseStudentCount={supabaseStudentCount}
               disciplineRecords={data.disciplineRecords || []}
+              teacherAssignments={data.teacherAssignments || []}
+              examinationRecords={data.examinationRecords || []}
+              dutyRosterData={data.dutyRosterData}
+              dailyAttendance={data.dailyAttendance || {}}
             />
           )}
 
@@ -1766,6 +1952,7 @@ export default function App() {
                 updateRemoteData({ examinationRecords, activityLogs });
               }}
               onNavigateToView={view => setActiveView(view as any)}
+              academicTermDates={data.academicTermDates}
             />
           )}
 
@@ -1807,6 +1994,8 @@ export default function App() {
                 updated[data.schoolInfo.name || 'default'] = keys;
                 updateRemoteData({ ledgerSubjectKeys: updated });
               }}
+              communicationTemplates={data.communicationTemplates || []}
+              academicTermDates={data.academicTermDates}
             />
           )}
 
@@ -1870,6 +2059,8 @@ export default function App() {
               initialExamType={smsTargetExam.examType || 'CSEE'}
               initialYear={smsTargetExam.year || '2026'}
               onNavigateToAnalyzer={() => setActiveView('nectaanalyzer')}
+              communicationTemplates={data.communicationTemplates || []}
+              academicTermDates={data.academicTermDates}
             />
           )}
 
@@ -1879,6 +2070,7 @@ export default function App() {
               currentUser={userAccount}
               teachers={data.teachers}
               schemesOfWork={data.schemesOfWork || []}
+              academicTermDates={data.academicTermDates}
               onSaveSchemeOfWork={(scheme) => {
                 const existing = data.schemesOfWork || [];
                 const updated = existing.some(s => s.id === scheme.id)
@@ -1919,6 +2111,7 @@ export default function App() {
               schoolInfo={data.schoolInfo}
               currentUser={userAccount}
               dailyAttendance={data.dailyAttendance || {}}
+              examinationRecords={data.examinationRecords || []}
               onSaveDailyAttendance={(date, rollCallRecords) => {
                 const currentDaily = data.dailyAttendance || {};
                 const updatedDaily = {
@@ -1930,6 +2123,33 @@ export default function App() {
               onUpdateStudent={handleUpdateStudent}
               onNavigateToResults={() => setActiveView('results')}
               onNavigateToDiscipline={student => setActiveView('discipline')}
+              onNavigateToScanView={() => setActiveView('attendance-scan')}
+            />
+          )}
+
+          {activeView === 'attendance-scan' && (
+            <AttendanceScanView
+              students={data.students}
+              schoolInfo={data.schoolInfo}
+              dailyAttendance={data.dailyAttendance || {}}
+              examinationRecords={data.examinationRecords || []}
+              onMarkAttendance={(date, studentId, status) => {
+                const currentDaily = data.dailyAttendance || {};
+                const updatedDaily = {
+                  ...currentDaily,
+                  [date]: {
+                    ...(currentDaily[date] || {}),
+                    [studentId]: status
+                  }
+                };
+                updateRemoteData({ dailyAttendance: updatedDaily });
+              }}
+              onBack={() => {
+                if (typeof window !== 'undefined' && window.location.search.includes('view=attendance-scan')) {
+                  window.history.replaceState({}, '', window.location.pathname);
+                }
+                setActiveView('attendance');
+              }}
             />
           )}
 
@@ -1937,10 +2157,24 @@ export default function App() {
             <DisciplineView
               records={data.disciplineRecords || []}
               students={data.students}
+              teachers={data.teachers}
+              schoolInfo={data.schoolInfo}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              dutyRosterData={data.dutyRosterData}
               currentUser={userAccount}
               onAddRecord={handleAddDisciplineRecord}
               onUpdateRecord={handleUpdateDisciplineRecord}
               onDeleteRecord={handleDeleteDisciplineRecord}
+              onUpdateDutyRoster={dutyRosterData => {
+                const activityLogs = logActivity(
+                  'DISCIPLINE_RECORD_UPDATED',
+                  'discipline',
+                  'Mfumo wa Zamu ya Walimu Umeboreshwa',
+                  'Taarifa za Zamu ya Walimu zimehifadhiwa kwenye database'
+                );
+                updateRemoteData({ dutyRosterData, activityLogs });
+              }}
+              onAddMainTeacher={handleAddTeacher}
             />
           )}
 
@@ -1964,6 +2198,9 @@ export default function App() {
             <StudentIDView
               students={data.students}
               schoolInfo={data.schoolInfo}
+              dailyAttendance={data.dailyAttendance || {}}
+              examinationRecords={data.examinationRecords || []}
+              onOpenVerifyPortal={(regNo) => setVerifyStudentRegNo(regNo)}
             />
           )}
 
@@ -2099,6 +2336,8 @@ export default function App() {
               subjectPeriodAllocations={data.subjectPeriodAllocations || []}
               teacherAssignments={data.teacherAssignments || []}
               journalRecords={data.journalRecords || {}}
+              savedTimetableRecords={data.savedTimetableRecords || []}
+              onUpdateSavedTimetableRecords={records => updateRemoteData({ savedTimetableRecords: records })}
               initialTab="journal"
               onUpdateAssignments={assignments => {
                 updateRemoteData({ timetableAssignments: assignments });
@@ -2149,6 +2388,8 @@ export default function App() {
               subjectPeriodAllocations={data.subjectPeriodAllocations || []}
               teacherAssignments={data.teacherAssignments || []}
               journalRecords={data.journalRecords || {}}
+              savedTimetableRecords={data.savedTimetableRecords || []}
+              onUpdateSavedTimetableRecords={records => updateRemoteData({ savedTimetableRecords: records })}
               onUpdateAssignments={assignments => {
                 const activityLogs = logActivity(
                   'TIMETABLE_UPDATE',
@@ -2325,6 +2566,30 @@ export default function App() {
               students={data.students}
               activityLogs={data.activityLogs || []}
               onClearActivityLogs={handleClearActivityLogs}
+              academicTermDates={data.academicTermDates}
+              onUpdateAcademicTermDates={academicTermDates => {
+                const activityLogs = logActivity(
+                  'SCHOOL_INFO_UPDATE',
+                  'settings',
+                  'Academic Calendar Updated',
+                  'Modified school term opening and closing dates'
+                );
+                updateRemoteData({ academicTermDates, activityLogs });
+              }}
+              communicationTemplates={data.communicationTemplates || []}
+              onUpdateCommunicationTemplates={templates => {
+                const activityLogs = logActivity(
+                  'SCHOOL_INFO_UPDATE',
+                  'settings',
+                  'Communication Templates Updated',
+                  'Modified SMS and WhatsApp message templates'
+                );
+                updateRemoteData({ communicationTemplates: templates, activityLogs });
+              }}
+              calendarEvents={data.calendarEvents || []}
+              onUpdateCalendarEvents={events => {
+                updateRemoteData({ calendarEvents: events });
+              }}
             />
           )}
         </main>

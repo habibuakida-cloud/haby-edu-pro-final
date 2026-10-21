@@ -52,7 +52,7 @@ export interface AISchemeRequest {
   stream?: string;
   curriculumType: 'NEW_CBC_2023' | 'OLD_CONTENT_2019';
   academicYear: string;
-  term: 'Term 1' | 'Term 2' | 'Term 3';
+  term: 'Term 1' | 'Term 2';
   teacherName?: string;
   schoolName?: string;
   periodsPerWeek?: number;

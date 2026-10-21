@@ -27,7 +27,7 @@ import {
   ChevronRight,
   ShieldCheck
 } from 'lucide-react';
-import { Student, Teacher, SchoolInfo, StreamSetting, UserAccount, Exam } from '../../types';
+import { Student, Teacher, SchoolInfo, StreamSetting, UserAccount, Exam, AcademicTermDates } from '../../types';
 import { format } from 'date-fns';
 import { generateAutoLessonPlan } from '../../utils/lessonPlanGenerator';
 import { LessonPlan } from '../../types/lessonPlan';
@@ -49,6 +49,7 @@ interface TeacherPortalViewProps {
   examinationRecords?: any[];
   onAutoSaveExaminationRecords?: (records: any[]) => void;
   onNavigateToView?: (view: string) => void;
+  academicTermDates?: AcademicTermDates;
 }
 
 export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
@@ -64,7 +65,8 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
   exams = [],
   examinationRecords = [],
   onAutoSaveExaminationRecords,
-  onNavigateToView
+  onNavigateToView,
+  academicTermDates
 }) => {
   // 1. Identify Logged-in / Selected Teacher Context
   const isTeacherOnly = currentUser?.role === 'TEACHER' && !currentUser?.isSuperAdmin;
@@ -985,6 +987,7 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
               schoolInfo={schoolInfo}
               orientation="portrait"
               allStudents={classStudents}
+              academicTermDates={academicTermDates}
             />
           </div>
         </div>

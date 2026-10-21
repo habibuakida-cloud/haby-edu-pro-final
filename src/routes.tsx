@@ -62,6 +62,7 @@ export type ActiveView =
   | 'nectaregs'
   | 'laboratory'
   | 'examsettings'
+  | 'attendance-scan'
   | 'settings';
 
 export interface SubModuleRoute {

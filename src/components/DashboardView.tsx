@@ -33,7 +33,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting, DisciplineRecord } from '../types';
+import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting, DisciplineRecord, TeacherAssignment, ExaminationRecord, DutyRosterData, DailyRollCallRecord } from '../types';
 import { subDays, subMonths, format, startOfDay } from 'date-fns';
 import { NURSERY_CLASSES, PRIMARY_CLASSES, SECONDARY_CLASSES } from '../constants/defaults';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
@@ -42,6 +42,8 @@ import { exportRemedialTimetablePDF } from '../utils/remedialPdfExport';
 import { isSameClass } from '../utils/reportCardUtils';
 
 import { TeacherDailyScheduleSummary } from './Dashboard/TeacherDailyScheduleSummary';
+import { MarkEntryProgressCard } from './Dashboard/MarkEntryProgressCard';
+import { MonthlyAttendanceTrendsWidget } from './Dashboard/MonthlyAttendanceTrendsWidget';
 import { CommandPaletteModal } from './common/CommandPaletteModal';
 import { QuickAddStudentModal } from './Students/QuickAddStudentModal';
 import { SmartDashboardWidget } from './SmartDashboardWidget';
@@ -66,6 +68,10 @@ interface DashboardViewProps {
   currentUser?: UserAccount | null;
   supabaseStudentCount?: number;
   disciplineRecords?: DisciplineRecord[];
+  teacherAssignments?: TeacherAssignment[];
+  examinationRecords?: ExaminationRecord[];
+  dutyRosterData?: DutyRosterData;
+  dailyAttendance?: Record<string, any>;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -87,7 +93,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   schoolId = '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
   currentUser,
   supabaseStudentCount,
-  disciplineRecords = []
+  disciplineRecords = [],
+  teacherAssignments = [],
+  examinationRecords = [],
+  dutyRosterData,
+  dailyAttendance = {}
 }) => {
   const displayStudentCount = supabaseStudentCount !== undefined ? supabaseStudentCount : students.length;
   const [activeLevelFilter, setActiveLevelFilter] = useState<'ALL' | 'PRIMARY' | 'PRE_PRIMARY' | 'SECONDARY'>('ALL');
@@ -592,6 +602,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         onNavigate={handleNavigate} 
       />
 
+      {/* DEDICATED REAL-TIME MARK ENTRY PROGRESS SUMMARY CARD */}
+      <MarkEntryProgressCard
+        students={students}
+        teachers={teachers}
+        exams={exams}
+        timetableAssignments={timetableAssignments}
+        teacherAssignments={teacherAssignments}
+        examinationRecords={examinationRecords}
+        onNavigate={handleNavigate}
+        isLoading={isLoading}
+      />
+
       {/* Main Executive Cards Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
         {/* Card 1: Enrolled Students & Gender */}
@@ -747,6 +769,15 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* MONTHLY STUDENT ATTENDANCE TRENDS FOR DISCIPLINE MASTER (RECHARTS VISUALIZATION) */}
+      <MonthlyAttendanceTrendsWidget
+        students={students}
+        dutyRosterData={dutyRosterData}
+        dailyAttendance={dailyAttendance}
+        disciplineRecords={disciplineRecords}
+        onNavigateToDiscipline={() => handleNavigate('discipline')}
+      />
 
       {/* STUDENT ENROLLMENT BY GENDER & CLASS LEVEL (RECHARTS BAR CHART) */}
       <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">

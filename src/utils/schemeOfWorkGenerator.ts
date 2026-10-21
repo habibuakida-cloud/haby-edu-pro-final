@@ -1320,13 +1320,40 @@ export const generateAutoSchemeOfWork = (
   stream: string,
   curriculumType: CurriculumType,
   academicYear: string,
-  term: 'Term 1' | 'Term 2' | 'Term 3',
+  term: 'Term 1' | 'Term 2' | 'Full Year',
   teacherName: string,
   schoolId = 'DEMO_SCHOOL',
   periodsPerWeek = 5
 ): SchemeOfWork => {
+  if (term === 'Full Year') {
+    const t1 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 1', teacherName, schoolId, periodsPerWeek);
+    const t2 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 2', teacherName, schoolId, periodsPerWeek);
+    
+    const t2Items = t2.items.map(item => ({
+      ...item,
+      id: `${item.id}_full`,
+      weekNumber: item.weekNumber + t1.items.length,
+      datesOrMonth: item.datesOrMonth.replace(/Week (\d+)/, (_, n) => `Week ${Number(n) + t1.items.length}`)
+    }));
+
+    const t2Logs = t2.logBookEntries.map(log => ({
+      ...log,
+      id: `${log.id}_full`,
+      schemeItemId: `${log.schemeItemId}_full`
+    }));
+
+    return {
+      ...t1,
+      id: `scheme_full_${Date.now()}`,
+      term: 'Full Year',
+      totalWeeks: t1.items.length + t2.items.length,
+      items: [...t1.items, ...t2Items],
+      logBookEntries: [...t1.logBookEntries, ...t2Logs]
+    };
+  }
+
   // Never default blindly to Physics! Use smart subject template matcher.
-  const template = getSubjectSchemeTemplate(subject, className, term, curriculumType);
+  const template = getSubjectSchemeTemplate(subject, className, term as any, curriculumType);
 
   const items: SchemeOfWorkItem[] = template.weeks.map(w => {
     if (curriculumType === 'NEW_CBC_2023') {

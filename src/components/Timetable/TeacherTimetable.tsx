@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { Teacher, TimetableAssignment, PeriodSetting } from '../../types';
 import { DAYS_OF_WEEK } from '../../constants/defaults';
-import { getSubjectColor } from '../../utils/colors';
+import { getSubjectColor, getSubjectShortName } from '../../utils/colors';
 import { 
   Clock, 
   BookOpen, 
@@ -13,9 +13,11 @@ import {
   Calendar, 
   Utensils, 
   Sparkles,
-  Download
+  Download,
+  FileSpreadsheet
 } from 'lucide-react';
 import { exportTimetablePDF } from '../../utils/timetablePdfExport';
+import { exportTeacherTimetableExcel } from '../../utils/timetableExcelExport';
 
 interface TeacherTimetableProps {
   teacher?: Teacher;
@@ -157,8 +159,17 @@ export const TeacherTimetable: React.FC<TeacherTimetableProps> = ({
     });
   };
 
+  const handleDownloadExcel = () => {
+    exportTeacherTimetableExcel({
+      schoolName: 'HABY EDUPRO ACADEMY',
+      teacher,
+      assignments,
+      periodSettings
+    });
+  };
+
   return (
-    <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6 master-timetable-container">
+    <div id="teacher-timetable-container" className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-xs space-y-6 master-timetable-container">
       {/* Header with teacher profile & load badge */}
       <div className="flex flex-wrap items-center justify-between gap-4 pb-4 border-b border-slate-200">
         <div className="flex items-center gap-3">
@@ -202,6 +213,15 @@ export const TeacherTimetable: React.FC<TeacherTimetableProps> = ({
           >
             <Download className="w-3.5 h-3.5 text-white" />
             <span className="hidden sm:inline">Download PDF</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleDownloadExcel}
+            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition print:hidden cursor-pointer shadow-xs active:scale-95"
+            title="Pakua Ratiba ya Mwalimu kwenye Excel (.xlsx)"
+          >
+            <FileSpreadsheet className="w-3.5 h-3.5 text-white" />
+            <span className="hidden sm:inline">Pakua Excel</span>
           </button>
           <button
             type="button"
@@ -266,7 +286,7 @@ export const TeacherTimetable: React.FC<TeacherTimetableProps> = ({
           return (
             <div 
               key={day}
-              className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs hover:shadow-xs transition"
+              className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs hover:shadow-xs transition print:border-slate-800 print:shadow-none"
             >
               {/* Day Header Strip */}
               <div className="bg-slate-900 text-white px-4 py-2.5 flex items-center justify-between border-b border-slate-800">
@@ -286,11 +306,11 @@ export const TeacherTimetable: React.FC<TeacherTimetableProps> = ({
 
               {/* Horizontal Period Grid for THIS Day:
                   Each column has the Period Name and EXACT TIME (Muda) on top horizontally! */}
-              <div className="overflow-x-auto p-3 bg-slate-50/50">
+              <div className="overflow-x-auto p-2 sm:p-3 bg-slate-50/50 print:p-1 print:bg-white print:overflow-visible">
                 <div 
-                  className="grid gap-2.5 min-w-[720px] print:grid-cols-8 print:min-w-0 print:gap-1"
+                  className="grid gap-2 sm:gap-2.5 min-w-[680px] sm:min-w-0 w-full print:w-full print:min-w-0 print:gap-1"
                   style={{
-                    gridTemplateColumns: `repeat(${dayPeriods.length}, minmax(115px, 1fr))`
+                    gridTemplateColumns: `repeat(${dayPeriods.length}, minmax(0, 1fr))`
                   }}
                 >
                   {dayPeriods.map((period, pIdx) => {
@@ -301,12 +321,12 @@ export const TeacherTimetable: React.FC<TeacherTimetableProps> = ({
                     return (
                       <div
                         key={`${day}-${period.name}-${pIdx}`}
-                        className={`rounded-xl border flex flex-col transition-all overflow-hidden ${
+                        className={`rounded-xl border flex flex-col transition-all overflow-hidden print:rounded-lg print:border-slate-800 ${
                           isBreak
-                            ? 'bg-amber-50/70 border-amber-200 text-amber-900'
+                            ? 'bg-amber-50/70 border-amber-200 text-amber-900 print:bg-amber-50/40'
                             : assignment
-                            ? 'bg-white border-blue-200 shadow-2xs'
-                            : 'bg-white/80 border-slate-200 border-dashed'
+                            ? 'bg-white border-blue-200 shadow-2xs print:shadow-none'
+                            : 'bg-white/80 border-slate-200 border-dashed print:border-slate-400'
                         }`}
                       >
                         {/* 1. TOP HEADER: MUDA NA JINA LA KIPINDI JUU KWA KILA SIKU */}
@@ -352,9 +372,9 @@ export const TeacherTimetable: React.FC<TeacherTimetableProps> = ({
                                   color: subColor?.text || '#1e40af',
                                   border: `1px solid ${subColor?.border || '#93c5fd'}`
                                 }}
-                                title={assignment.subject}
+                                title={getSubjectShortName(assignment.subject)}
                               >
-                                {assignment.subject}
+                                {getSubjectShortName(assignment.subject)}
                               </div>
                               <div className="text-[11px] font-black text-slate-800 truncate">
                                 {assignment.className}

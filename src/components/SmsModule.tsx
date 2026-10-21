@@ -24,13 +24,14 @@ import {
   TrendingUp,
   Mail,
   Bell,
-  Inbox
+  Inbox,
+  MessageCircle
 } from 'lucide-react';
 import { db } from '../lib/firebaseClient';
 import { supabase } from '../lib/dbClient';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { downloadFile } from '../utils/export';
-import { SchoolInfo } from '../types';
+import { SchoolInfo, AcademicTermDates } from '../types';
 
 interface SmsModuleProps {
   schoolId: string;
@@ -41,6 +42,8 @@ interface SmsModuleProps {
   initialExamType?: string;
   initialYear?: string;
   onNavigateToAnalyzer?: () => void;
+  academicTermDates?: AcademicTermDates;
+  communicationTemplates?: any[];
 }
 
 interface ExamRecordItem {
@@ -92,7 +95,9 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   parentStudents: propParentStudents = [],
   initialExamType = 'CSEE',
   initialYear = new Date().getFullYear().toString(),
-  onNavigateToAnalyzer
+  onNavigateToAnalyzer,
+  academicTermDates,
+  communicationTemplates = []
 }) => {
   const [activeTab, setActiveTab] = useState<'results' | 'announcements' | 'inbox' | 'parents' | 'wallet' | 'logs' | 'diagnostics' | 'history' | 'insights'>('results');
   
@@ -176,6 +181,11 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
       const { error } = await supabase.from('parent_messages').insert(payload);
       if (error) throw error;
 
+      // Also trigger native SMS if on mobile
+      if (window.confirm("Je, unataka pia kufungua App ya SMS kwenye simu yako kutuma jibu hili?")) {
+        sendSmsViaDevice(selectedInboxMessage.parent_phone, replyText.trim());
+      }
+
       setReplyText('');
       setSelectedInboxMessage(null);
       loadInbox();
@@ -183,6 +193,49 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     } catch (err: any) {
       setNotification({ type: 'error', message: 'Imeshindwa kutuma jibu: ' + err.message });
     }
+  };
+
+  const sendSmsViaDevice = (phone: string, message: string) => {
+    const cleanPhone = phone.replace(/\D/g, '');
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const separator = isIOS ? '&' : '?';
+    const url = `sms:${cleanPhone}${separator}body=${encodeURIComponent(message)}`;
+    window.location.href = url;
+  };
+
+  const sendViaWhatsApp = (phone: string, message: string) => {
+    let cleanPhone = phone.replace(/\D/g, '');
+    if (cleanPhone.startsWith('0')) {
+      cleanPhone = '255' + cleanPhone.substring(1);
+    } else if (cleanPhone.length === 9) {
+      cleanPhone = '255' + cleanPhone;
+    }
+    const url = `https://wa.me/${cleanPhone}?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
+  };
+
+  const generateResultsMessage = (rec: ExamRecordItem, schoolName: string, type: 'SMS' | 'WhatsApp' = 'SMS') => {
+    const subjectsStr = Object.entries(rec.subjects_json || {})
+      .map(([s, g]) => `${s}-${g}`)
+      .join(', ');
+    
+    const template = communicationTemplates.find(t => t.type === type && t.category === 'Results');
+    if (template) {
+      return template.content
+        .replace(/{studentName}/g, rec.student_name || rec.student_cno)
+        .replace(/{examName}/g, rec.exam_type)
+        .replace(/{year}/g, String(rec.year))
+        .replace(/{division}/g, rec.DIV || '-')
+        .replace(/{marks}/g, String(rec.AGGT || '-'))
+        .replace(/{subjects}/g, subjectsStr)
+        .replace(/{schoolName}/g, schoolName);
+    }
+
+    if (type === 'WhatsApp') {
+      return `*MATOKEO YA MTIHANI*\n\nNdugu Mzazi, haya ni matokeo ya mwanao *${rec.student_name || rec.student_cno}* kwa mtihani wa *${rec.exam_type}* mwaka *${rec.year}*:\n\n*Division:* ${rec.DIV || '-'}\n*Points:* ${rec.AGGT || '-'}\n\n*Masomo:*\n${subjectsStr}\n\nAsante,\n*${schoolName}*`;
+    }
+
+    return `Ndugu Mzazi, matokeo ya ${rec.student_name || rec.student_cno} ${rec.exam_type} ${rec.year}: DIV ${rec.DIV || '-'}, AGGT ${rec.AGGT || '-'}. Masomo: ${subjectsStr}. - ${schoolName}`;
   };
 
   useEffect(() => {
@@ -1487,7 +1540,26 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                 className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-700 hover:from-emerald-700 hover:to-teal-800 disabled:opacity-50 text-white font-black text-xs rounded-xl shadow-sm transition flex items-center gap-2"
               >
                 <Send className="w-4 h-4" />
-                <span>{isSendingResults ? 'Inatuma SMS via Beem Africa...' : 'Tuma kwa Wazazi via SMS'}</span>
+                <span>{isSendingResults ? 'Inatuma SMS via Beem Africa...' : 'Tuma kwa Wazazi via SMS (Web)'}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  if (filteredExamRecords.length > 0) {
+                    const first = filteredExamRecords[0];
+                    const parent = parentsMap.get(first.student_cno.toUpperCase().trim());
+                    if (parent && parent.phone_255) {
+                       const msg = generateResultsMessage(first, schoolInfo.name || 'HABY EDU PRO');
+                       sendSmsViaDevice(parent.phone_255, msg);
+                    } else {
+                       alert('Tafadhali hakikisha mwanafunzi wa kwanza ana namba ya mzazi.');
+                    }
+                  }
+                }}
+                className="px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-black text-xs rounded-xl shadow-sm transition flex items-center gap-2"
+              >
+                <Smartphone className="w-4 h-4" />
+                <span>Tuma via Simu Yangu (Native)</span>
               </button>
             </div>
           </div>
@@ -1524,7 +1596,8 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                       <th className="px-3 py-2.5 border-r border-slate-200 text-center">AGGT</th>
                       <th className="px-3 py-2.5 border-r border-slate-200">Masomo & Madaraja</th>
                       <th className="px-3 py-2.5 border-r border-slate-200">Namba ya Mzazi (255...)</th>
-                      <th className="px-3 py-2.5 text-center">Hali ya Namba</th>
+                      <th className="px-3 py-2.5 border-r border-slate-200 text-center">Hali ya Namba</th>
+                      <th className="px-3 py-2.5 text-center">Kitendo</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1582,18 +1655,31 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                               />
                             )}
                           </td>
-                          <td className="px-3 py-2 text-center font-bold">
-                            {hasPhone ? (
-                              <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 font-semibold">
-                                <CheckCircle2 className="w-3.5 h-3.5" />
-                                <span>Tayari</span>
-                              </span>
-                            ) : (
-                              <span className="inline-flex items-center gap-1 text-[11px] text-amber-700 font-semibold">
-                                <AlertCircle className="w-3.5 h-3.5" />
-                                <span>Haipo</span>
-                              </span>
-                            )}
+                          <td className="px-3 py-2 text-center">
+                             {hasPhone && (
+                               <div className="flex items-center justify-center gap-1">
+                                 <button
+                                   onClick={() => {
+                                     const msg = generateResultsMessage(rec, schoolInfo.name || 'HABY EDU PRO', 'SMS');
+                                     sendSmsViaDevice(parent?.phone_255 || '', msg);
+                                   }}
+                                   className="p-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg transition"
+                                   title="Tuma matokeo via SMS Simu"
+                                 >
+                                   <Smartphone className="w-3.5 h-3.5" />
+                                 </button>
+                                 <button
+                                   onClick={() => {
+                                     const msg = generateResultsMessage(rec, schoolInfo.name || 'HABY EDU PRO', 'WhatsApp');
+                                     sendViaWhatsApp(parent?.phone_255 || '', msg);
+                                   }}
+                                   className="p-1.5 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded-lg transition"
+                                   title="Tuma matokeo via WhatsApp"
+                                 >
+                                   <MessageCircle className="w-3.5 h-3.5" />
+                                 </button>
+                               </div>
+                             )}
                           </td>
                         </tr>
                       );
@@ -1669,14 +1755,45 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                 Salio lililopo: <strong className="text-slate-900">{walletBalance} SMS</strong>
               </div>
 
-              <button
-                onClick={handleSendAnnouncement}
-                disabled={isSendingAnnouncement || walletBalance <= 0}
-                className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
-              >
-                <Send className="w-4 h-4" />
-                <span>{isSendingAnnouncement ? 'Inatuma Tangazo...' : 'Tuma Tangazo kwa Wazazi'}</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  onClick={handleSendAnnouncement}
+                  disabled={isSendingAnnouncement || walletBalance <= 0}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
+                >
+                  <Send className="w-4 h-4" />
+                  <span>{isSendingAnnouncement ? 'Inatuma Tangazo...' : 'Tuma Tangazo via SMS (Web)'}</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (!announcementMsg.trim()) {
+                      alert('Tafadhali andika ujumbe kwanza.');
+                      return;
+                    }
+                    sendSmsViaDevice('', announcementMsg);
+                  }}
+                  className="px-6 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
+                >
+                  <Smartphone className="w-4 h-4" />
+                  <span>Tuma via SMS Simu</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    if (!announcementMsg.trim()) {
+                      alert('Tafadhali andika ujumbe kwanza.');
+                      return;
+                    }
+                    const fullMsg = `${announcementMsg}\n\n- ${schoolInfo.name || 'HABY EDU PRO'}`;
+                    sendViaWhatsApp('', fullMsg);
+                  }}
+                  className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2"
+                >
+                  <MessageCircle className="w-4 h-4" />
+                  <span>Tuma via WhatsApp</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -1802,7 +1919,17 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                         <td className="px-3 py-2 text-slate-600 border-r border-slate-200">
                           {p.class_level || 'All'}
                         </td>
-                        <td className="px-3 py-2 text-center">
+                        <td className="px-3 py-2 text-center flex items-center justify-center gap-1">
+                          <button
+                            onClick={() => {
+                              const msg = `Ndugu Mzazi, tunapenda kuwasiliana nawe kuhusu mwanafunzi ${p.student_name || p.student_cno}. - ${schoolInfo.name || 'HABY EDU PRO'}`;
+                              sendSmsViaDevice(p.phone_255 || '', msg);
+                            }}
+                            className="p-1 text-blue-500 hover:bg-blue-50 rounded transition"
+                            title="Tuma SMS via Simu"
+                          >
+                            <Smartphone className="w-3.5 h-3.5" />
+                          </button>
                           <button
                             onClick={async () => {
                               if (confirm(`Je, una uhakika unataka kufuta namba ya mzazi wa ${p.student_cno}?`)) {

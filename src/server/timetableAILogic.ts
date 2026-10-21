@@ -246,10 +246,11 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
         const existing = existingMap.get(slotKey);
 
         if (existing) {
-          const isExtraCurricular = existing.activityType && existing.activityType !== 'academic';
+          const isExtraCurricular = existing.isLocked || (existing.activityType && existing.activityType !== 'academic');
           if (isExtraCurricular && preserveExtraCurricular) {
             generatedAssignments.push({
               ...existing,
+              isLocked: true,
               id: existing.id || ++nextId
             });
             return;

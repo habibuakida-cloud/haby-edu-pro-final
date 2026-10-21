@@ -1,5 +1,5 @@
 import React from 'react';
-import { SchoolInfo, Student } from '../../types';
+import { SchoolInfo, Student, AcademicTermDates } from '../../types';
 import { 
   calculatePerformanceSummary, 
   calculateStudentRank, 
@@ -29,6 +29,7 @@ interface ReportCardDocumentProps {
   orientation: 'portrait' | 'landscape';
   allStudents?: Student[];
   containerId?: string;
+  academicTermDates?: AcademicTermDates;
 }
 
 export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
@@ -36,7 +37,8 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
   schoolInfo,
   orientation,
   allStudents = [],
-  containerId = 'report-card-printable-area'
+  containerId = 'report-card-printable-area',
+  academicTermDates
 }) => {
   const rawMarks = student.marks || {};
   const marks = cleanAndFilterMarksForClass(rawMarks, student.className, student.level);
@@ -371,8 +373,13 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
                 </div>
               </div>
               <div className="col-span-4 text-right bg-amber-50 p-1.5 rounded border border-amber-200">
-                <div className="font-bold text-amber-900 uppercase">Next Term Resumes:</div>
-                <div className="font-extrabold text-slate-900 text-[10px]">{periodSetting.nextTermBegins || '12 January 2027'}</div>
+                <div className="font-bold text-amber-900 uppercase">Academic Calendar Notice:</div>
+                <div className="font-extrabold text-slate-900 text-[10px]">
+                  Closing Date: {academicTermDates?.terminalBreakStart || academicTermDates?.annualBreakStart || '—'}
+                </div>
+                <div className="font-extrabold text-blue-900 text-[10px]">
+                  Next Term Resumes: {academicTermDates?.terminalBreakEnd || academicTermDates?.annualBreakEnd || periodSetting.nextTermBegins || '—'}
+                </div>
               </div>
             </div>
           </div>
@@ -680,7 +687,7 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
           )}
         </div>
         <div className="bg-amber-100 text-amber-900 px-2 py-0.5 rounded font-bold">
-          Next Term Commences: {periodSetting.nextTermBegins || '12 January 2027'}
+          Closing: {academicTermDates?.terminalBreakStart || academicTermDates?.annualBreakStart || '—'} • Opening: {academicTermDates?.terminalBreakEnd || academicTermDates?.annualBreakEnd || periodSetting.nextTermBegins || '—'}
         </div>
       </div>
     </div>

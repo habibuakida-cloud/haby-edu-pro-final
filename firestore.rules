@@ -15,13 +15,23 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // Users and School Admins collections
+    match /users/{userId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(userId);
+    }
+
+    match /school_admins/{adminId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(adminId);
+    }
+
     // Students collection
     match /students/{studentId} {
       allow read: if true;
       allow create, update: if isValidId(studentId)
         && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 150
         && request.resource.data.className is string && request.resource.data.className.size() <= 50
-        && request.resource.data.feeStatus in ['PAID', 'UNPAID']
         && request.resource.data.schoolId is string && request.resource.data.schoolId.size() <= 128;
       allow delete: if isValidId(studentId);
     }
@@ -38,21 +48,88 @@ service cloud.firestore {
     // Schools collection
     match /schools/{schoolId} {
       allow read: if true;
-      allow create, update: if isValidId(schoolId)
-        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 200;
-      allow delete: if isValidId(schoolId);
+      allow create, update, delete: if isValidId(schoolId);
     }
 
     // Daily Attendance collection
     match /daily_attendance/{attendanceId} {
       allow read: if true;
-      allow create: if isValidId(attendanceId)
-        && request.resource.data.studentId is string && request.resource.data.studentId.size() <= 128
-        && request.resource.data.teacherId is string && request.resource.data.teacherId.size() <= 128
-        && request.resource.data.schoolId is string && request.resource.data.schoolId.size() <= 128
-        && request.resource.data.status in ['PRESENT', 'ABSENT']
-        && request.resource.data.timestamp == request.time;
-      allow update, delete: if false;
+      allow create, update, delete: if isValidId(attendanceId);
+    }
+
+    // School Data snapshot collection
+    match /school_data/{schoolId} {
+      allow read: if true;
+      allow create, update: if isValidId(schoolId);
+      allow delete: if isValidId(schoolId);
+    }
+
+    // Academic & Operations collections
+    match /timetables/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /teaching_logs/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /laboratory_apparatus/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /exams/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /exam_records/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /classes/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /parents/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    // Environment & Agricultural Equipment collections
+    match /environment_equipment/{equipmentId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(equipmentId);
+    }
+
+    match /equipment_usage_log/{logId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(logId);
+    }
+
+    match /environment_orders/{orderId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(orderId);
+    }
+
+    match /school_purchased_equipment/{purchaseId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(purchaseId);
+    }
+
+    // Teacher Duty Roster (Mfumo wa Zamu ya Walimu) & Discipline Records
+    match /duty_roster/{schoolId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(schoolId);
+    }
+
+    match /discipline_records/{recordId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(recordId);
     }
   }
 }

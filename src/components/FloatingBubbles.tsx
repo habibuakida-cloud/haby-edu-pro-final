@@ -46,9 +46,9 @@ export const FloatingBubbles: React.FC<{
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Use props if available, otherwise local state (fallback)
-  const [localEnabled, setLocalEnabled] = useState(true);
+  const [localEnabled, setLocalEnabled] = useState(false);
   const [localTheme, setLocalTheme] = useState<BubbleTheme>('rainbow');
-  const [localDensity, setLocalDensity] = useState<'low' | 'medium' | 'high'>('medium');
+  const [localDensity, setLocalDensity] = useState<'low' | 'medium' | 'high'>('low');
 
   const isEnabled = settings?.enabled ?? localEnabled;
   const theme = (settings?.theme as BubbleTheme) ?? localTheme;

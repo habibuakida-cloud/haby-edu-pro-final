@@ -256,7 +256,6 @@ export const TopPerformersLeaderboard: React.FC<TopPerformersLeaderboardProps> =
               <option value="All">Muhula Wote</option>
               <option value="Term 1">Muhula I</option>
               <option value="Term 2">Muhula II</option>
-              <option value="Term 3">Muhula III</option>
             </select>
           </div>
         </div>

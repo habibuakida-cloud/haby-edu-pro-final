@@ -25,13 +25,19 @@ import {
 import { HabyEduProLogo } from './HabyEduProLogo';
 import { QRCodeSVG } from 'qrcode.react';
 import { db, supabase, getAll } from '../../lib/dbClient';
+import {
+  computeStudentAttendanceSummary,
+  generateStudentQrCardText
+} from '../../utils/studentQrUtils';
 
 interface VerifiedStudentProfileViewProps {
   regNo: string;
   students: Student[];
   schoolInfo: SchoolInfo;
+  dailyAttendance?: Record<string, Record<number, 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED'>>;
   examinationRecords?: ExaminationRecord[];
   exams?: Exam[];
+  onMarkAttendance?: (studentId: number, status: 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED') => void;
   onBackToMain: () => void;
 }
 
@@ -233,8 +239,10 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
   regNo,
   students,
   schoolInfo,
+  dailyAttendance = {},
   examinationRecords,
   exams,
+  onMarkAttendance,
   onBackToMain
 }) => {
   const [loading, setLoading] = useState<boolean>(true);
@@ -242,8 +250,9 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
   const [schoolData, setSchoolData] = useState<SchoolInfo>(schoolInfo);
   const [allExamRecords, setAllExamRecords] = useState<GeneratedExamRecord[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>('');
-  const [activeTab, setActiveTab] = useState<'results' | 'profile' | 'slip'>('results');
+  const [activeTab, setActiveTab] = useState<'results' | 'attendance' | 'profile' | 'slip'>('results');
   const [copySuccess, setCopySuccess] = useState<boolean>(false);
+  const [markedStatusNotice, setMarkedStatusNotice] = useState<string | null>(null);
 
   // Normalize incoming registration number
   const cleanTargetReg = useMemo(() => normalizeRegNo(regNo), [regNo]);
@@ -615,13 +624,17 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
 
                 {/* Scannable Verified Badge */}
                 <div className="shrink-0 p-2.5 bg-white border border-slate-200 rounded-2xl shadow-sm text-center hidden md:flex flex-col items-center">
-                  <QRCodeSVG value={currentUrl} size={64} level="M" />
+                  <QRCodeSVG
+                    value={generateStudentQrCardText(studentData, schoolData, dailyAttendance, examinationRecords || [])}
+                    size={64}
+                    level="L"
+                  />
                   <span className="block text-[7.5px] font-black text-blue-900 uppercase mt-1 tracking-tighter">QR VERIFIED</span>
                 </div>
               </div>
 
               {/* Navigation View Switcher Tabs */}
-              <div className="mt-5 flex items-center gap-2 border-t border-slate-200/80 pt-3">
+              <div className="mt-5 flex flex-wrap items-center gap-2 border-t border-slate-200/80 pt-3">
                 <button
                   onClick={() => setActiveTab('results')}
                   className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-2 ${
@@ -632,6 +645,18 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
                 >
                   <Award className="w-4 h-4" />
                   <span>Matokeo ya Mitihani ({allExamRecords.length})</span>
+                </button>
+
+                <button
+                  onClick={() => setActiveTab('attendance')}
+                  className={`flex-1 sm:flex-none px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center justify-center gap-2 ${
+                    activeTab === 'attendance'
+                      ? 'bg-emerald-600 text-white shadow-md'
+                      : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+                  }`}
+                >
+                  <Calendar className="w-4 h-4" />
+                  <span>Mahudhurio ({computeStudentAttendanceSummary(studentData, dailyAttendance).attendanceRate}%)</span>
                 </button>
 
                 <button
@@ -846,6 +871,145 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
                   </p>
                 </div>
 
+                {/* Comparison Overview Table Across All Different Examinations */}
+                <div className="border border-slate-200 rounded-2xl overflow-hidden shadow-xs">
+                  <div className="p-3.5 bg-slate-900 text-white flex items-center justify-between">
+                    <span className="text-xs font-black uppercase tracking-wider flex items-center gap-2">
+                      <Award className="w-4 h-4 text-amber-400" />
+                      <span>Muhtasari wa Matokeo ya Mitihani Mbalimbali (All Examinations Summary)</span>
+                    </span>
+                    <span className="text-[11px] font-mono text-amber-300">{allExamRecords.length} Exams</span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-black">
+                          <th className="p-3">Mtihani (Examination)</th>
+                          <th className="p-3 text-center">Muhula / Mwaka</th>
+                          <th className="p-3 text-center">Jumla ya Alama</th>
+                          <th className="p-3 text-center">Wastani (%)</th>
+                          <th className="p-3 text-center">Daraja &amp; Pointi</th>
+                          <th className="p-3 text-center">Nafasi (Rank)</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {allExamRecords.map(ex => (
+                          <tr
+                            key={ex.id}
+                            onClick={() => setSelectedExamId(ex.id)}
+                            className={`cursor-pointer transition ${
+                              ex.id === selectedRecord?.id ? 'bg-blue-50/70 font-bold' : 'hover:bg-slate-50'
+                            }`}
+                          >
+                            <td className="p-3 font-bold text-slate-900">{ex.examName}</td>
+                            <td className="p-3 text-center text-slate-600">{ex.term} ({ex.academicYear})</td>
+                            <td className="p-3 text-center font-mono font-bold text-slate-800">{ex.totalMarks}</td>
+                            <td className="p-3 text-center font-mono font-black text-blue-700">{ex.averageMarks}% ({ex.overallGrade})</td>
+                            <td className="p-3 text-center">
+                              <span className="px-2 py-0.5 rounded-full bg-purple-100 text-purple-900 font-black text-[11px]">
+                                {ex.division} ({ex.points} pts)
+                              </span>
+                            </td>
+                            <td className="p-3 text-center font-mono font-bold text-emerald-800">
+                              #{ex.positionInClass} / {ex.totalCandidates}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* TAB 1B: ATTENDANCE SUMMARY & REAL-TIME MARKING */}
+            {activeTab === 'attendance' && (
+              <div className="p-4 sm:p-6 space-y-5">
+                {(() => {
+                  const attSummary = computeStudentAttendanceSummary(studentData, dailyAttendance);
+                  return (
+                    <>
+                      <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-2xl p-5 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                          <span className="text-[10px] font-black uppercase tracking-wider text-emerald-300">
+                            REKODI YA MAHUDHURIO YA MWANAFUNZI • {new Date().getFullYear()}
+                          </span>
+                          <h3 className="text-lg font-black mt-0.5">{studentData.name} ({studentData.regNo})</h3>
+                          <p className="text-xs text-emerald-100 mt-0.5">
+                            Hali ya Leo ({new Date().toISOString().split('T')[0]}):{' '}
+                            <strong className="underline">{attSummary.todayStatus}</strong>
+                          </p>
+                        </div>
+                        <div className="text-left sm:text-right">
+                          <span className="text-3xl font-black font-mono text-amber-300">{attSummary.attendanceRate}%</span>
+                          <span className="block text-[10px] uppercase font-bold text-emerald-200">Wastani wa Mahudhurio</span>
+                        </div>
+                      </div>
+
+                      {markedStatusNotice && (
+                        <div className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-xl text-emerald-900 text-xs font-black flex items-center gap-2">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>{markedStatusNotice}</span>
+                        </div>
+                      )}
+
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
+                        <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-2xl">
+                          <span className="text-[10px] font-black uppercase text-emerald-700 block">Waliohudhuria (Present)</span>
+                          <span className="text-2xl font-black font-mono text-emerald-800 mt-1 block">{attSummary.presentDays}</span>
+                          <span className="text-[10px] text-emerald-600 font-bold">Siku / Days</span>
+                        </div>
+                        <div className="p-4 bg-rose-50 border border-rose-200 rounded-2xl">
+                          <span className="text-[10px] font-black uppercase text-rose-700 block">Waliokosa (Absent)</span>
+                          <span className="text-2xl font-black font-mono text-rose-800 mt-1 block">{attSummary.absentDays}</span>
+                          <span className="text-[10px] text-rose-600 font-bold">Siku / Days</span>
+                        </div>
+                        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl">
+                          <span className="text-[10px] font-black uppercase text-amber-700 block">Waliochelewa (Late)</span>
+                          <span className="text-2xl font-black font-mono text-amber-800 mt-1 block">{attSummary.lateDays}</span>
+                          <span className="text-[10px] text-amber-600 font-bold">Siku / Days</span>
+                        </div>
+                        <div className="p-4 bg-blue-50 border border-blue-200 rounded-2xl">
+                          <span className="text-[10px] font-black uppercase text-blue-700 block">Ruhusa (Excused)</span>
+                          <span className="text-2xl font-black font-mono text-blue-800 mt-1 block">{attSummary.excusedDays}</span>
+                          <span className="text-[10px] text-blue-600 font-bold">Siku / Days</span>
+                        </div>
+                      </div>
+
+                      {onMarkAttendance && (
+                        <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                          <span className="text-xs font-black text-slate-800 uppercase tracking-wider block">
+                            Weka Mahudhurio ya Leo (Mark Real-Time Attendance):
+                          </span>
+                          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                            {(['PRESENT', 'LATE', 'ABSENT', 'EXCUSED'] as const).map(st => (
+                              <button
+                                key={st}
+                                type="button"
+                                onClick={() => {
+                                  onMarkAttendance(studentData.id, st);
+                                  setMarkedStatusNotice(`Mahudhurio ya ${studentData.name} yamewekwa: ${st} (${new Date().toLocaleTimeString()})`);
+                                }}
+                                className={`py-2.5 px-3 rounded-xl font-black transition cursor-pointer border ${
+                                  st === 'PRESENT'
+                                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600'
+                                    : st === 'LATE'
+                                    ? 'bg-amber-500 hover:bg-amber-600 text-slate-950 border-amber-500'
+                                    : st === 'ABSENT'
+                                    ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-600'
+                                    : 'bg-blue-600 hover:bg-blue-700 text-white border-blue-600'
+                                }`}
+                              >
+                                ✓ Mark {st}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
@@ -969,7 +1133,11 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
                     </div>
 
                     <div className="text-center">
-                      <QRCodeSVG value={currentUrl} size={54} level="M" />
+                      <QRCodeSVG
+                        value={generateStudentQrCardText(studentData, schoolData, dailyAttendance, examinationRecords || [])}
+                        size={54}
+                        level="L"
+                      />
                       <span className="text-[8px] font-mono text-slate-500 block mt-1">VERIFIED CERT</span>
                     </div>
                   </div>

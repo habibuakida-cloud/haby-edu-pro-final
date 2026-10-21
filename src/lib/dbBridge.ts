@@ -1,4 +1,5 @@
 import { Student, Teacher, Exam } from '../types';
+import { computeTeacherInitial } from '../utils/teacherInitials';
 
 export const DEFAULT_PRIMARY_SCHOOL_ID = '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
 
@@ -7,6 +8,7 @@ export const getCurrentSchoolId = (): string => {
     return (
       localStorage.getItem('currentSchoolId') ||
       localStorage.getItem('schoolId') ||
+      localStorage.getItem('haby_last_school_id') ||
       sessionStorage.getItem('haby_school_id') ||
       DEFAULT_PRIMARY_SCHOOL_ID
     );
@@ -14,21 +16,57 @@ export const getCurrentSchoolId = (): string => {
   return DEFAULT_PRIMARY_SCHOOL_ID;
 };
 
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function makeDeterministicUuid(seed: string): string {
+  if (UUID_REGEX.test(seed)) return seed.toLowerCase();
+  let h1 = 0xdeadbeef ^ seed.length;
+  let h2 = 0x41c6ce57 ^ seed.length;
+  let h3 = 0x9e3779b9 ^ seed.length;
+  let h4 = 0x85ebca6b ^ seed.length;
+  for (let i = 0; i < seed.length; i++) {
+    const ch = seed.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ ch, 2246822519);
+    h4 = Math.imul(h4 ^ ch, 3266489917);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  h3 = Math.imul(h3 ^ (h3 >>> 16), 2246822507) ^ Math.imul(h4 ^ (h4 >>> 13), 3266489909);
+  h4 = Math.imul(h4 ^ (h4 >>> 16), 2246822507) ^ Math.imul(h3 ^ (h3 >>> 13), 3266489909);
+  const hex = (
+    (h1 >>> 0).toString(16).padStart(8, '0') +
+    (h2 >>> 0).toString(16).padStart(8, '0') +
+    (h3 >>> 0).toString(16).padStart(8, '0') +
+    (h4 >>> 0).toString(16).padStart(8, '0')
+  );
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 // Transformers for Students
 export function toSupabaseStudent(s: any, schoolId: string, matchedClassId?: string) {
+  const rawCandidate = s.firestoreDocId || (typeof s.id === 'string' && UUID_REGEX.test(s.id) ? s.id : '');
+  const seed = rawCandidate || `std_${schoolId}_${s.regNo || s.reg_no || s.id || s.name}`;
+  const stableId = makeDeterministicUuid(seed);
   return {
-    id: s.id && typeof s.id === 'string' && s.id.length > 10 ? s.id : undefined,
+    id: stableId,
     school_id: schoolId,
+    schoolId: schoolId,
     name: s.name || '',
     class_name: s.className || s.class_name || 'Form 1',
+    className: s.className || s.class_name || 'Form 1',
     stream: s.stream || 'A',
     gender: s.gender || 'Male',
     parent_phone: s.parentPhone || s.phone || '',
+    parentPhone: s.parentPhone || s.phone || '',
     phone: s.phone || s.parentPhone || '',
     reg_no: s.regNo || s.reg_no || '',
+    regNo: s.regNo || s.reg_no || '',
     level: s.level || 'CSEE',
     dob: s.dob || null,
     passport_photo: s.passportPhoto || null,
+    passportPhoto: s.passportPhoto || null,
     subjects: Array.isArray(s.subjects) ? s.subjects : [],
     marks: s.marks || {},
     total: String(s.total ?? 0),
@@ -39,8 +77,20 @@ export function toSupabaseStudent(s: any, schoolId: string, matchedClassId?: str
 }
 
 export function fromSupabaseStudent(s: any, idx: number): Student {
+  const regStr = String(s.reg_no || s.regNo || '');
+  const regMatch = regStr.match(/\/(\d{3,4})\//);
+  const parsedFromReg = regMatch ? 2000 + parseInt(regMatch[1], 10) : null;
+  const numId =
+    typeof s.id === 'number'
+      ? s.id
+      : typeof s.numericId === 'number'
+      ? s.numericId
+      : typeof s.numeric_id === 'number'
+      ? s.numeric_id
+      : parsedFromReg || 2001 + idx;
   return {
-    id: typeof s.id === 'number' ? s.id : (Number(String(s.id).replace(/\D/g, '')) || (idx + 1)),
+    id: numId,
+    firestoreDocId: typeof s.id === 'string' ? s.id : s.firestoreDocId,
     name: s.name || '',
     className: s.class_name || s.className || '',
     stream: s.stream || '',
@@ -62,30 +112,49 @@ export function fromSupabaseStudent(s: any, idx: number): Student {
 
 // Transformers for Teachers
 export function toSupabaseTeacher(t: any, schoolId: string) {
+  const rawCandidate = t.firestoreDocId || (typeof t.id === 'string' && UUID_REGEX.test(t.id) ? t.id : '');
+  const seed = rawCandidate || `tch_${schoolId}_${t.id || t.email || t.name}`;
+  const stableId = makeDeterministicUuid(seed);
+  const calculatedInitial = (t.name ? computeTeacherInitial(t.name) : '') || t.initial || 'TR';
   return {
-    id: t.id && typeof t.id === 'string' && t.id.length > 10 ? t.id : undefined,
+    id: stableId,
     school_id: schoolId,
+    schoolId: schoolId,
     name: t.name || '',
     gender: t.gender || 'Male',
     school_role: t.schoolRole || t.school_role || 'Subject Teacher',
-    initial: t.initial || (t.name ? t.name.slice(0, 2).toUpperCase() : ''),
+    schoolRole: t.schoolRole || t.school_role || 'Subject Teacher',
+    initial: calculatedInitial,
     phone: t.phone || '',
     email: t.email || '',
     subjects: Array.isArray(t.subjects) ? t.subjects : [],
     teaching_streams: Array.isArray(t.teachingStreams) ? t.teachingStreams : (Array.isArray(t.teaching_streams) ? t.teaching_streams : []),
+    teachingStreams: Array.isArray(t.teachingStreams) ? t.teachingStreams : (Array.isArray(t.teaching_streams) ? t.teaching_streams : []),
     color: t.color || '#1d4ed8',
     max_periods_per_week: t.maxPeriodsPerWeek || 20,
-    exclude_invigilation: Boolean(t.excludeInvigilation)
+    maxPeriodsPerWeek: t.maxPeriodsPerWeek || 20,
+    exclude_invigilation: Boolean(t.excludeInvigilation),
+    excludeInvigilation: Boolean(t.excludeInvigilation)
   };
 }
 
 export function fromSupabaseTeacher(t: any, idx: number): Teacher {
+  const numId =
+    typeof t.id === 'number'
+      ? t.id
+      : typeof t.numericId === 'number'
+      ? t.numericId
+      : typeof t.numeric_id === 'number'
+      ? t.numeric_id
+      : 1001 + idx;
+  const calculatedInitial = (t.name ? computeTeacherInitial(t.name) : '') || t.initial || 'TR';
   return {
-    id: typeof t.id === 'number' ? t.id : (Number(String(t.id).replace(/\D/g, '')) || (idx + 101)),
+    id: numId,
+    firestoreDocId: typeof t.id === 'string' ? t.id : t.firestoreDocId,
     name: t.name || '',
     gender: (t.gender as any) || 'Male',
     schoolRole: t.school_role || t.schoolRole || 'Subject Teacher',
-    initial: t.initial || (t.name ? t.name.slice(0, 2).toUpperCase() : ''),
+    initial: calculatedInitial,
     phone: t.phone || '',
     email: t.email || '',
     subjects: Array.isArray(t.subjects) ? t.subjects : [],
@@ -101,13 +170,16 @@ export function toSupabaseExam(e: any, schoolId: string) {
   const isAct = e.isActive !== undefined 
     ? Boolean(e.isActive) 
     : (e.status !== 'Inactive' && e.status !== 'Locked');
+  const stableId = makeDeterministicUuid(`exm_${schoolId}_${e.id || e.name}`);
   return {
-    id: e.id && typeof e.id === 'string' && e.id.length > 10 ? e.id : undefined,
+    id: stableId,
     school_id: schoolId,
+    schoolId: schoolId,
     name: e.name || '',
     term: e.term || 'Term 1',
     year: String(e.year || new Date().getFullYear()),
     class_name: e.className || e.class_name || 'All',
+    className: e.className || e.class_name || 'All',
     level: e.level || 'CSEE',
     date: e.date || new Date().toISOString().split('T')[0],
     status: isAct ? 'Active' : 'Inactive'
@@ -117,7 +189,7 @@ export function toSupabaseExam(e: any, schoolId: string) {
 export function fromSupabaseExam(e: any, idx: number): Exam {
   const isAct = e.status !== 'Inactive' && e.status !== 'Locked';
   return {
-    id: e.id || (idx + 1),
+    id: typeof e.id === 'number' ? e.id : (idx + 1),
     name: e.name || '',
     level: (e.level as any) || 'CSEE',
     className: e.class_name || e.className || 'All',
@@ -126,6 +198,7 @@ export function fromSupabaseExam(e: any, idx: number): Exam {
     isActive: isAct
   };
 }
+
 
 export function toSupabaseDiscipline(d: any, schoolId: string) {
   return {
@@ -280,32 +353,48 @@ class MutationResult {
 class UpdateBuilder {
   private tableName: string;
   private updateData: any;
+  private filters: Record<string, any> = {};
 
   constructor(tableName: string, data: any) {
     this.tableName = tableName;
     this.updateData = data;
   }
 
-  async eq(column: string, value: any) {
-    const filters: Record<string, any> = { [column]: value };
-    const res = await fetch('/api/db/query', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        table: this.tableName,
-        action: 'update',
-        filters,
-        data: this.updateData
-      })
-    });
-    if (!res.ok) return { data: null, error: await res.text() };
-    return { data: await res.json(), error: null };
+  eq(column: string, value: any) {
+    this.filters[column] = value;
+    return this;
+  }
+
+  select(_cols?: string) {
+    return this;
+  }
+
+  private async execute() {
+    const activeFilters = Object.keys(this.filters).length > 0 ? this.filters : { id: this.updateData?.id };
+    try {
+      const res = await fetch('/api/db/query', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          table: this.tableName,
+          action: 'update',
+          filters: activeFilters,
+          data: this.updateData
+        })
+      });
+      if (!res.ok) return { data: null, error: await res.text() };
+      const json = await res.json();
+      return { data: json.data || json, error: null };
+    } catch (err: any) {
+      return { data: null, error: err };
+    }
   }
 
   then(resolve: (val: any) => void, reject?: (err: any) => void) {
-    return this.eq('id', this.updateData.id).then(resolve, reject);
+    return this.execute().then(resolve, reject);
   }
 }
+
 
 class DeleteBuilder {
   private tableName: string;

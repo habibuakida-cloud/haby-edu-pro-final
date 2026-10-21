@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { UserAccount } from '../../types';
 
 interface RoleGuardProps {
@@ -7,6 +7,24 @@ interface RoleGuardProps {
   onRedirect: (view: string) => void;
   children: React.ReactNode;
 }
+
+const ALLOWED_TEACHER_VIEWS = [
+  'teacherportal',
+  'markentry',
+  'classjournal',
+  'lessonplans',
+  'schemes',
+  'timetable',
+  'invigilation',
+  'attendance',
+  'attendance-scan',
+  'academiccalendar',
+  'studentid',
+  'dailytracker',
+  'discipline'
+];
+
+const RESTRICTED_SUPER_ADMIN_VIEWS = ['network', 'github', 'backup', 'multischool'];
 
 export const RoleGuard: React.FC<RoleGuardProps> = ({
   currentUser,
@@ -17,23 +35,21 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
   const role = (currentUser?.role || 'TEACHER').toUpperCase();
   const isSuperAdmin = currentUser?.isSuperAdmin || role === 'SUPER_ADMIN' || currentUser?.email === 'habibuakida@gmail.com';
 
-  // 1. TEACHER role: allowed only teacherportal / teacher related views (/teacher)
-  if (role === 'TEACHER' && !isSuperAdmin) {
-    const allowedTeacherViews = ['teacherportal', 'markentry', 'classjournal', 'lessonplans', 'schemes', 'timetable', 'invigilation'];
-    if (!allowedTeacherViews.includes(currentView)) {
-      onRedirect('teacherportal');
-      return null;
-    }
-  }
+  const shouldRedirectTeacher = role === 'TEACHER' && !isSuperAdmin && !ALLOWED_TEACHER_VIEWS.includes(currentView);
+  const shouldRedirectAdmin = (role === 'HEADMASTER' || role === 'ACADEMIC') && !isSuperAdmin && RESTRICTED_SUPER_ADMIN_VIEWS.includes(currentView);
 
-  // 2. HEADMASTER / ACADEMIC role: allowed /school-admin and /teacher routes, but not super admin network
-  if ((role === 'HEADMASTER' || role === 'ACADEMIC') && !isSuperAdmin) {
-    const restrictedSuperAdminViews = ['network', 'github', 'backup', 'multischool'];
-    if (restrictedSuperAdminViews.includes(currentView)) {
+  useEffect(() => {
+    if (shouldRedirectTeacher) {
+      onRedirect('teacherportal');
+    } else if (shouldRedirectAdmin) {
       onRedirect('dashboard');
-      return null;
     }
+  }, [shouldRedirectTeacher, shouldRedirectAdmin, onRedirect]);
+
+  if (shouldRedirectTeacher || shouldRedirectAdmin) {
+    return null;
   }
 
   return <>{children}</>;
 };
+

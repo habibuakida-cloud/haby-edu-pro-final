@@ -93,9 +93,8 @@ export const ExamArchiveView: React.FC<ExamArchiveViewProps> = ({ examinationRec
             <label className="block text-xs font-bold text-slate-500 mb-1">Term</label>
             <select value={termFilter} onChange={e => setTermFilter(e.target.value)} className="w-full p-2 bg-slate-50 border border-slate-300 rounded-lg text-sm">
               <option value="All">All Terms</option>
-              <option value="Term 1">Term 1</option>
-              <option value="Term 2">Term 2</option>
-              <option value="Term 3">Term 3</option>
+              <option value="Term 1">Term 1 (Muhula I)</option>
+              <option value="Term 2">Term 2 (Muhula II)</option>
             </select>
           </div>
           <div className="flex-[2] min-w-[300px]">

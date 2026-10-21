@@ -4,12 +4,12 @@ import {
   FileCode, ExternalLink, Users, KeyRound, UserPlus, Trash2, Eye, EyeOff, Shield, Globe, 
   Activity, Power, PowerOff, AlertCircle, Info, Search, Filter, History, FileSpreadsheet, 
   UserCheck, FileText, Layers, ArrowUpDown, CheckCircle, ChevronDown, Sparkles, Calendar,
-  LogIn, Copy, CheckCheck, BookOpen, Key, Edit, Github, Zap, Rocket, Printer
+  LogIn, Copy, CheckCheck, BookOpen, Key, Edit, Github, Zap, Rocket, Printer, MessageSquare
 } from 'lucide-react';
 import { 
   SchoolInfo, PeriodSetting, TimetableAssignment, UserAccount, Student, Teacher,
   School as SchoolType, SchoolStatus, ActivityLog, ActivityCategory, ActivityAction,
-  InstitutionalLevel, StreamSetting
+  InstitutionalLevel, StreamSetting, AcademicTermDates
 } from '../types';
 import { PeriodSettingsManager } from './Timetable/PeriodSettingsManager';
 import { ClassStreamManagerModal } from './common/ClassStreamManagerModal';
@@ -20,10 +20,13 @@ import { normalizeStreamName, getNextLogicalStream } from '../utils/classStreamU
 import { db } from '../lib/firebaseClient';
 import { supabase } from '../lib/dbClient';
 import { DatabaseHealthWidget } from './common/DatabaseHealthWidget';
+import { TermCalendarView } from './Calendar/TermCalendarView';
+import { AcademicCalendarView } from './Calendar/AcademicCalendarView';
 import { useAuth } from '../context/AuthContext';
 import { SUBJECT_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
 import { saveSchoolData } from '../lib/dataService';
 import { fetchSchoolsFromFirestore, saveSchoolToFirestore, saveStudentToFirestore, saveTeacherToFirestore } from '../lib/firestoreService';
+import { CommunicationSettings } from './CommunicationSettings';
 
 
 const generateUUID = () => {
@@ -53,6 +56,12 @@ interface SettingsViewProps {
   students?: Student[];
   activityLogs?: ActivityLog[];
   onClearActivityLogs?: () => void;
+  academicTermDates?: AcademicTermDates;
+  onUpdateAcademicTermDates?: (dates: AcademicTermDates) => void;
+  communicationTemplates?: any[];
+  onUpdateCommunicationTemplates?: (templates: any[]) => void;
+  calendarEvents?: any[];
+  onUpdateCalendarEvents?: (events: any[]) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -74,9 +83,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   currentUser,
   students = [],
   activityLogs = [],
-  onClearActivityLogs
+  onClearActivityLogs,
+  academicTermDates,
+  onUpdateAcademicTermDates,
+  communicationTemplates = [],
+  onUpdateCommunicationTemplates,
+  calendarEvents = [],
+  onUpdateCalendarEvents
 }) => {
-  const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'users' | 'audit' | 'network' | 'github' | 'backup' | 'dbhealth' | 'themepresets'>('periods');
+  const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'calendar' | 'events' | 'templates' | 'users' | 'audit' | 'network' | 'github' | 'backup' | 'dbhealth' | 'themepresets'>('periods');
   const { config, updateConfig } = useAppTheme();
   const [customTailwindOverride, setCustomTailwindOverride] = useState<string>(() => {
     return localStorage.getItem('haby_custom_tailwind_override') || 'bg-blue-600 text-white shadow-md';
@@ -1104,6 +1119,45 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
         <button
           type="button"
+          onClick={() => setActiveTab('calendar')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
+            activeTab === 'calendar'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          Academic Calendar & Term Dates
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('events')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
+            activeTab === 'events'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Calendar className="w-4 h-4" />
+          Tukio Maalum (Events)
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('templates')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
+            activeTab === 'templates'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <MessageSquare className="w-4 h-4" />
+          Communication Templates
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('users')}
           className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
             activeTab === 'users'
@@ -1534,6 +1588,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             streamSettings={streamSettings}
           />
         </div>
+      )}
+
+      {/* TAB: ACADEMIC CALENDAR (TERM DATES) */}
+      {activeTab === 'calendar' && (
+        <TermCalendarView 
+          academicTermDates={academicTermDates}
+          onUpdateAcademicTermDates={onUpdateAcademicTermDates}
+        />
+      )}
+
+      {/* TAB: ACADEMIC EVENTS */}
+      {activeTab === 'events' && (
+        <AcademicCalendarView 
+          events={calendarEvents}
+          onUpdateEvents={onUpdateCalendarEvents || (() => {})}
+        />
+      )}
+
+      {/* TAB: COMMUNICATION TEMPLATES */}
+      {activeTab === 'templates' && (
+        <CommunicationSettings 
+          templates={communicationTemplates}
+          onUpdateTemplates={(newTemplates) => {
+            if (onUpdateCommunicationTemplates) {
+              onUpdateCommunicationTemplates(newTemplates);
+            }
+          }}
+        />
       )}
 
       {/* TAB 2: SCHOOL INFO */}
@@ -3359,10 +3441,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* TAB: DATABASE HEALTH & LATENCY DIAGNOSTICS */}
       {activeTab === 'dbhealth' && (
         <div className="space-y-6">
-          <DatabaseHealthWidget
-            schoolId={currentUser?.schoolId || '02dff10d-78fb-4af6-ab5a-db1d275d7e06'}
-            currentUserRole={currentUser?.role}
-          />
+          <DatabaseHealthWidget />
         </div>
       )}
 

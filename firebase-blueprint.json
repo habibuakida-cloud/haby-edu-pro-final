@@ -76,6 +76,27 @@
     "/daily_attendance/{attendanceId}": {
       "schema": "DailyAttendance",
       "description": "Collection of student attendance records"
+    },
+    "/school_data/{schoolId}": {
+      "schema": "School",
+      "description": "Collection of full school data snapshots"
+    },
+    "/environment_equipment/{equipmentId}": {
+      "schema": "School",
+      "description": "Environmental and agricultural equipment inventory"
+    },
+    "/equipment_usage_log/{logId}": {
+      "schema": "School",
+      "description": "Equipment usage and checkout logs"
+    },
+    "/environment_orders/{orderId}": {
+      "schema": "School",
+      "description": "Environmental equipment procurement orders"
+    },
+    "/school_purchased_equipment/{purchaseId}": {
+      "schema": "School",
+      "description": "Verified purchased equipment records"
     }
   }
 }
+

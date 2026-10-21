@@ -1,4 +1,5 @@
 import { ReamPaperRecord } from '../types';
+import { supabase } from './dbClient';
 
 const LOCAL_STORAGE_REAMS_KEY = 'haby_ream_paper_records_';
 
@@ -18,7 +19,36 @@ function setLocalReams(schoolId: string, records: ReamPaperRecord[]): void {
 
 export async function fetchReamPaperRecords(schoolId: string): Promise<ReamPaperRecord[]> {
   if (!schoolId) return [];
-  return getLocalReams(schoolId);
+  const local = getLocalReams(schoolId);
+  try {
+    const { data, error } = await supabase
+      .from('ream_paper_records')
+      .select('*')
+      .eq('school_id', schoolId)
+      .order('created_at', { ascending: false });
+    if (!error && Array.isArray(data) && data.length > 0) {
+      const mapped: ReamPaperRecord[] = data.map((r: any) => ({
+        id: String(r.id),
+        student_id: r.student_id || r.studentId || '',
+        student_name: r.student_name || r.studentName || '',
+        class: r.class || '',
+        stream: r.stream || '',
+        reams_brought: Number(r.reams_brought ?? r.reamsBrought ?? 1),
+        date_brought: r.date_brought || r.dateBrought || '',
+        term: r.term || 'Muhula 1',
+        academic_year: r.academic_year || r.academicYear || '2026',
+        received_by: r.received_by || r.receivedBy || '',
+        notes: r.notes || '',
+        school_id: r.school_id || r.schoolId || schoolId,
+        created_at: r.created_at || r.createdAt || new Date().toISOString()
+      }));
+      setLocalReams(schoolId, mapped);
+      return mapped;
+    }
+  } catch (e) {
+    console.warn('Error fetching ream_paper_records from DB:', e);
+  }
+  return local;
 }
 
 export async function saveReamPaperRecord(schoolId: string, record: Partial<ReamPaperRecord>): Promise<{ error: any }> {
@@ -38,6 +68,13 @@ export async function saveReamPaperRecord(schoolId: string, record: Partial<Ream
     list.unshift(entry as any);
   }
   setLocalReams(schoolId, list);
+
+  try {
+    await supabase.from('ream_paper_records').upsert(entry);
+  } catch (e) {
+    console.warn('Error saving ream_paper_record to DB:', e);
+  }
+
   return { error: null };
 }
 
@@ -46,5 +83,13 @@ export async function deleteReamPaperRecord(schoolId: string, recordId: string):
   const list = getLocalReams(schoolId);
   const filtered = list.filter(r => r.id !== recordId);
   setLocalReams(schoolId, filtered);
+
+  try {
+    await supabase.from('ream_paper_records').delete().eq('id', recordId);
+  } catch (e) {
+    console.warn('Error deleting ream_paper_record from DB:', e);
+  }
+
   return true;
 }
+

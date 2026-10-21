@@ -34,7 +34,9 @@ import {
   Zap,
   Sliders,
   Edit3,
-  LayoutGrid
+  LayoutGrid,
+  Save,
+  CheckCircle2
 } from 'lucide-react';
 import { 
   TimetableAssignment, 
@@ -47,7 +49,8 @@ import {
   TeacherAssignment,
   SchoolInfo,
   UserAccount,
-  Student
+  Student,
+  SavedTimetableRecord
 } from '../../types';
 import { 
   DAYS_OF_WEEK, 
@@ -64,7 +67,8 @@ import {
   getTeacherColor, 
   getDayTheme, 
   getFormStreamTheme,
-  getExtraCurricularInfo 
+  getExtraCurricularInfo,
+  getSubjectShortName 
 } from '../../utils/colors';
 import { 
   exportTimetableToCSV, 
@@ -72,6 +76,9 @@ import {
   printFormattedSection 
 } from '../../utils/export';
 import { exportTimetablePDF } from '../../utils/timetablePdfExport';
+import { exportGeneralTimetableExcel } from '../../utils/timetableExcelExport';
+import { saveSchoolData } from '../../lib/dataService';
+import { getCurrentSchoolId } from '../../lib/dbBridge';
 import { isSameClass } from '../../utils/reportCardUtils';
 import { isSameStream } from '../../lib/timetableService';
 import { detectTimetableConflicts } from '../../utils/conflicts';
@@ -126,10 +133,12 @@ interface TimetableContainerProps {
   institutionalPolicy?: InstitutionalPolicy;
   subjectPeriodAllocations?: SubjectPeriodAllocation[];
   teacherAssignments?: TeacherAssignment[];
+  savedTimetableRecords?: SavedTimetableRecord[];
+  onUpdateSavedTimetableRecords?: (records: SavedTimetableRecord[]) => void;
   schoolInfo?: SchoolInfo;
   currentUser?: UserAccount | null;
   students?: Student[];
-  initialTab?: 'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings';
+  initialTab?: 'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings' | 'saved';
   journalRecords?: Record<string, any>;
   onUpdateJournal?: (records: Record<string, any>) => void;
   onUpdateAssignments: (assignments: TimetableAssignment[]) => void;
@@ -153,6 +162,7 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   institutionalPolicy = DEFAULT_INSTITUTIONAL_POLICY,
   subjectPeriodAllocations = [],
   teacherAssignments = [],
+  savedTimetableRecords = [],
   schoolInfo,
   currentUser,
   students = [],
@@ -165,11 +175,12 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   onUpdateInstitutionalPolicy = () => {},
   onUpdateSubjectPeriodAllocations = () => {},
   onUpdateTeacherAssignments = () => {},
+  onUpdateSavedTimetableRecords = () => {},
   journalRecords = {},
   onUpdateJournal = () => {}
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'constraints' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings' | 'graphical' | 'teacherEntry' | 'generalEntry'
+    'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'constraints' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings' | 'graphical' | 'teacherEntry' | 'generalEntry' | 'saved'
   >(initialTab || 'general');
 
   React.useEffect(() => {
@@ -209,6 +220,28 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
 
   // AI Timetable Assistant Modal state
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [saveSnapshotModalOpen, setSaveSnapshotModalOpen] = useState(false);
+  const [snapshotTitle, setSnapshotTitle] = useState('Term 1 Master Timetable');
+
+  const handleSaveSnapshot = () => {
+    if (!snapshotTitle.trim()) {
+      alert('Tafadhali ingiza jina la ratiba hii.');
+      return;
+    }
+    const newRecord: SavedTimetableRecord = {
+      id: String(Date.now()),
+      title: snapshotTitle.trim(),
+      createdAt: new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+      scope: 'General',
+      assignmentsCount: assignments.length,
+      assignments: [...assignments]
+    };
+    if (onUpdateSavedTimetableRecords) {
+      onUpdateSavedTimetableRecords([...(savedTimetableRecords || []), newRecord]);
+    }
+    setSaveSnapshotModalOpen(false);
+    alert(`Ratiba "${newRecord.title}" imehifadhiwa kikamilifu kwenye Saved Timetables!`);
+  };
 
   const handleShareTimetableWhatsApp = (scope: string) => {
     const text = `*HABY EDUPRO TIMETABLE (RATIBA YA MASOMO)*
@@ -236,6 +269,46 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
   const handlePrintActiveTimetableGrid = () => {
     handlePrintTimetable();
+  };
+
+  const [isSavingDb, setIsSavingDb] = useState(false);
+  const [saveSuccessNotice, setSaveSuccessNotice] = useState(false);
+
+  const handleSavePermanentlyToDatabase = async () => {
+    setIsSavingDb(true);
+    try {
+      if (onUpdateAssignments) {
+        onUpdateAssignments(assignments);
+      }
+      const schoolId = getCurrentSchoolId();
+      await saveSchoolData(schoolId, {
+        timetableAssignments: assignments,
+        periodSettings,
+        streamSettings,
+        teacherAssignments,
+        subjectPeriodAllocations
+      });
+      setSaveSuccessNotice(true);
+      setTimeout(() => setSaveSuccessNotice(false), 4000);
+    } catch (err) {
+      console.warn("Save database notice:", err);
+    } finally {
+      setIsSavingDb(false);
+    }
+  };
+
+  const handleExportExcel = () => {
+    exportGeneralTimetableExcel({
+      schoolName,
+      selectedClass: selectedGeneralClass,
+      selectedStream: selectedGeneralStream,
+      selectedDay: selectedDayFilter,
+      assignments,
+      teachers,
+      periodSettings,
+      streamSettings,
+      schoolInfo
+    });
   };
 
   // Comprehensive Timetable Integrity Analysis
@@ -855,6 +928,22 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
         <button
           type="button"
+          onClick={() => setActiveTab('saved')}
+          className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
+            activeTab === 'saved'
+              ? 'bg-blue-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Save className="w-4 h-4" />
+          <span>Ratiba Zilizohifadhiwa (Saved)</span>
+          <span className="px-1.5 py-0.2 bg-blue-100 text-blue-800 text-[10px] rounded-full font-bold">
+            {(savedTimetableRecords || []).length}
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('policies')}
           className={`px-4 py-2.5 rounded-lg text-sm font-bold transition-colors flex items-center gap-2 ${
             activeTab === 'policies'
@@ -863,7 +952,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           }`}
         >
           <Sliders className="w-4 h-4" />
-          Institutional Policies
+          <span>Sera za Shule (Policies)</span>
         </button>
 
         <button
@@ -876,11 +965,11 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           }`}
         >
           <Sliders className="w-4 h-4 text-amber-500" />
-          <span>Constraint Rules &amp; Audit</span>
+          <span>Sheria na Ukaguzi (Audit)</span>
           {constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount > 0 ? (
             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-rose-600 text-white shadow-2xs animate-pulse flex items-center gap-1">
               <span className="w-1.5 h-1.5 rounded-full bg-white inline-block" />
-              <span>{constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount} Violations</span>
+              <span>{constraintValidationReport.criticalIssuesCount + constraintValidationReport.warningIssuesCount} Hitilafu</span>
             </span>
           ) : (
             <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
@@ -899,7 +988,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           }`}
         >
           <BookOpen className="w-4 h-4" />
-          Subject Allocations
+          <span>Mgawanyo wa Masomo (Allocations)</span>
         </button>
 
         <button
@@ -912,7 +1001,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           }`}
         >
           <Users className="w-4 h-4" />
-          Teacher Allocations
+          <span>Upangaji wa Walimu (Assignments)</span>
         </button>
 
         <button
@@ -925,7 +1014,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           }`}
         >
           <Palette className="w-4 h-4" />
-          Settings
+          <span>Mipangilio (Settings)</span>
         </button>
 
         <button
@@ -1330,11 +1419,55 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               </button>
 
               <button
-                onClick={() => exportTimetableToCSV(assignments, teachers)}
-                className="px-3 py-2 text-xs font-bold bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                type="button"
+                onClick={() => {
+                  setSnapshotTitle(`Master Timetable — ${new Date().toLocaleDateString()}`);
+                  setSaveSnapshotModalOpen(true);
+                }}
+                className="px-3.5 py-2 text-xs font-black bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-300 rounded-lg flex items-center gap-1.5 shadow-sm transition-all cursor-pointer active:scale-95"
+                title="Hifadhi toleo la sasa la ratiba hii kwenye mkusanyiko wa Ratiba Zilizohifadhiwa (Snapshots)"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Hifadhi Ratiba (Snapshot)</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSavePermanentlyToDatabase}
+                disabled={isSavingDb}
+                className={`px-3.5 py-2 text-xs font-black rounded-lg flex items-center gap-1.5 shadow-sm transition-all cursor-pointer ${
+                  saveSuccessNotice
+                    ? 'bg-emerald-600 text-white animate-pulse'
+                    : 'bg-emerald-700 hover:bg-emerald-800 text-white'
+                }`}
+                title="Hifadhi Ratiba yote kudumu kwenye Database (SQL & Firestore) isipotee ukilogout"
+              >
+                {saveSuccessNotice ? (
+                  <>
+                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                    <span>Imehifadhiwa Kudumu! ✓</span>
+                  </>
+                ) : isSavingDb ? (
+                  <>
+                    <Zap className="w-3.5 h-3.5 animate-spin" />
+                    <span>Inahifadhi...</span>
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-3.5 h-3.5" />
+                    <span>Hifadhi Kudumu (Save DB)</span>
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportExcel}
+                className="px-3 py-2 text-xs font-bold bg-white text-emerald-800 border border-emerald-300 rounded-lg hover:bg-emerald-50 flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                title="Pakua Ratiba Kuu kwenye Excel (.xlsx) ikiwa imepangwa na kusanifiwa kikamilifu"
               >
                 <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                Export CSV
+                <span>Pakua Excel (.xlsx)</span>
               </button>
 
               <button
@@ -1358,7 +1491,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 title="Generate high-quality, formatted PDF export of the master timetable with all columns fitting in A4 landscape using jsPDF"
               >
                 <Download className="w-3.5 h-3.5 text-white" />
-                <span>Download PDF</span>
+                <span>Download PDF (A4)</span>
               </button>
 
               <button
@@ -1733,7 +1866,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                                   className="font-bold leading-tight truncate flex items-center justify-between gap-1"
                                                 >
                                                   <span title={assignment.subject} className="flex items-center gap-1">
-                                                    {!extraInfo && <span>{assignment.subject}</span>}
+                                                    {!extraInfo && <span className="font-extrabold">{getSubjectShortName(assignment.subject)}</span>}
                                                     {extraInfo && <span className="font-extrabold">{assignment.subject}</span>}
                                                   </span>
                                                   {conflict?.hasConflict && (
@@ -2851,6 +2984,146 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             onUpdateAssignments(newAssignments);
           }}
         />
+      )}
+
+      {/* ======================================================== */}
+      {/* SAVED TIMETABLES TAB VIEW                                */}
+      {/* ======================================================== */}
+      {activeTab === 'saved' && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+          <div className="flex items-center justify-between pb-4 border-b border-slate-100">
+            <div>
+              <h3 className="text-lg font-black text-[#1f4d8b]">Saved Timetable Snapshots (Ratiba Zilizohifadhiwa)</h3>
+              <p className="text-xs text-slate-500 font-medium">Hifadhi, pakia, au futa ratiba mbalimbali za masomo (Term 1, Term 2, Annual, Midterm) kwa urahisi.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setSnapshotTitle(`Master Timetable — ${new Date().toLocaleDateString()}`);
+                setSaveSnapshotModalOpen(true);
+              }}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center gap-2 cursor-pointer"
+            >
+              <Save className="w-4 h-4" />
+              <span>+ Hifadhi Ratiba Hii (Save Snapshot)</span>
+            </button>
+          </div>
+
+          {(!savedTimetableRecords || savedTimetableRecords.length === 0) ? (
+            <div className="text-center py-16 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+              <Calendar className="w-12 h-12 text-slate-300 mx-auto mb-3" />
+              <h4 className="text-sm font-black text-slate-700">Hakuna Ratiba Zilizohifadhiwa Bado</h4>
+              <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                Tengeneza ratiba yako ya masomo kwenye General Tab, kisha bonyeza kitufe cha "Hifadhi Ratiba Hii" ili kutunza kumbukumbu ya ratiba hiyo hapa.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {savedTimetableRecords.map(rec => (
+                <div key={rec.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-4 hover:border-blue-300 transition-all flex flex-col justify-between">
+                  <div className="space-y-2">
+                    <div className="flex items-start justify-between gap-2">
+                      <h4 className="text-sm font-black text-slate-900 line-clamp-1">{rec.title}</h4>
+                      <span className="text-[10px] font-bold px-2.5 py-0.5 bg-blue-50 text-blue-700 rounded-full shrink-0">
+                        {rec.createdAt}
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 font-medium flex items-center gap-3">
+                      <span className="flex items-center gap-1"><Clock className="w-3.5 h-3.5 text-blue-500" /> {rec.assignmentsCount || rec.assignments?.length || 0} Lessons</span>
+                      <span className="flex items-center gap-1"><Layers className="w-3.5 h-3.5 text-indigo-500" /> Scope: {rec.scope || 'General'}</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Pakia ratiba "${rec.title}" kwenye kazi yako ya sasa?`)) {
+                          onUpdateAssignments(rec.assignments || []);
+                          setActiveTab('general');
+                          alert(`Ratiba "${rec.title}" imepakiwa kikamilifu!`);
+                        }
+                      }}
+                      className="flex-1 px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Pakia Ratiba (Load)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Futa ratiba iliyohifadhiwa "${rec.title}"?`)) {
+                          const updated = savedTimetableRecords.filter(r => r.id !== rec.id);
+                          if (onUpdateSavedTimetableRecords) {
+                            onUpdateSavedTimetableRecords(updated);
+                          }
+                        }
+                      }}
+                      className="p-2 text-rose-600 hover:bg-rose-50 rounded-xl border border-rose-200 transition-colors cursor-pointer"
+                      title="Futa ratiba"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Save Snapshot Modal */}
+      {saveSnapshotModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-2xs z-50 flex items-center justify-center p-4 animate-in fade-in">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-5 border border-slate-200">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+              <h4 className="text-base font-black text-slate-900 flex items-center gap-2">
+                <Save className="w-5 h-5 text-emerald-600" />
+                <span>Hifadhi Ratiba Snapshot</span>
+              </h4>
+              <button
+                type="button"
+                onClick={() => setSaveSnapshotModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-slate-700 uppercase tracking-wider block mb-1">Jina la Ratiba (Snapshot Title):</label>
+                <input
+                  type="text"
+                  value={snapshotTitle}
+                  onChange={e => setSnapshotTitle(e.target.value)}
+                  placeholder="e.g., Term 1 2026 Master Timetable"
+                  className="w-full px-3.5 py-2.5 text-xs border border-slate-300 rounded-xl bg-slate-50 focus:bg-white font-semibold outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+              <p className="text-[11px] text-slate-500">
+                Ratiba hii itahifadhi vipindi vyote {assignments.length} vilivyopangwa kwa sasa, ikikuruhusu kuunda na kuhifadhi matoleo tofauti ya ratiba za shule.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setSaveSnapshotModalOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl cursor-pointer"
+              >
+                Ghairi (Cancel)
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveSnapshot}
+                className="px-5 py-2 text-xs font-black bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-sm cursor-pointer"
+              >
+                Hifadhi Rasmi
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -12,32 +12,49 @@ import {
   User,
   X,
   FileText,
-  Printer
+  Printer,
+  ClipboardCheck,
+  Calendar
 } from 'lucide-react';
-import { DisciplineRecord, Student, UserAccount } from '../types';
+import { DisciplineRecord, DutyRosterData, SchoolInfo, Student, Teacher, UserAccount } from '../types';
 import { 
   NURSERY_CLASSES, 
   PRIMARY_CLASSES, 
-  SECONDARY_CLASSES 
+  SECONDARY_CLASSES,
+  DEFAULT_APP_DATA
 } from '../constants/defaults';
+import { DutyRosterSystem } from './Discipline/DutyRosterSystem';
 
 interface DisciplineViewProps {
   records: DisciplineRecord[];
   students: Student[];
+  teachers?: Teacher[];
+  schoolInfo?: SchoolInfo;
+  schoolId?: string;
+  dutyRosterData?: DutyRosterData;
   currentUser?: UserAccount | null;
   onAddRecord: (record: DisciplineRecord) => void;
   onUpdateRecord: (record: DisciplineRecord) => void;
   onDeleteRecord: (id: string) => void;
+  onUpdateDutyRoster?: (data: DutyRosterData) => void;
+  onAddMainTeacher?: (teacher: Teacher) => void;
 }
 
 export const DisciplineView: React.FC<DisciplineViewProps> = ({
   records,
   students,
+  teachers = [],
+  schoolInfo = DEFAULT_APP_DATA.schoolInfo,
+  schoolId = '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
+  dutyRosterData,
   currentUser,
   onAddRecord,
   onUpdateRecord,
-  onDeleteRecord
+  onDeleteRecord,
+  onUpdateDutyRoster,
+  onAddMainTeacher
 }) => {
+  const [activeMainSection, setActiveMainSection] = useState<'DUTY_ROSTER' | 'CONDUCT_LEDGER'>('DUTY_ROSTER');
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState<string>('All');
   const [streamFilter, setStreamFilter] = useState<string>('All');
@@ -138,6 +155,55 @@ export const DisciplineView: React.FC<DisciplineViewProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* Main Discipline Module Switcher: Mfumo wa Zamu ya Walimu vs Rejista ya Nidhamu */}
+      <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-lg">
+          <button
+            type="button"
+            onClick={() => setActiveMainSection('DUTY_ROSTER')}
+            className={`px-4 py-2 rounded-md text-xs font-black flex items-center gap-2 transition-colors cursor-pointer ${
+              activeMainSection === 'DUTY_ROSTER'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Calendar className="w-4 h-4 text-emerald-400" />
+            <span>Mfumo wa Zamu ya Walimu (Teacher Duty Roster)</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveMainSection('CONDUCT_LEDGER')}
+            className={`px-4 py-2 rounded-md text-xs font-black flex items-center gap-2 transition-colors cursor-pointer ${
+              activeMainSection === 'CONDUCT_LEDGER'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <ShieldAlert className="w-4 h-4 text-blue-500" />
+            <span>Rejista ya Nidhamu ya Wanafunzi ({records.length})</span>
+          </button>
+        </div>
+
+        <div className="text-xs text-slate-500 font-medium">
+          Idara ya Nidhamu & Usimamizi wa Zamu za Walimu — {schoolInfo?.name || 'Shule ya Sekondari'}
+        </div>
+      </div>
+
+      {activeMainSection === 'DUTY_ROSTER' ? (
+        <DutyRosterSystem
+          schoolId={schoolId}
+          schoolInfo={schoolInfo}
+          students={students}
+          teachers={teachers}
+          currentUser={currentUser}
+          dutyRosterData={dutyRosterData}
+          onUpdateDutyRoster={nextDuty => {
+            if (onUpdateDutyRoster) onUpdateDutyRoster(nextDuty);
+          }}
+          onAddMainTeacher={onAddMainTeacher}
+        />
+      ) : (
+        <>
       {/* KPI Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs flex items-center gap-4">
@@ -493,6 +559,8 @@ export const DisciplineView: React.FC<DisciplineViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

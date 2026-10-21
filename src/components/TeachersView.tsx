@@ -68,6 +68,7 @@ import { MultipleTeacherRegistrationModal } from './Teachers/MultipleTeacherRegi
 import { PhoneInputPlugin } from './common/PhoneInputPlugin';
 import { StudentPhoneBadge } from './common/StudentPhoneBadge';
 import { useConfirmDelete } from '../context/ConfirmDeleteContext';
+import { computeTeacherInitial } from '../utils/teacherInitials';
 
 interface TeachersViewProps {
   teachers: Teacher[];
@@ -366,13 +367,10 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     ];
   }, [periodSettings]);
 
-  // Auto-generate initials
+  // Auto-generate initials (First letter of First Name + First letter of Last Name, e.g. Juma Hassan = JH)
   const generateInitials = (fullName: string, currentTeacherId?: number): string => {
-    const parts = fullName.trim().split(/\s+/).filter(Boolean);
-    if (!parts.length) return 'NN';
-    const first = parts[0].charAt(0);
-    const second = parts.length > 1 ? parts[1].charAt(0) : parts[0].charAt(1) || 'N';
-    const base = `${first}${second}`.toUpperCase();
+    const base = computeTeacherInitial(fullName);
+    if (!base || base === 'TR') return 'TR';
 
     let result = base;
     let counter = 1;

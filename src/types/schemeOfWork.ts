@@ -41,7 +41,7 @@ export interface SchemeOfWork {
   subject: string;
   curriculumType: CurriculumType;
   academicYear: string;
-  term: 'Term 1' | 'Term 2' | 'Term 3';
+  term: 'Term 1' | 'Term 2' | 'Full Year';
   periodsPerWeek: number;
   totalWeeks: number;
   department?: string;
