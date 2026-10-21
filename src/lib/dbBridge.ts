@@ -18,14 +18,15 @@ export const getCurrentSchoolId = (): string => {
 
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function makeDeterministicUuid(seed: string): string {
-  if (UUID_REGEX.test(seed)) return seed.toLowerCase();
-  let h1 = 0xdeadbeef ^ seed.length;
-  let h2 = 0x41c6ce57 ^ seed.length;
-  let h3 = 0x9e3779b9 ^ seed.length;
-  let h4 = 0x85ebca6b ^ seed.length;
-  for (let i = 0; i < seed.length; i++) {
-    const ch = seed.charCodeAt(i);
+export function makeDeterministicUuid(seed: string): string {
+  const clean = String(seed || '').trim();
+  if (UUID_REGEX.test(clean)) return clean.toLowerCase();
+  let h1 = 0xdeadbeef ^ clean.length;
+  let h2 = 0x41c6ce57 ^ clean.length;
+  let h3 = 0x9e3779b9 ^ clean.length;
+  let h4 = 0x85ebca6b ^ clean.length;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean.charCodeAt(i);
     h1 = Math.imul(h1 ^ ch, 2654435761);
     h2 = Math.imul(h2 ^ ch, 1597334677);
     h3 = Math.imul(h3 ^ ch, 2246822519);
@@ -46,13 +47,16 @@ function makeDeterministicUuid(seed: string): string {
 
 // Transformers for Students
 export function toSupabaseStudent(s: any, schoolId: string, matchedClassId?: string) {
-  const rawCandidate = s.firestoreDocId || (typeof s.id === 'string' && UUID_REGEX.test(s.id) ? s.id : '');
-  const seed = rawCandidate || `std_${schoolId}_${s.regNo || s.reg_no || s.id || s.name}`;
+  const validSchoolId = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
+    ? DEFAULT_PRIMARY_SCHOOL_ID
+    : schoolId;
+  const regKey = String(s.regNo || s.reg_no || '').trim().toUpperCase();
+  const seed = `std_${validSchoolId}_${regKey || s.id || s.name}`;
   const stableId = makeDeterministicUuid(seed);
   return {
     id: stableId,
-    school_id: schoolId,
-    schoolId: schoolId,
+    school_id: validSchoolId,
+    schoolId: validSchoolId,
     name: s.name || '',
     class_name: s.className || s.class_name || 'Form 1',
     className: s.className || s.class_name || 'Form 1',
@@ -112,14 +116,17 @@ export function fromSupabaseStudent(s: any, idx: number): Student {
 
 // Transformers for Teachers
 export function toSupabaseTeacher(t: any, schoolId: string) {
-  const rawCandidate = t.firestoreDocId || (typeof t.id === 'string' && UUID_REGEX.test(t.id) ? t.id : '');
-  const seed = rawCandidate || `tch_${schoolId}_${t.id || t.email || t.name}`;
+  const validSchoolId = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
+    ? DEFAULT_PRIMARY_SCHOOL_ID
+    : schoolId;
+  const tchKey = String(t.email || t.name || t.id || '').trim().toLowerCase();
+  const seed = `tch_${validSchoolId}_${tchKey}`;
   const stableId = makeDeterministicUuid(seed);
   const calculatedInitial = (t.name ? computeTeacherInitial(t.name) : '') || t.initial || 'TR';
   return {
     id: stableId,
-    school_id: schoolId,
-    schoolId: schoolId,
+    school_id: validSchoolId,
+    schoolId: validSchoolId,
     name: t.name || '',
     gender: t.gender || 'Male',
     school_role: t.schoolRole || t.school_role || 'Subject Teacher',
@@ -167,14 +174,17 @@ export function fromSupabaseTeacher(t: any, idx: number): Teacher {
 
 // Transformers for Exams
 export function toSupabaseExam(e: any, schoolId: string) {
+  const validSchoolId = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
+    ? DEFAULT_PRIMARY_SCHOOL_ID
+    : schoolId;
   const isAct = e.isActive !== undefined 
     ? Boolean(e.isActive) 
     : (e.status !== 'Inactive' && e.status !== 'Locked');
-  const stableId = makeDeterministicUuid(`exm_${schoolId}_${e.id || e.name}`);
+  const stableId = makeDeterministicUuid(`exm_${validSchoolId}_${e.id || e.name}`);
   return {
     id: stableId,
-    school_id: schoolId,
-    schoolId: schoolId,
+    school_id: validSchoolId,
+    schoolId: validSchoolId,
     name: e.name || '',
     term: e.term || 'Term 1',
     year: String(e.year || new Date().getFullYear()),

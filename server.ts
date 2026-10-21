@@ -19,8 +19,16 @@ import {
 } from './src/server/timetableStore.ts';
 import { db } from './src/db/index.ts';
 import * as schema from './src/db/schema.ts';
-import { DEFAULT_APP_DATA } from './src/constants/defaults.ts';
-import { eq, inArray, and, asc, desc, getTableColumns, sql } from 'drizzle-orm';
+import {
+  DEFAULT_APP_DATA,
+  TANZANIAN_TEMPLATE_PERIOD_SETTINGS,
+  TANZANIAN_TEMPLATE_STREAM_SETTINGS,
+  TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS,
+  SECONDARY_SUBJECTS,
+  UPPER_PRIMARY_SUBJECTS_LIST,
+  NURSERY_SUBJECTS_LIST
+} from './src/constants/defaults.ts';
+import { eq, inArray, notInArray, and, asc, desc, getTableColumns, sql } from 'drizzle-orm';
 
 dotenv.config();
 
@@ -43,15 +51,35 @@ export function toDeterministicUuid(val: any, isSchoolId = false): string {
   if (val === undefined || val === null || val === '') {
     return isSchoolId ? DEFAULT_SCHOOL_UUID : crypto.randomUUID();
   }
-  const str = String(val).trim();
-  if (!str || (isSchoolId && (str === 'DEMO_SCHOOL' || str === 'DEFAULT_PRIMARY_SCHOOL_ID' || str === 'DEFAULT'))) {
+  const clean = String(val).trim();
+  if (!clean || (isSchoolId && (clean === 'DEMO_SCHOOL' || clean === 'DEFAULT_PRIMARY_SCHOOL_ID' || clean === 'DEFAULT'))) {
     return isSchoolId ? DEFAULT_SCHOOL_UUID : crypto.randomUUID();
   }
-  if (UUID_REGEX.test(str)) {
-    return str.toLowerCase();
+  if (UUID_REGEX.test(clean)) {
+    return clean.toLowerCase();
   }
-  const hash = crypto.createHash('md5').update(str).digest('hex');
-  return `${hash.slice(0, 8)}-${hash.slice(8, 12)}-4${hash.slice(13, 16)}-a${hash.slice(17, 20)}-${hash.slice(20, 32)}`;
+  let h1 = 0xdeadbeef ^ clean.length;
+  let h2 = 0x41c6ce57 ^ clean.length;
+  let h3 = 0x9e3779b9 ^ clean.length;
+  let h4 = 0x85ebca6b ^ clean.length;
+  for (let i = 0; i < clean.length; i++) {
+    const ch = clean.charCodeAt(i);
+    h1 = Math.imul(h1 ^ ch, 2654435761);
+    h2 = Math.imul(h2 ^ ch, 1597334677);
+    h3 = Math.imul(h3 ^ ch, 2246822519);
+    h4 = Math.imul(h4 ^ ch, 3266489917);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  h3 = Math.imul(h3 ^ (h3 >>> 16), 2246822507) ^ Math.imul(h4 ^ (h4 >>> 13), 3266489909);
+  h4 = Math.imul(h4 ^ (h4 >>> 16), 2246822507) ^ Math.imul(h3 ^ (h3 >>> 13), 3266489909);
+  const hex = (
+    (h1 >>> 0).toString(16).padStart(8, '0') +
+    (h2 >>> 0).toString(16).padStart(8, '0') +
+    (h3 >>> 0).toString(16).padStart(8, '0') +
+    (h4 >>> 0).toString(16).padStart(8, '0')
+  );
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
 const ensuredSchoolsCache = new Set<string>();
@@ -301,117 +329,509 @@ async function upsertTableRecords(tableName: string, tableObj: any, rawRecords: 
 
   // Determine conflict target column
   let conflictTarget = tableObj.id;
+  let conflictKeyName = 'id';
   if ((tableName === 'school_data' || tableName === 'sms_wallet') && tableObj.schoolId) {
     conflictTarget = tableObj.schoolId;
+    conflictKeyName = 'schoolId';
+  } else if (tableName === 'parents' && tableObj.phone) {
+    conflictTarget = tableObj.phone;
+    conflictKeyName = 'phone';
   }
+
+  // Normalize & deduplicate records by conflict key
+  const dedupedMap = new Map<string, Record<string, any>>();
+  const unkeyedList: Record<string, any>[] = [];
 
   for (const raw of rawRecords) {
     if (!raw || typeof raw !== 'object') continue;
     try {
       const normalized = await normalizeRecordForTable(tableObj, raw, false);
       if (tableName === 'parent_students') {
-        const inserted = await db.insert(tableObj).values(normalized).onConflictDoNothing().returning();
-        if (inserted[0]) results.push(toDualCaseRow(tableObj, inserted[0]));
-      } else if (conflictTarget) {
-        const updateSet = { ...normalized };
-        if (conflictTarget === tableObj.schoolId) {
-          delete updateSet.id;
-        }
-        const upserted = await db.insert(tableObj).values(normalized).onConflictDoUpdate({
-          target: conflictTarget,
-          set: updateSet,
-        }).returning();
-        if (upserted[0]) results.push(toDualCaseRow(tableObj, upserted[0]));
+        const compositeKey = `${normalized.parentId}_${normalized.studentId}`;
+        dedupedMap.set(compositeKey, normalized);
+      } else if (conflictKeyName && normalized[conflictKeyName] !== undefined && normalized[conflictKeyName] !== null) {
+        dedupedMap.set(String(normalized[conflictKeyName]), normalized);
       } else {
-        const inserted = await db.insert(tableObj).values(normalized).onConflictDoNothing().returning();
-        if (inserted[0]) results.push(toDualCaseRow(tableObj, inserted[0]));
+        unkeyedList.push(normalized);
       }
-    } catch (rowErr: any) {
-      console.warn(`Upsert row warning on ${tableName}:`, rowErr?.message || rowErr);
+    } catch (normErr: any) {
+      console.warn(`Normalize warning on ${tableName}:`, normErr?.message || normErr);
+    }
+  }
+
+  const normalizedList = [...Array.from(dedupedMap.values()), ...unkeyedList];
+  if (normalizedList.length === 0) return [];
+
+  // Build excluded column map for fast PostgreSQL multi-row upsert
+  const excludedSet: Record<string, any> = {};
+  for (const [jsKey, colDef] of Object.entries(cols) as [string, any][]) {
+    if (jsKey === 'id' || jsKey === 'createdAt') continue;
+    if (conflictKeyName === 'schoolId' && jsKey === 'schoolId') continue;
+    excludedSet[jsKey] = sql.raw(`excluded."${colDef.name}"`);
+  }
+
+  const BATCH_SIZE = 100;
+  for (let i = 0; i < normalizedList.length; i += BATCH_SIZE) {
+    const batch = normalizedList.slice(i, i + BATCH_SIZE);
+    try {
+      if (tableName === 'parent_students' || !conflictTarget || Object.keys(excludedSet).length === 0) {
+        const inserted = await db.insert(tableObj).values(batch).onConflictDoNothing().returning();
+        for (const row of inserted) {
+          results.push(toDualCaseRow(tableObj, row));
+        }
+      } else {
+        const upserted = await db.insert(tableObj).values(batch).onConflictDoUpdate({
+          target: conflictTarget,
+          set: excludedSet,
+        }).returning();
+        for (const row of upserted) {
+          results.push(toDualCaseRow(tableObj, row));
+        }
+      }
+    } catch (batchErr: any) {
+      // Fallback row-by-row if a batch hits a secondary constraint
+      for (const normalized of batch) {
+        try {
+          if (tableName === 'parent_students' || !conflictTarget) {
+            const inserted = await db.insert(tableObj).values(normalized).onConflictDoNothing().returning();
+            if (inserted[0]) results.push(toDualCaseRow(tableObj, inserted[0]));
+          } else {
+            const updateSet = { ...normalized };
+            if (conflictKeyName === 'schoolId') delete updateSet.id;
+            const upserted = await db.insert(tableObj).values(normalized).onConflictDoUpdate({
+              target: conflictTarget,
+              set: updateSet,
+            }).returning();
+            if (upserted[0]) results.push(toDualCaseRow(tableObj, upserted[0]));
+          }
+        } catch (rowErr: any) {
+          console.warn(`Upsert row warning on ${tableName}:`, rowErr?.message || rowErr);
+        }
+      }
     }
   }
   return results;
+}
+
+function pickNonEmptyArray<T = any>(...candidates: any[]): T[] {
+  for (const c of candidates) {
+    if (Array.isArray(c) && c.length > 0) return c;
+  }
+  return [];
+}
+
+function pickNonEmptyObject<T = Record<string, any>>(...candidates: any[]): T {
+  for (const c of candidates) {
+    if (c && typeof c === 'object' && !Array.isArray(c) && Object.keys(c).length > 0) {
+      return c as T;
+    }
+  }
+  return {} as T;
 }
 
 // Helper to synchronize relational tables from a schoolData snapshot
 async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<string, any>) {
   const validSchoolUuid = await ensureSchoolExists(schoolId);
   try {
-    if (Array.isArray(raw.students) && raw.students.length > 0) {
-      await upsertTableRecords('students', schema.students, raw.students.map((s: any) => ({
+    // 0. Sync School metadata & Subscriptions & SMS Wallet
+    if (raw.schoolInfo && typeof raw.schoolInfo === 'object') {
+      const info = raw.schoolInfo;
+      await upsertTableRecords('schools', schema.schools, [{
+        id: validSchoolUuid,
+        name: info.name || 'HabyEduPro3A',
+        code: info.schoolNumber || 'S.0123',
+        phone: info.phone || '0717616343',
+        email: info.email || 'info@habyedupro3a.ac.tz',
+        status: 'ACTIVE',
+        updatedAt: new Date(),
+      }]);
+    }
+
+    await db.insert(schema.smsWallet).values({
+      id: toDeterministicUuid(`wallet_${validSchoolUuid}`),
+      schoolId: validSchoolUuid,
+      balance: 500,
+      updatedAt: new Date(),
+    }).onConflictDoNothing().catch(() => {});
+
+    // 1. Students (canonical deterministic ID + deduplicate stale rows)
+    const rawStudents = pickNonEmptyArray(raw.students, DEFAULT_APP_DATA.students);
+    const canonicalStudentIds: string[] = [];
+    const seenStudentKeys = new Set<string>();
+    const studentPayloads: any[] = [];
+
+    for (const s of rawStudents) {
+      if (!s || typeof s !== 'object') continue;
+      const regKey = String(s.regNo || s.reg_no || '').trim().toUpperCase();
+      const dedupeKey = regKey || String(s.id || s.name || '').trim().toLowerCase();
+      if (!dedupeKey || seenStudentKeys.has(dedupeKey)) continue;
+      seenStudentKeys.add(dedupeKey);
+
+      const canonicalId = toDeterministicUuid(`std_${validSchoolUuid}_${regKey || s.id || s.name}`);
+      canonicalStudentIds.push(canonicalId);
+      studentPayloads.push({
         ...s,
-        id: s.firestoreDocId || s.regNo || s.reg_no || `std_${validSchoolUuid}_${s.id || s.name}`,
+        id: canonicalId,
         schoolId: validSchoolUuid,
-      })));
+      });
     }
-    if (Array.isArray(raw.teachers) && raw.teachers.length > 0) {
-      await upsertTableRecords('teachers', schema.teachers, raw.teachers.map((t: any) => ({
+
+    if (studentPayloads.length > 0) {
+      await upsertTableRecords('students', schema.students, studentPayloads);
+      try {
+        await db.delete(schema.students).where(
+          and(
+            eq(schema.students.schoolId, validSchoolUuid as any),
+            notInArray(schema.students.id, canonicalStudentIds as any)
+          )
+        );
+      } catch (cleanupErr) {}
+    }
+
+    // 2. Teachers (canonical deterministic ID + deduplicate stale rows)
+    const rawTeachers = pickNonEmptyArray(raw.teachers, DEFAULT_APP_DATA.teachers);
+    const canonicalTeacherIds: string[] = [];
+    const seenTeacherKeys = new Set<string>();
+    const teacherPayloads: any[] = [];
+
+    for (const t of rawTeachers) {
+      if (!t || typeof t !== 'object') continue;
+      const tchKey = String(t.email || t.name || t.id || '').trim().toLowerCase();
+      if (!tchKey || seenTeacherKeys.has(tchKey)) continue;
+      seenTeacherKeys.add(tchKey);
+
+      const canonicalId = toDeterministicUuid(`tch_${validSchoolUuid}_${tchKey}`);
+      canonicalTeacherIds.push(canonicalId);
+      teacherPayloads.push({
         ...t,
-        id: t.firestoreDocId || `tch_${validSchoolUuid}_${t.id || t.name}`,
+        id: canonicalId,
         schoolId: validSchoolUuid,
+      });
+    }
+
+    if (teacherPayloads.length > 0) {
+      await upsertTableRecords('teachers', schema.teachers, teacherPayloads);
+      try {
+        await db.delete(schema.teachers).where(
+          and(
+            eq(schema.teachers.schoolId, validSchoolUuid as any),
+            notInArray(schema.teachers.id, canonicalTeacherIds as any)
+          )
+        );
+      } catch (cleanupErr) {}
+
+      // Also sync authorized_staff from teachers
+      await upsertTableRecords('authorized_staff', schema.authorizedStaff, teacherPayloads.slice(0, 50).map((t: any) => ({
+        id: toDeterministicUuid(`staff_${validSchoolUuid}_${t.email || t.name}`),
+        schoolId: validSchoolUuid,
+        name: t.name || 'Teacher',
+        email: t.email || `${String(t.name || 'teacher').toLowerCase().replace(/[^a-z0-9]/g, '.')}@school.ac.tz`,
+        role: t.schoolRole || 'TEACHER',
+        assignedSubjects: Array.isArray(t.subjects) ? t.subjects : [],
+        isActive: true,
       })));
     }
-    if (Array.isArray(raw.exams) && raw.exams.length > 0) {
-      await upsertTableRecords('exams', schema.exams, raw.exams.map((e: any) => ({
+
+    // 3. Subjects Catalog
+    const allSubjectNames = Array.from(new Set([
+      ...SECONDARY_SUBJECTS,
+      ...UPPER_PRIMARY_SUBJECTS_LIST,
+      ...NURSERY_SUBJECTS_LIST
+    ]));
+    if (allSubjectNames.length > 0) {
+      await upsertTableRecords('subjects', schema.subjects, allSubjectNames.map((subjName, idx) => ({
+        id: toDeterministicUuid(`subj_${validSchoolUuid}_${subjName}`),
+        schoolId: validSchoolUuid,
+        name: subjName,
+        code: `SUB-${String(idx + 1).padStart(3, '0')}`,
+      })));
+    }
+
+    // 4. Exams, Exam Records & Exam Results
+    const rawExams = pickNonEmptyArray(raw.exams, DEFAULT_APP_DATA.exams);
+    if (rawExams.length > 0) {
+      await upsertTableRecords('exams', schema.exams, rawExams.map((e: any) => ({
         ...e,
-        id: `exm_${validSchoolUuid}_${e.id || e.name}`,
+        id: toDeterministicUuid(`exm_${validSchoolUuid}_${e.id || e.name}`),
         schoolId: validSchoolUuid,
       })));
     }
-    const rawExamRecs = raw.examinationRecords || raw.examination_records;
-    const examRecs = (Array.isArray(rawExamRecs) && rawExamRecs.length > 0) ? rawExamRecs : DEFAULT_APP_DATA.examinationRecords;
-    if (Array.isArray(examRecs) && examRecs.length > 0) {
-      await upsertTableRecords('exam_records', schema.examRecords, examRecs.map((r: any) => ({
+
+    const examRecs = pickNonEmptyArray(raw.examinationRecords, raw.examination_records, DEFAULT_APP_DATA.examinationRecords);
+    if (examRecs.length > 0) {
+      await upsertTableRecords('exam_records', schema.examRecords, examRecs.map((r: any, idx: number) => ({
         ...r,
+        id: r.id ? String(r.id) : `rec_${validSchoolUuid}_${idx}`,
         schoolId: validSchoolUuid,
+        subjectMarks: r.subjectMarks || r.subjects || {},
+        totalMarks: String(r.totalMarks ?? 0),
+        averageScore: String(r.averageScore ?? r.averageMarks ?? 0),
+        rank: Number(r.rank ?? r.positionInClass ?? (idx + 1)),
       })));
     }
-    const rawTtAssigns = raw.timetableAssignments || raw.timetable_assignments;
-    const ttAssigns = (Array.isArray(rawTtAssigns) && rawTtAssigns.length > 0) ? rawTtAssigns : DEFAULT_APP_DATA.timetableAssignments;
-    if (Array.isArray(ttAssigns) && ttAssigns.length > 0) {
+
+    // 5. Timetable Assignments & Timetables
+    const ttAssigns = pickNonEmptyArray(
+      raw.timetableAssignments,
+      raw.timetable_assignments,
+      DEFAULT_APP_DATA.timetableAssignments,
+      TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS
+    );
+    if (ttAssigns.length > 0) {
       await upsertTableRecords('timetable_assignments', schema.timetableAssignments, ttAssigns.map((a: any, idx: number) => ({
         ...a,
-        id: a.id ? String(a.id) : `ta_${validSchoolUuid}_${idx}`,
+        id: a.id ? `ta_${validSchoolUuid}_${a.id}` : `ta_${validSchoolUuid}_${idx}`,
         schoolId: validSchoolUuid,
+        className: a.className || 'Form 1',
+        stream: a.stream || 'STREAM A',
+        day: a.day || 'Monday',
+        period: a.period || `Period ${(idx % 7) + 1}`,
+        subject: a.subject || 'Mathematics',
+        teacherId: typeof a.teacherId === 'number' ? a.teacherId : 101,
       })));
+
+      await upsertTableRecords('timetables', schema.timetables, ttAssigns.map((a: any, idx: number) => {
+        const periodNumMatch = String(a.period || '').match(/(\d+)/);
+        const periodNumber = periodNumMatch ? parseInt(periodNumMatch[1], 10) : (idx % 7) + 1;
+        return {
+          id: a.id ? `tt_${validSchoolUuid}_${a.id}` : `tt_${validSchoolUuid}_${idx}`,
+          schoolId: validSchoolUuid,
+          classId: a.className || 'Form 1',
+          stream: a.stream || 'STREAM A',
+          dayOfWeek: a.day || 'Monday',
+          periodNumber,
+          subjectId: a.subject || 'Mathematics',
+          teacherId: typeof a.teacherId === 'number' ? a.teacherId : 101,
+          timeStart: '08:00',
+          timeEnd: '08:40',
+        };
+      }));
     }
-    const rawPSettings = raw.periodSettings || raw.period_settings;
-    const pSettings = (Array.isArray(rawPSettings) && rawPSettings.length > 0) ? rawPSettings : DEFAULT_APP_DATA.periodSettings;
-    if (Array.isArray(pSettings) && pSettings.length > 0) {
+
+    // 6. Period Settings & Periods
+    const pSettings = pickNonEmptyArray(
+      raw.periodSettings,
+      raw.period_settings,
+      DEFAULT_APP_DATA.periodSettings,
+      TANZANIAN_TEMPLATE_PERIOD_SETTINGS
+    );
+    if (pSettings.length > 0) {
       await upsertTableRecords('period_settings', schema.periodSettings, pSettings.map((p: any, idx: number) => ({
         ...p,
-        id: p.id ? String(p.id) : `ps_${validSchoolUuid}_${idx}`,
+        id: p.id ? `ps_${validSchoolUuid}_${p.id}` : `ps_${validSchoolUuid}_${idx}`,
         schoolId: validSchoolUuid,
-        startTime: p.startTime || p.start || '08:00',
-        endTime: p.endTime || p.end || '08:40',
-      })));
-      await upsertTableRecords('periods', schema.periods, pSettings.map((p: any, idx: number) => ({
-        id: `prd_${validSchoolUuid}_${p.name || idx}`,
-        schoolId: validSchoolUuid,
+        day: p.day || 'Monday',
         name: p.name || `Period ${idx + 1}`,
         startTime: p.startTime || p.start || '08:00',
         endTime: p.endTime || p.end || '08:40',
         isBreak: Boolean(p.isBreak || p.is_break),
       })));
+
+      // Deduplicate periods by period name (e.g., Period 1..7)
+      const uniquePeriodsMap = new Map<string, any>();
+      pSettings.forEach((p: any, idx: number) => {
+        const pName = p.name || `Period ${idx + 1}`;
+        if (!uniquePeriodsMap.has(pName)) {
+          uniquePeriodsMap.set(pName, {
+            id: toDeterministicUuid(`prd_${validSchoolUuid}_${pName}`),
+            schoolId: validSchoolUuid,
+            name: pName,
+            startTime: p.startTime || p.start || '08:00',
+            endTime: p.endTime || p.end || '08:40',
+            isBreak: Boolean(p.isBreak || p.is_break),
+          });
+        }
+      });
+      await upsertTableRecords('periods', schema.periods, Array.from(uniquePeriodsMap.values()));
     }
-    const rawSSettings = raw.streamSettings || raw.stream_settings;
-    const sSettings = (Array.isArray(rawSSettings) && rawSSettings.length > 0) ? rawSSettings : DEFAULT_APP_DATA.streamSettings;
-    if (Array.isArray(sSettings) && sSettings.length > 0) {
+
+    // 7. Stream Settings & Classes
+    const sSettings = pickNonEmptyArray(
+      raw.streamSettings,
+      raw.stream_settings,
+      DEFAULT_APP_DATA.streamSettings,
+      TANZANIAN_TEMPLATE_STREAM_SETTINGS
+    );
+    if (sSettings.length > 0) {
       await upsertTableRecords('stream_settings', schema.streamSettings, sSettings.map((s: any, idx: number) => ({
         ...s,
-        id: s.id ? String(s.id) : `ss_${validSchoolUuid}_${s.className || idx}`,
+        id: s.id ? `ss_${validSchoolUuid}_${s.id}` : `ss_${validSchoolUuid}_${s.className || idx}`,
         schoolId: validSchoolUuid,
+        className: s.className || `Class ${idx + 1}`,
+        level: s.level || 'CSEE',
+        streams: Array.isArray(s.streams) ? s.streams : ['STREAM A', 'STREAM B'],
       })));
+
       await upsertTableRecords('classes', schema.classes, sSettings.map((s: any, idx: number) => ({
-        id: `cls_${validSchoolUuid}_${s.className || idx}`,
+        id: toDeterministicUuid(`cls_${validSchoolUuid}_${s.className || idx}`),
         schoolId: validSchoolUuid,
         name: s.className || `Class ${idx + 1}`,
         level: s.level || 'CSEE',
-        stream: Array.isArray(s.streams) && s.streams[0] ? s.streams[0] : 'A',
+        stream: Array.isArray(s.streams) && s.streams[0] ? s.streams[0] : 'STREAM A',
       })));
     }
-    const discRecs = raw.disciplineRecords || raw.discipline_records || DEFAULT_APP_DATA.disciplineRecords;
-    if (Array.isArray(discRecs) && discRecs.length > 0) {
+
+    // 8. Subject Period Allocations & Teacher Assignments & Institutional Policy
+    const spaList = pickNonEmptyArray(
+      raw.subjectPeriodAllocations,
+      raw.subject_period_allocations,
+      DEFAULT_APP_DATA.subjectPeriodAllocations
+    );
+    if (spaList.length > 0) {
+      await upsertTableRecords('subject_period_allocations', schema.subjectPeriodAllocations, spaList.map((spa: any, idx: number) => ({
+        id: spa.id ? `${validSchoolUuid}_${spa.id}` : `spa_${validSchoolUuid}_${idx}`,
+        schoolId: validSchoolUuid,
+        className: spa.className || 'Form 1',
+        subjectName: spa.subjectName || spa.subject || 'Mathematics',
+        periodsPerWeek: Number(spa.periodsPerWeek || 4),
+        doublePeriods: Boolean(spa.doublePeriods),
+      })));
+    }
+
+    const tAssignList = pickNonEmptyArray(
+      raw.teacherAssignments,
+      raw.teacher_assignments,
+      DEFAULT_APP_DATA.teacherAssignments
+    );
+    if (tAssignList.length > 0) {
+      const flatTeacherAssigns: any[] = [];
+      tAssignList.forEach((ta: any, idx: number) => {
+        const subjectsArr = Array.isArray(ta.subjects) && ta.subjects.length > 0
+          ? ta.subjects
+          : [ta.subjectName || ta.subject || 'Mathematics'];
+        const streamsArr = Array.isArray(ta.streams) && ta.streams.length > 0
+          ? ta.streams
+          : [`${ta.className || 'Form 1'} - ${ta.stream || 'STREAM A'}`];
+        const firstStreamParts = String(streamsArr[0] || 'Form 1 - STREAM A').split(' - ');
+        flatTeacherAssigns.push({
+          id: ta.id ? `${validSchoolUuid}_${ta.id}` : `tassign_${validSchoolUuid}_${idx}`,
+          schoolId: validSchoolUuid,
+          teacherId: Number(ta.teacherId || 101),
+          teacherName: ta.teacherName || 'Teacher',
+          className: ta.className || firstStreamParts[0] || 'Form 1',
+          stream: ta.stream || firstStreamParts[1] || 'STREAM A',
+          subjectName: subjectsArr[0] || 'Mathematics',
+          periodsCount: Number(ta.periodsCount || 4),
+        });
+      });
+      await upsertTableRecords('teacher_assignments', schema.teacherAssignments, flatTeacherAssigns);
+    }
+
+    const policyObj = pickNonEmptyObject(raw.institutionalPolicy, raw.institutional_policy, DEFAULT_APP_DATA.institutionalPolicy);
+    if (Object.keys(policyObj).length > 0) {
+      await upsertTableRecords('institutional_policies', schema.institutionalPolicies, [{
+        id: `pol_${validSchoolUuid}`,
+        schoolId: validSchoolUuid,
+        policyName: 'Standard School Timetable & Academic Policy',
+        rules: policyObj,
+        updatedAt: new Date(),
+      }]);
+    }
+
+    // 9. Invigilation Sessions, Supervisors & Selected Invigilators
+    const invSessions = pickNonEmptyArray(raw.sessions, DEFAULT_APP_DATA.sessions);
+    if (invSessions.length > 0) {
+      await upsertTableRecords('invigilation_sessions', schema.invigilationSessions, invSessions.map((s: any, idx: number) => ({
+        id: s.id ? `inv_sess_${validSchoolUuid}_${s.id}` : `inv_sess_${validSchoolUuid}_${idx}`,
+        schoolId: validSchoolUuid,
+        rawDate: s.rawDate || '2026-10-15',
+        date: s.rawDate || '2026-10-15',
+        day: s.day || 'Thursday',
+        session: s.session || 'SESSION I',
+        startTime: s.startTime || s.start || '08:00',
+        endTime: s.endTime || s.end || '10:30',
+        timeSlot: s.timeSlot || s.time || '08:00-10:30',
+        subject: s.subject || 'Mathematics',
+        level: s.level || 'CSEE',
+        className: s.className || 'Form 1',
+        stream: s.stream || 'STREAM A',
+        roomsCount: Number(s.roomsCount || s.rooms || 1),
+      })));
+    }
+
+    const invSupervisors = pickNonEmptyArray(raw.supervisors, DEFAULT_APP_DATA.supervisors);
+    if (invSupervisors.length > 0) {
+      await upsertTableRecords('invigilation_supervisors', schema.invigilationSupervisors, invSupervisors.map((sup: any, idx: number) => ({
+        id: sup.id ? `inv_sup_${validSchoolUuid}_${sup.id}` : `inv_sup_${validSchoolUuid}_${idx}`,
+        schoolId: validSchoolUuid,
+        teacherId: Number(sup.teacherId || 101),
+        name: sup.name || 'Supervisor',
+        initial: sup.initial || 'SV',
+        phone: sup.phone || '',
+        role: sup.role || 'Chief Supervisor',
+      })));
+    }
+
+    const selInvigilators = pickNonEmptyArray(raw.selectedInvigilators, raw.selected_invigilators, DEFAULT_APP_DATA.selectedInvigilators);
+    if (selInvigilators.length > 0) {
+      await upsertTableRecords('selected_invigilators', schema.selectedInvigilators, selInvigilators.map((item: any, idx: number) => {
+        const tId = typeof item === 'number' ? item : Number(item?.teacherId || item?.id || (101 + idx));
+        const matchedT = rawTeachers.find((t: any) => Number(t.id) === tId);
+        return {
+          id: `sel_inv_${validSchoolUuid}_${tId}`,
+          schoolId: validSchoolUuid,
+          teacherId: tId,
+          teacherName: item?.teacherName || matchedT?.name || `Teacher ${tId}`,
+          isActive: true,
+        };
+      }));
+    }
+
+    // 10. Daily Attendance -> period_attendance table
+    const dailyAtt = pickNonEmptyObject(raw.dailyAttendance, raw.daily_attendance);
+    const attRows: any[] = [];
+    for (const [dateKey, studentStatusMap] of Object.entries(dailyAtt)) {
+      if (!studentStatusMap || typeof studentStatusMap !== 'object') continue;
+      for (const [studIdStr, statusVal] of Object.entries(studentStatusMap as Record<string, any>)) {
+        const matchedStud = rawStudents.find((s: any) => String(s.id) === String(studIdStr));
+        attRows.push({
+          id: `att_${validSchoolUuid}_${dateKey}_${studIdStr}`,
+          schoolId: validSchoolUuid,
+          date: dateKey,
+          dayOfWeek: new Date(dateKey).toLocaleDateString('en-US', { weekday: 'long' }) || 'Monday',
+          periodNumber: 1,
+          className: matchedStud?.className || 'Form 1',
+          stream: matchedStud?.stream || 'STREAM A',
+          subject: 'Daily Roll Call',
+          teacherName: matchedStud?.name || `Student #${studIdStr}`,
+          status: String(statusVal || 'PRESENT'),
+          reason: `Student ID ${studIdStr} (${matchedStud?.regNo || ''})`,
+          markedBy: 'Attendance System',
+        });
+      }
+    }
+    if (attRows.length > 0) {
+      await upsertTableRecords('period_attendance', schema.periodAttendance, attRows.slice(0, 300));
+    }
+
+    // 11. Parents & Parent-Students links from student parentPhone
+    const parentRowsMap = new Map<string, any>();
+    const parentStudentLinks: any[] = [];
+    for (const s of studentPayloads.slice(0, 200)) {
+      const phone = String(s.parentPhone || s.parent_phone || s.phone || '').trim();
+      if (!phone || phone.length < 6) continue;
+      const parentId = toDeterministicUuid(`par_${validSchoolUuid}_${phone}`);
+      if (!parentRowsMap.has(phone)) {
+        parentRowsMap.set(phone, {
+          id: parentId,
+          schoolId: validSchoolUuid,
+          phone,
+          passwordHash: '123456',
+          fullName: `Parent of ${s.name || 'Student'}`,
+        });
+      }
+      parentStudentLinks.push({
+        parentId,
+        studentId: s.id,
+      });
+    }
+    if (parentRowsMap.size > 0) {
+      await upsertTableRecords('parents', schema.parents, Array.from(parentRowsMap.values()));
+    }
+
+    // 12. Discipline Records & Activity Logs & Duty Roster
+    const discRecs = pickNonEmptyArray(raw.disciplineRecords, raw.discipline_records, DEFAULT_APP_DATA.disciplineRecords);
+    if (discRecs.length > 0) {
       await upsertTableRecords('discipline_records', schema.disciplineRecords, discRecs.map((d: any, idx: number) => ({
         id: d.id ? String(d.id) : `disc_${validSchoolUuid}_${idx}`,
         schoolId: validSchoolUuid,
@@ -425,8 +845,9 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
         status: d.status || 'Resolved',
       })));
     }
-    const actLogs = raw.activityLogs || raw.activity_logs || DEFAULT_APP_DATA.activityLogs;
-    if (Array.isArray(actLogs) && actLogs.length > 0) {
+
+    const actLogs = pickNonEmptyArray(raw.activityLogs, raw.activity_logs, DEFAULT_APP_DATA.activityLogs);
+    if (actLogs.length > 0) {
       await upsertTableRecords('activity_logs', schema.activityLogs, actLogs.slice(0, 50).map((l: any, idx: number) => ({
         id: l.id ? String(l.id) : `log_${validSchoolUuid}_${idx}`,
         schoolId: validSchoolUuid,
@@ -441,6 +862,7 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
         timestamp: l.timestamp || new Date().toISOString(),
       })));
     }
+
     const dutyData = raw.dutyRosterData || raw.duty_roster_data;
     if (dutyData && typeof dutyData === 'object') {
       if (Array.isArray(dutyData.streams) && dutyData.streams.length > 0) {
@@ -518,17 +940,14 @@ app.get('/api/db/school-data', async (req, res) => {
       const isDemo = resolvedId === DEFAULT_SCHOOL_UUID;
       
       if (isDemo) {
-        if (!Array.isArray(dual.students) || dual.students.length === 0) {
-          dual.students = DEFAULT_APP_DATA.students;
-        }
-        if (!Array.isArray(dual.teachers) || dual.teachers.length === 0) {
-          dual.teachers = DEFAULT_APP_DATA.teachers;
-        }
-        if (!Array.isArray(dual.exams) || dual.exams.length === 0) {
-          dual.exams = DEFAULT_APP_DATA.exams;
-        }
+        dual.students = pickNonEmptyArray(dual.students, DEFAULT_APP_DATA.students);
+        dual.teachers = pickNonEmptyArray(dual.teachers, DEFAULT_APP_DATA.teachers);
+        dual.exams = pickNonEmptyArray(dual.exams, DEFAULT_APP_DATA.exams);
+        dual.periodSettings = pickNonEmptyArray(dual.periodSettings, dual.period_settings, DEFAULT_APP_DATA.periodSettings);
+        dual.streamSettings = pickNonEmptyArray(dual.streamSettings, dual.stream_settings, DEFAULT_APP_DATA.streamSettings);
+        dual.timetableAssignments = pickNonEmptyArray(dual.timetableAssignments, dual.timetable_assignments, DEFAULT_APP_DATA.timetableAssignments);
+        dual.examinationRecords = pickNonEmptyArray(dual.examinationRecords, dual.examination_records, DEFAULT_APP_DATA.examinationRecords);
       } else {
-        // For real schools, default to empty arrays if null/missing
         dual.students = Array.isArray(dual.students) ? dual.students : [];
         dual.teachers = Array.isArray(dual.teachers) ? dual.teachers : [];
         dual.exams = Array.isArray(dual.exams) ? dual.exams : [];
@@ -559,72 +978,52 @@ app.post('/api/db/school-data', async (req, res) => {
 
     const isDemo = schoolId === DEFAULT_SCHOOL_UUID;
 
-    const resolvedStudents = (Array.isArray(raw.students) && raw.students.length > 0)
-      ? raw.students
-      : (Array.isArray(existing?.students) && (existing.students as any[]).length > 0)
-        ? existing.students
-        : (isDemo ? DEFAULT_APP_DATA.students : []);
-
-    const resolvedTeachers = (Array.isArray(raw.teachers) && raw.teachers.length > 0)
-      ? raw.teachers
-      : (Array.isArray(existing?.teachers) && (existing.teachers as any[]).length > 0)
-        ? existing.teachers
-        : (isDemo ? DEFAULT_APP_DATA.teachers : []);
-
-    const resolvedExams = (Array.isArray(raw.exams) && raw.exams.length > 0)
-      ? raw.exams
-      : (Array.isArray(existing?.exams) && (existing.exams as any[]).length > 0)
-        ? existing.exams
-        : (isDemo ? DEFAULT_APP_DATA.exams : []);
-
-    const resolvedDisciplineRecords = (Array.isArray(raw.disciplineRecords) && raw.disciplineRecords.length > 0)
-      ? raw.disciplineRecords
-      : (Array.isArray(raw.discipline_records) && raw.discipline_records.length > 0)
-        ? raw.discipline_records
-        : (Array.isArray(existing?.disciplineRecords) && (existing.disciplineRecords as any[]).length > 0)
-          ? existing.disciplineRecords
-          : DEFAULT_APP_DATA.disciplineRecords || [];
-
-    const resolvedDutyRosterData = (raw.dutyRosterData && typeof raw.dutyRosterData === 'object' && Object.keys(raw.dutyRosterData).length > 0)
-      ? raw.dutyRosterData
-      : (raw.duty_roster_data && typeof raw.duty_roster_data === 'object' && Object.keys(raw.duty_roster_data).length > 0)
-        ? raw.duty_roster_data
-        : (existing?.dutyRosterData && typeof existing.dutyRosterData === 'object' && Object.keys(existing.dutyRosterData as any).length > 0)
-          ? existing.dutyRosterData
-          : {};
+    const resolvedStudents = pickNonEmptyArray(raw.students, existing?.students, isDemo ? DEFAULT_APP_DATA.students : []);
+    const resolvedTeachers = pickNonEmptyArray(raw.teachers, existing?.teachers, isDemo ? DEFAULT_APP_DATA.teachers : []);
+    const resolvedExams = pickNonEmptyArray(raw.exams, existing?.exams, isDemo ? DEFAULT_APP_DATA.exams : []);
+    const resolvedDisciplineRecords = pickNonEmptyArray(raw.disciplineRecords, raw.discipline_records, existing?.disciplineRecords, DEFAULT_APP_DATA.disciplineRecords);
+    const resolvedDutyRosterData = pickNonEmptyObject(raw.dutyRosterData, raw.duty_roster_data, existing?.dutyRosterData);
 
     const normalizedData = {
       id: raw.id || schoolId,
       schoolId: schoolId,
-      schoolInfo: raw.schoolInfo || raw.school_info || existing?.schoolInfo || DEFAULT_APP_DATA.schoolInfo || {},
-      timetableAssignments: raw.timetableAssignments || raw.timetable_assignments || existing?.timetableAssignments || DEFAULT_APP_DATA.timetableAssignments || [],
-      periodSettings: raw.periodSettings || raw.period_settings || existing?.periodSettings || DEFAULT_APP_DATA.periodSettings || [],
-      streamSettings: raw.streamSettings || raw.stream_settings || existing?.streamSettings || DEFAULT_APP_DATA.streamSettings || [],
-      institutionalPolicy: raw.institutionalPolicy || raw.institutional_policy || existing?.institutionalPolicy || DEFAULT_APP_DATA.institutionalPolicy || {},
-      sessions: raw.sessions || existing?.sessions || [],
-      supervisors: raw.supervisors || existing?.supervisors || [],
-      selectedInvigilators: raw.selectedInvigilators || raw.selected_invigilators || existing?.selectedInvigilators || [],
-      invigilationAssignments: raw.invigilationAssignments || raw.invigilation_assignments || existing?.invigilationAssignments || {},
-      dailyAttendance: raw.dailyAttendance || raw.daily_attendance || existing?.dailyAttendance || {},
-      journalRecords: raw.journalRecords || raw.journal_records || existing?.journalRecords || {},
-      schemesOfWork: raw.schemesOfWork || raw.schemes_of_work || existing?.schemesOfWork || [],
-      lessonPlans: raw.lessonPlans || raw.lesson_plans || existing?.lessonPlans || [],
-      teacherEvaluations: raw.teacherEvaluations || raw.teacher_evaluations || existing?.teacherEvaluations || [],
-      savedTimetableRecords: raw.savedTimetableRecords || raw.saved_timetable_records || existing?.savedTimetableRecords || [],
-      savedInvigilationRecords: raw.savedInvigilationRecords || raw.saved_invigilation_records || existing?.savedInvigilationRecords || [],
-      gradeCutoffs: raw.gradeCutoffs || raw.grade_cutoffs || existing?.gradeCutoffs || {},
-      ledgerSubjectKeys: raw.ledgerSubjectKeys || raw.ledger_subject_keys || existing?.ledgerSubjectKeys || {},
-      subjectPeriodAllocations: raw.subjectPeriodAllocations || raw.subject_period_allocations || existing?.subjectPeriodAllocations || [],
-      teacherAssignments: raw.teacherAssignments || raw.teacher_assignments || existing?.teacherAssignments || [],
-      subjectPaperConfigs: raw.subjectPaperConfigs || raw.subject_paper_configs || existing?.subjectPaperConfigs || {},
-      bubbleSettings: raw.bubbleSettings || raw.bubble_settings || existing?.bubbleSettings || {},
+      schoolInfo: pickNonEmptyObject(raw.schoolInfo, raw.school_info, existing?.schoolInfo, DEFAULT_APP_DATA.schoolInfo),
+      timetableAssignments: pickNonEmptyArray(raw.timetableAssignments, raw.timetable_assignments, existing?.timetableAssignments, DEFAULT_APP_DATA.timetableAssignments),
+      periodSettings: pickNonEmptyArray(raw.periodSettings, raw.period_settings, existing?.periodSettings, DEFAULT_APP_DATA.periodSettings),
+      streamSettings: pickNonEmptyArray(raw.streamSettings, raw.stream_settings, existing?.streamSettings, DEFAULT_APP_DATA.streamSettings),
+      institutionalPolicy: pickNonEmptyObject(raw.institutionalPolicy, raw.institutional_policy, existing?.institutionalPolicy, DEFAULT_APP_DATA.institutionalPolicy),
+      sessions: pickNonEmptyArray(raw.sessions, existing?.sessions, DEFAULT_APP_DATA.sessions),
+      supervisors: pickNonEmptyArray(raw.supervisors, existing?.supervisors, DEFAULT_APP_DATA.supervisors),
+      selectedInvigilators: pickNonEmptyArray(raw.selectedInvigilators, raw.selected_invigilators, existing?.selectedInvigilators, DEFAULT_APP_DATA.selectedInvigilators),
+      invigilationAssignments: pickNonEmptyObject(raw.invigilationAssignments, raw.invigilation_assignments, existing?.invigilationAssignments),
+      dailyAttendance: {
+        ...((existing?.dailyAttendance as Record<string, any>) || {}),
+        ...(raw.daily_attendance || {}),
+        ...(raw.dailyAttendance || {}),
+      },
+      journalRecords: {
+        ...((existing?.journalRecords as Record<string, any>) || {}),
+        ...(raw.journal_records || {}),
+        ...(raw.journalRecords || {}),
+      },
+      schemesOfWork: pickNonEmptyArray(raw.schemesOfWork, raw.schemes_of_work, existing?.schemesOfWork),
+      lessonPlans: pickNonEmptyArray(raw.lessonPlans, raw.lesson_plans, existing?.lessonPlans),
+      teacherEvaluations: pickNonEmptyArray(raw.teacherEvaluations, raw.teacher_evaluations, existing?.teacherEvaluations),
+      savedTimetableRecords: pickNonEmptyArray(raw.savedTimetableRecords, raw.saved_timetable_records, existing?.savedTimetableRecords),
+      savedInvigilationRecords: pickNonEmptyArray(raw.savedInvigilationRecords, raw.saved_invigilation_records, existing?.savedInvigilationRecords),
+      gradeCutoffs: pickNonEmptyObject(raw.gradeCutoffs, raw.grade_cutoffs, existing?.gradeCutoffs),
+      ledgerSubjectKeys: pickNonEmptyObject(raw.ledgerSubjectKeys, raw.ledger_subject_keys, existing?.ledgerSubjectKeys),
+      subjectPeriodAllocations: pickNonEmptyArray(raw.subjectPeriodAllocations, raw.subject_period_allocations, existing?.subjectPeriodAllocations, DEFAULT_APP_DATA.subjectPeriodAllocations),
+      teacherAssignments: pickNonEmptyArray(raw.teacherAssignments, raw.teacher_assignments, existing?.teacherAssignments, DEFAULT_APP_DATA.teacherAssignments),
+      subjectPaperConfigs: pickNonEmptyObject(raw.subjectPaperConfigs, raw.subject_paper_configs, existing?.subjectPaperConfigs),
+      bubbleSettings: pickNonEmptyObject(raw.bubbleSettings, raw.bubble_settings, existing?.bubbleSettings),
       students: resolvedStudents,
       teachers: resolvedTeachers,
       exams: resolvedExams,
-      examinationRecords: raw.examinationRecords || raw.examination_records || existing?.examinationRecords || [],
+      examinationRecords: pickNonEmptyArray(raw.examinationRecords, raw.examination_records, existing?.examinationRecords, isDemo ? DEFAULT_APP_DATA.examinationRecords : []),
       disciplineRecords: resolvedDisciplineRecords,
       dutyRosterData: resolvedDutyRosterData,
-      academicTermDates: raw.academicTermDates || raw.academic_term_dates || existing?.academicTermDates || {},
+      academicTermDates: pickNonEmptyObject(raw.academicTermDates, raw.academic_term_dates, existing?.academicTermDates),
       updatedAt: new Date(),
     };
 
@@ -918,50 +1317,45 @@ app.post('/api/db/sync-all', async (req, res) => {
       sourceData = snap || DEFAULT_APP_DATA;
     }
 
-    if (!Array.isArray(sourceData.students) || sourceData.students.length === 0) {
-      sourceData = {
-        ...sourceData,
-        students: DEFAULT_APP_DATA.students,
-        teachers: (Array.isArray(sourceData.teachers) && sourceData.teachers.length > 0) ? sourceData.teachers : DEFAULT_APP_DATA.teachers,
-        exams: (Array.isArray(sourceData.exams) && sourceData.exams.length > 0) ? sourceData.exams : DEFAULT_APP_DATA.exams,
-        streamSettings: (Array.isArray(sourceData.streamSettings) && sourceData.streamSettings.length > 0) ? sourceData.streamSettings : DEFAULT_APP_DATA.streamSettings,
-        periodSettings: (Array.isArray(sourceData.periodSettings) && sourceData.periodSettings.length > 0) ? sourceData.periodSettings : DEFAULT_APP_DATA.periodSettings,
-        timetableAssignments: (Array.isArray(sourceData.timetableAssignments) && sourceData.timetableAssignments.length > 0) ? sourceData.timetableAssignments : DEFAULT_APP_DATA.timetableAssignments,
-      };
-      await db.insert(schema.schoolData).values({
-        id: schoolId,
-        schoolId: schoolId,
-        schoolInfo: sourceData.schoolInfo || DEFAULT_APP_DATA.schoolInfo,
-        students: sourceData.students,
-        teachers: sourceData.teachers,
-        exams: sourceData.exams,
-        streamSettings: sourceData.streamSettings,
-        periodSettings: sourceData.periodSettings,
-        timetableAssignments: sourceData.timetableAssignments,
-        updatedAt: new Date(),
-      }).onConflictDoUpdate({
-        target: schema.schoolData.schoolId,
-        set: {
-          students: sourceData.students,
-          teachers: sourceData.teachers,
-          exams: sourceData.exams,
-          streamSettings: sourceData.streamSettings,
-          periodSettings: sourceData.periodSettings,
-          timetableAssignments: sourceData.timetableAssignments,
-          updatedAt: new Date(),
-        },
-      });
-    }
+    const mergedSource = {
+      ...sourceData,
+      schoolInfo: pickNonEmptyObject(sourceData.schoolInfo, sourceData.school_info, DEFAULT_APP_DATA.schoolInfo),
+      students: pickNonEmptyArray(sourceData.students, DEFAULT_APP_DATA.students),
+      teachers: pickNonEmptyArray(sourceData.teachers, DEFAULT_APP_DATA.teachers),
+      exams: pickNonEmptyArray(sourceData.exams, DEFAULT_APP_DATA.exams),
+      streamSettings: pickNonEmptyArray(sourceData.streamSettings, sourceData.stream_settings, DEFAULT_APP_DATA.streamSettings, TANZANIAN_TEMPLATE_STREAM_SETTINGS),
+      periodSettings: pickNonEmptyArray(sourceData.periodSettings, sourceData.period_settings, DEFAULT_APP_DATA.periodSettings, TANZANIAN_TEMPLATE_PERIOD_SETTINGS),
+      timetableAssignments: pickNonEmptyArray(sourceData.timetableAssignments, sourceData.timetable_assignments, DEFAULT_APP_DATA.timetableAssignments, TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS),
+      examinationRecords: pickNonEmptyArray(sourceData.examinationRecords, sourceData.examination_records, DEFAULT_APP_DATA.examinationRecords),
+      subjectPeriodAllocations: pickNonEmptyArray(sourceData.subjectPeriodAllocations, sourceData.subject_period_allocations, DEFAULT_APP_DATA.subjectPeriodAllocations),
+      teacherAssignments: pickNonEmptyArray(sourceData.teacherAssignments, sourceData.teacher_assignments, DEFAULT_APP_DATA.teacherAssignments),
+      institutionalPolicy: pickNonEmptyObject(sourceData.institutionalPolicy, sourceData.institutional_policy, DEFAULT_APP_DATA.institutionalPolicy),
+      sessions: pickNonEmptyArray(sourceData.sessions, DEFAULT_APP_DATA.sessions),
+      supervisors: pickNonEmptyArray(sourceData.supervisors, DEFAULT_APP_DATA.supervisors),
+      selectedInvigilators: pickNonEmptyArray(sourceData.selectedInvigilators, sourceData.selected_invigilators, DEFAULT_APP_DATA.selectedInvigilators),
+      disciplineRecords: pickNonEmptyArray(sourceData.disciplineRecords, sourceData.discipline_records, DEFAULT_APP_DATA.disciplineRecords),
+      updatedAt: new Date(),
+    };
 
-    await syncRelationalTablesFromSnapshot(schoolId, sourceData);
+    await db.insert(schema.schoolData).values({
+      id: schoolId,
+      schoolId: schoolId,
+      ...mergedSource,
+    }).onConflictDoUpdate({
+      target: schema.schoolData.schoolId,
+      set: mergedSource,
+    });
+
+    await syncRelationalTablesFromSnapshot(schoolId, mergedSource);
     res.json({
       success: true,
       synced: {
-        students: (sourceData.students || []).length,
-        teachers: (sourceData.teachers || []).length,
-        exams: (sourceData.exams || []).length,
-        classes: (sourceData.streamSettings || []).length,
-        periods: (sourceData.periodSettings || []).length,
+        students: (mergedSource.students || []).length,
+        teachers: (mergedSource.teachers || []).length,
+        exams: (mergedSource.exams || []).length,
+        classes: (mergedSource.streamSettings || []).length,
+        periods: (mergedSource.periodSettings || []).length,
+        timetableAssignments: (mergedSource.timetableAssignments || []).length,
       },
     });
   } catch (err: any) {
@@ -1098,11 +1492,14 @@ app.post('/api/db/students', async (req, res) => {
   try {
     const { schoolId, payload } = req.body;
     const validSchoolUuid = await ensureSchoolExists(schoolId);
-    const records = (Array.isArray(payload) ? payload : [payload]).map((s: any) => ({
-      ...s,
-      id: s.firestoreDocId || s.regNo || s.reg_no || s.id,
-      schoolId: validSchoolUuid,
-    }));
+    const records = (Array.isArray(payload) ? payload : [payload]).map((s: any) => {
+      const regKey = String(s.regNo || s.reg_no || '').trim().toUpperCase();
+      return {
+        ...s,
+        id: toDeterministicUuid(`std_${validSchoolUuid}_${regKey || s.id || s.name}`),
+        schoolId: validSchoolUuid,
+      };
+    });
     const saved = await upsertTableRecords('students', schema.students, records);
     res.json({ success: true, data: saved });
   } catch (err: any) {
@@ -1130,11 +1527,14 @@ app.post('/api/db/teachers', async (req, res) => {
   try {
     const { schoolId, payload } = req.body;
     const validSchoolUuid = await ensureSchoolExists(schoolId);
-    const records = (Array.isArray(payload) ? payload : [payload]).map((t: any) => ({
-      ...t,
-      id: t.firestoreDocId || t.id || t.name,
-      schoolId: validSchoolUuid,
-    }));
+    const records = (Array.isArray(payload) ? payload : [payload]).map((t: any) => {
+      const tchKey = String(t.email || t.name || t.id || '').trim().toLowerCase();
+      return {
+        ...t,
+        id: toDeterministicUuid(`tch_${validSchoolUuid}_${tchKey}`),
+        schoolId: validSchoolUuid,
+      };
+    });
     const saved = await upsertTableRecords('teachers', schema.teachers, records);
     res.json({ success: true, data: saved });
   } catch (err: any) {
@@ -1164,7 +1564,7 @@ app.post('/api/db/exams', async (req, res) => {
     const validSchoolUuid = await ensureSchoolExists(schoolId);
     const records = (Array.isArray(payload) ? payload : [payload]).map((e: any) => ({
       ...e,
-      id: e.id || `${validSchoolUuid}_${e.name}`,
+      id: toDeterministicUuid(`exm_${validSchoolUuid}_${e.id || e.name}`),
       schoolId: validSchoolUuid,
     }));
     const saved = await upsertTableRecords('exams', schema.exams, records);

@@ -16,27 +16,45 @@ const ALL_TABLES_META: { name: string; label: string; category: string }[] = [
   // Core Institutional
   { name: 'schools', label: 'Schools Registry', category: 'Core' },
   { name: 'school_data', label: 'School Snapshot (JSONB)', category: 'Core' },
+  { name: 'school_settings', label: 'School Configuration', category: 'Core' },
+  { name: 'school_subscriptions', label: 'School Subscriptions', category: 'Core' },
   { name: 'profiles', label: 'User Profiles & Roles', category: 'Core' },
+  { name: 'user_roles', label: 'Role Assignments', category: 'Core' },
+  // Academic Roster & Curriculum
   { name: 'students', label: 'Students Roster', category: 'Academic' },
   { name: 'teachers', label: 'Teachers & Staff', category: 'Academic' },
   { name: 'classes', label: 'Classes & Streams', category: 'Academic' },
+  { name: 'stream_settings', label: 'Stream Settings', category: 'Academic' },
   { name: 'subjects', label: 'Subjects Catalog', category: 'Academic' },
+  { name: 'subject_period_allocations', label: 'Subject Period Allocations', category: 'Academic' },
+  { name: 'teacher_assignments', label: 'Teacher Subject Assignments', category: 'Academic' },
+  // Timetables & Teaching Logs
   { name: 'periods', label: 'School Periods', category: 'Timetable' },
+  { name: 'period_settings', label: 'Period Settings', category: 'Timetable' },
+  { name: 'period_allocations', label: 'Period Allocations', category: 'Timetable' },
   { name: 'timetable_assignments', label: 'Timetable Assignments', category: 'Timetable' },
+  { name: 'timetables', label: 'Master Timetables', category: 'Timetable' },
+  { name: 'saved_timetable_records', label: 'Saved Timetable Snapshots', category: 'Timetable' },
   { name: 'teacher_period_attendance', label: 'Teacher Period Attendance', category: 'Timetable' },
+  { name: 'teaching_logs', label: 'Classroom Teaching Logs', category: 'Timetable' },
   // Examinations & Results
   { name: 'exams', label: 'Examination Sessions', category: 'Exams' },
   { name: 'exam_results', label: 'Student Exam Results', category: 'Exams' },
   { name: 'exam_records', label: 'Master Examination Ledger', category: 'Exams' },
+  { name: 'exam_timetables', label: 'Examination Timetables', category: 'Exams' },
   { name: 'exam_sitting_plans', label: 'Exam Sitting Plans', category: 'Exams' },
   { name: 'invigilation_rosters', label: 'Invigilation Rosters', category: 'Exams' },
-  // Attendance & Discipline
-  { name: 'period_attendance', label: 'Daily Period Attendance', category: 'Attendance' },
+  { name: 'invigilation_slots', label: 'Invigilation Slots', category: 'Exams' },
+  { name: 'invigilation_settings', label: 'Invigilation Settings', category: 'Exams' },
+  { name: 'selected_invigilators', label: 'Selected Invigilators', category: 'Exams' },
+  // Attendance, Discipline & Parent Portal
+  { name: 'period_attendance', label: 'Daily & Period Attendance', category: 'Attendance' },
   { name: 'weekly_attendance_reports', label: 'Weekly Attendance Reports', category: 'Attendance' },
   { name: 'discipline_records', label: 'Student Discipline Records', category: 'Discipline' },
+  { name: 'teacher_duty_roster', label: 'Teacher Duty Roster', category: 'Discipline' },
   { name: 'parents', label: 'Parent Contacts', category: 'Portal' },
   { name: 'parent_students', label: 'Parent-Student Links', category: 'Portal' },
-  // Remedial & Resources
+  // Remedial & Academic Resources
   { name: 'remedial_timetable', label: 'Remedial Timetable', category: 'Remedial' },
   { name: 'remedial_attendance', label: 'Remedial Attendance', category: 'Remedial' },
   { name: 'remedial_payment_settings', label: 'Remedial Payment Settings', category: 'Remedial' },
@@ -51,7 +69,7 @@ const ALL_TABLES_META: { name: string; label: string; category: string }[] = [
   { name: 'equipment_usage_log', label: 'Equipment Usage Logs', category: 'Environment' },
   { name: 'environment_orders', label: 'Environment Orders', category: 'Environment' },
   { name: 'school_purchased_equipment', label: 'Purchased Equipment', category: 'Environment' },
-  // SMS & Finance & Security
+  // SMS, Finance & Security
   { name: 'sms_wallet', label: 'SMS Wallet Balance', category: 'Communications' },
   { name: 'sms_logs', label: 'SMS Dispatch Logs', category: 'Communications' },
   { name: 'sms_payment_history', label: 'SMS Payment History', category: 'Finance' },
@@ -59,7 +77,6 @@ const ALL_TABLES_META: { name: string; label: string; category: string }[] = [
   { name: 'fee_structures', label: 'Fee Structures', category: 'Finance' },
   { name: 'student_invoices', label: 'Student Invoices', category: 'Finance' },
   { name: 'fee_payments', label: 'Fee Payments', category: 'Finance' },
-  { name: 'school_subscriptions', label: 'School Subscriptions', category: 'Finance' },
   { name: 'activity_logs', label: 'System Audit Logs', category: 'Security' }
 ];
 
@@ -68,7 +85,7 @@ export const DatabaseHealthWidget: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [syncing, setSyncing] = useState<boolean>(false);
   const [firestoreOk, setFirestoreOk] = useState<boolean>(true);
-  const [totalTablesInDb, setTotalTablesInDb] = useState<number>(51);
+  const [totalTablesInDb, setTotalTablesInDb] = useState<number>(54);
   const [lastChecked, setLastChecked] = useState<string>('');
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
 
@@ -83,11 +100,11 @@ export const DatabaseHealthWidget: React.FC = () => {
         setFirestoreOk(!fsErr?.message?.includes('offline'));
       }
 
-      // 2. Query server diagnostics endpoint for all 51 PostgreSQL tables
+      // 2. Query server diagnostics endpoint for all 54 PostgreSQL tables
       const diagRes = await fetch('/api/db/diagnostics');
       if (diagRes.ok) {
         const diag = await diagRes.json();
-        setTotalTablesInDb(diag.totalTables || 51);
+        setTotalTablesInDb(diag.totalTables || 54);
         const diagMap = new Map<string, { connected: boolean; count: number; error?: string }>();
         (diag.tables || []).forEach((t: any) => {
           diagMap.set(t.table, { connected: t.connected, count: t.rowCount, error: t.error });
@@ -111,7 +128,6 @@ export const DatabaseHealthWidget: React.FC = () => {
         });
         setStatuses(results);
       } else {
-        // Fallback: check individual tables via supabase bridge
         const results: TableStatus[] = [];
         for (const t of ALL_TABLES_META.slice(0, 15)) {
           try {
@@ -155,7 +171,7 @@ export const DatabaseHealthWidget: React.FC = () => {
       if (json.success) {
         const s = json.synced || {};
         setSyncMessage(
-          `Synced successfully: ${s.students || 0} students, ${s.teachers || 0} teachers, ${s.exams || 0} exams, ${s.classes || 0} classes, ${s.periods || 0} periods.`
+          `Synced successfully: ${s.students || 0} students, ${s.teachers || 0} teachers, ${s.exams || 0} exams, ${s.classes || 0} classes, ${s.periods || 0} periods, ${s.timetableAssignments || 0} timetable slots.`
         );
         await checkHealth();
       } else {

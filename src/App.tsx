@@ -196,9 +196,11 @@ export default function App() {
 
   // Helper function to persist school state snapshot to Supabase
   const saveSchoolDataToSupabase = async (schId: string, snapData: any) => {
-    if (!schId) return;
+    if (!schId || !snapData) return;
     try {
+      const { usalRecords: _omitUsal, ...restSnap } = snapData;
       const payload = {
+        ...restSnap,
         id: schId,
         school_id: schId,
         school_info: snapData.schoolInfo || {},
@@ -214,6 +216,11 @@ export default function App() {
         selected_invigilators: snapData.selectedInvigilators || [],
         invigilation_assignments: snapData.invigilationAssignments || {},
         daily_attendance: snapData.dailyAttendance || {},
+        dailyAttendance: snapData.dailyAttendance || {},
+        period_attendance: snapData.periodAttendance || [],
+        periodAttendance: snapData.periodAttendance || [],
+        teaching_logs: snapData.teachingLogs || [],
+        teachingLogs: snapData.teachingLogs || [],
         journal_records: snapData.journalRecords || {},
         schemesOfWork: snapData.schemesOfWork || [],
         schemes_of_work: snapData.schemesOfWork || [],
@@ -242,6 +249,8 @@ export default function App() {
         exams: snapData.exams || [],
         examinationRecords: snapData.examinationRecords || [],
         examination_records: snapData.examinationRecords || [],
+        disciplineRecords: snapData.disciplineRecords || [],
+        discipline_records: snapData.disciplineRecords || [],
         parents: snapData.parents || [],
         academic_term_dates: snapData.academicTermDates || {},
         communicationTemplates: snapData.communicationTemplates || [],
@@ -251,7 +260,7 @@ export default function App() {
         updated_at: new Date().toISOString()
       };
       
-      // Persist snapshot to Supabase school_data table with resilience
+      // Persist snapshot to Cloud SQL school_data table with automatic relational sync
       await saveSchoolData(schId, payload);
     } catch (err) {
       console.warn("Error saving school snapshot:", err);
@@ -608,34 +617,66 @@ export default function App() {
     // Real-time Firestore sync with the specific database instance
     testFirestoreConnection();
     const unsubStudents = subscribeToStudents(schoolId, (firestoreStudents) => {
-      if (!firestoreStudents) return;
+      if (!firestoreStudents || firestoreStudents.length === 0) return;
       console.log(`[Firestore Live Sync] Received ${firestoreStudents.length} students from database`);
       
       setData(prev => {
-        // Build a fresh list from Firestore to avoid duplication
-        const mapped: Student[] = firestoreStudents.map((fs, idx) => {
+        const existingList = Array.isArray(prev.students) ? prev.students : [];
+        const byDocId = new Map<string, Student>();
+        const byNumId = new Map<number, Student>();
+        const byName = new Map<string, Student>();
+        existingList.forEach(s => {
+          if ((s as any).firestoreDocId) byDocId.set(String((s as any).firestoreDocId), s);
+          if (typeof s.id === 'number') byNumId.set(s.id, s);
+          if (s.name) byName.set(`${s.name.trim().toLowerCase()}_${(s.className || '').trim().toLowerCase()}`, s);
+        });
+
+        const updatedIds = new Set<number>();
+        const mappedFromFs: Student[] = firestoreStudents.map((fs, idx) => {
           const fsAny = fs as any;
           const tailNum = Number(String(fs.id).split('_').pop());
           const safeNumId = typeof fsAny.numericId === 'number' ? fsAny.numericId : (!isNaN(tailNum) && tailNum > 0 ? tailNum : 2001 + idx);
-          
+          const existing =
+            byDocId.get(String(fs.id)) ||
+            byNumId.get(safeNumId) ||
+            byName.get(`${(fs.name || '').trim().toLowerCase()}_${(fs.className || '').trim().toLowerCase()}`);
+
+          const finalId = existing?.id ?? safeNumId;
+          updatedIds.add(finalId);
+
           return {
-            id: safeNumId,
+            ...(existing || {}),
+            id: finalId,
             firestoreDocId: fs.id,
-            name: fs.name || 'Student',
-            className: fs.className || 'Form 1',
-            gender: (fs.gender as any) || 'Male',
-            parentPhone: fs.parentPhone || '',
-            phone: fs.parentPhone || '',
-            feeStatus: (fs.feeStatus as any) || 'PAID',
+            name: fs.name || existing?.name || 'Student',
+            className: fs.className || existing?.className || 'Form 1',
+            gender: (fs.gender as any) || existing?.gender || 'Male',
+            parentPhone: fs.parentPhone || existing?.parentPhone || '',
+            phone: fs.parentPhone || fsAny.phone || existing?.phone || '',
+            feeStatus: (fs.feeStatus as any) || (existing as any)?.feeStatus || 'PAID',
             school_id: fs.schoolId || schoolId,
-            stream: fs.stream || 'STREAM A',
-            dob: fs.dob || '2010-01-01',
-            subjects: fsAny.subjects || ['Basic Mathematics', 'English Language', 'Kiswahili', 'Biology', 'Chemistry', 'Physics', 'Geography', 'History', 'Civics'],
-            regNo: fsAny.regNo || `S.0123/${String(idx + 1).padStart(4, '0')}/2026`
+            stream: fs.stream || existing?.stream || 'STREAM A',
+            dob: fs.dob || existing?.dob || '2010-01-01',
+            subjects: Array.isArray(fsAny.subjects) && fsAny.subjects.length > 0
+              ? fsAny.subjects
+              : (existing?.subjects || ['Basic Mathematics', 'English Language', 'Kiswahili', 'Biology', 'Chemistry', 'Physics', 'Geography', 'History', 'Civics']),
+            regNo: fsAny.regNo || existing?.regNo || `S.0123/${String(idx + 1).padStart(4, '0')}/2026`,
+            marks: fsAny.marks || existing?.marks || {},
+            total: fsAny.total ?? existing?.total,
+            average: fsAny.average ?? existing?.average,
+            grade: fsAny.grade || existing?.grade,
+            division: fsAny.division || existing?.division,
+            points: fsAny.points ?? existing?.points,
+            remark: fsAny.remark || existing?.remark,
+            position: fsAny.position ?? existing?.position
           };
         });
 
-        const nextState = { ...prev, students: mapped };
+        // Retain existing students not yet present in Firestore so partial Firestore state never drops SQL roster
+        const remaining = existingList.filter(s => !updatedIds.has(s.id));
+        const merged = [...mappedFromFs, ...remaining];
+
+        const nextState = { ...prev, students: merged };
         try {
           localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextState));
           localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextState));
@@ -645,30 +686,54 @@ export default function App() {
     });
 
     const unsubTeachers = subscribeToTeachers(schoolId, (firestoreTeachers) => {
-      if (!firestoreTeachers) return;
+      if (!firestoreTeachers || firestoreTeachers.length === 0) return;
       console.log(`[Firestore Live Sync] Received ${firestoreTeachers.length} teachers from database`);
       
       setData(prev => {
-        const mapped: Teacher[] = firestoreTeachers.map((ft, idx) => {
+        const existingList = Array.isArray(prev.teachers) ? prev.teachers : [];
+        const byDocId = new Map<string, Teacher>();
+        const byNumId = new Map<number, Teacher>();
+        const byName = new Map<string, Teacher>();
+        existingList.forEach(t => {
+          if ((t as any).firestoreDocId) byDocId.set(String((t as any).firestoreDocId), t);
+          if (typeof t.id === 'number') byNumId.set(t.id, t);
+          if (t.name) byName.set(t.name.trim().toLowerCase(), t);
+        });
+
+        const updatedIds = new Set<number>();
+        const mappedFromFs: Teacher[] = firestoreTeachers.map((ft, idx) => {
           const ftAny = ft as any;
           const tailNum = Number(String(ft.id).split('_').pop());
           const safeNumId = typeof ftAny.numericId === 'number' ? ftAny.numericId : (!isNaN(tailNum) && tailNum > 0 ? tailNum : 1001 + idx);
-          
+          const existing =
+            byDocId.get(String(ft.id)) ||
+            byNumId.get(safeNumId) ||
+            byName.get((ft.name || '').trim().toLowerCase());
+
+          const finalId = existing?.id ?? safeNumId;
+          updatedIds.add(finalId);
+
           return {
-            id: safeNumId,
+            ...(existing || {}),
+            id: finalId,
             firestoreDocId: ft.id,
-            name: ft.name || 'Teacher',
-            gender: ftAny.gender || 'Male',
-            schoolRole: ftAny.schoolRole || 'Subject Teacher',
-            phone: ft.phone || '',
-            email: ft.email || '',
-            subjects: Array.isArray(ftAny.subjects) ? ftAny.subjects : (ft.subject ? [ft.subject] : ['Basic Mathematics']),
-            initial: (ft.name ? computeTeacherInitial(ft.name) : '') || ftAny.initial || 'TR',
-            excludeInvigilation: ftAny.excludeInvigilation ?? false
+            name: ft.name || existing?.name || 'Teacher',
+            gender: ftAny.gender || existing?.gender || 'Male',
+            schoolRole: ftAny.schoolRole || existing?.schoolRole || 'Subject Teacher',
+            phone: ft.phone || existing?.phone || '',
+            email: ft.email || existing?.email || '',
+            subjects: Array.isArray(ftAny.subjects) && ftAny.subjects.length > 0
+              ? ftAny.subjects
+              : (ft.subject ? [ft.subject] : (existing?.subjects || ['Basic Mathematics'])),
+            initial: (ft.name ? computeTeacherInitial(ft.name) : '') || ftAny.initial || existing?.initial || 'TR',
+            excludeInvigilation: ftAny.excludeInvigilation ?? existing?.excludeInvigilation ?? false
           };
         });
 
-        const nextState = { ...prev, teachers: mapped };
+        const remaining = existingList.filter(t => !updatedIds.has(t.id));
+        const merged = [...mappedFromFs, ...remaining];
+
+        const nextState = { ...prev, teachers: merged };
         try {
           localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextState));
           localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextState));
@@ -1082,13 +1147,26 @@ export default function App() {
     try {
       await saveStudentToFirestore({
         id: docId,
+        numericId: validId,
+        regNo: studentWithId.regNo,
         name: studentWithId.name,
         className: studentWithId.className,
         gender: studentWithId.gender || '',
         parentPhone: studentWithId.parentPhone || studentWithId.phone || '',
+        phone: studentWithId.phone || studentWithId.parentPhone || '',
         feeStatus: ((studentWithId as any).feeStatus === 'PAID' ? 'PAID' : 'UNPAID'),
         schoolId: schoolId,
-        stream: studentWithId.stream || ''
+        stream: studentWithId.stream || '',
+        dob: studentWithId.dob || '2010-01-01',
+        subjects: studentWithId.subjects || [],
+        marks: studentWithId.marks || {},
+        total: studentWithId.total,
+        average: studentWithId.average,
+        grade: studentWithId.grade,
+        division: studentWithId.division,
+        points: studentWithId.points,
+        remark: studentWithId.remark,
+        position: studentWithId.position
       });
     } catch (fsErr) {
       console.warn("Firestore save student error:", fsErr);
@@ -1151,14 +1229,26 @@ export default function App() {
         processedStudents.map(s =>
           saveStudentToFirestore({
             id: (s as any).firestoreDocId,
+            numericId: s.id,
+            regNo: s.regNo,
             name: s.name,
             className: s.className || 'Form 1',
             gender: s.gender || 'Male',
             parentPhone: s.parentPhone || s.phone || '',
+            phone: s.phone || s.parentPhone || '',
             feeStatus: (s.feeStatus as any) || 'PAID',
             schoolId,
             stream: s.stream || 'STREAM A',
-            dob: s.dob || '2010-01-01'
+            dob: s.dob || '2010-01-01',
+            subjects: s.subjects || [],
+            marks: s.marks || {},
+            total: s.total,
+            average: s.average,
+            grade: s.grade,
+            division: s.division,
+            points: s.points,
+            remark: s.remark,
+            position: s.position
           })
         )
       ).catch(() => {});
@@ -1203,13 +1293,26 @@ export default function App() {
     try {
       await saveStudentToFirestore({
         id: fsDocId,
+        numericId: student.id,
+        regNo: student.regNo,
         name: student.name,
         className: student.className,
         gender: student.gender || '',
         parentPhone: student.parentPhone || student.phone || '',
+        phone: student.phone || student.parentPhone || '',
         feeStatus: ((student as any).feeStatus === 'PAID' ? 'PAID' : 'UNPAID'),
         schoolId: schoolId,
-        stream: student.stream || ''
+        stream: student.stream || '',
+        dob: student.dob || '2010-01-01',
+        subjects: student.subjects || [],
+        marks: student.marks || {},
+        total: student.total,
+        average: student.average,
+        grade: student.grade,
+        division: student.division,
+        points: student.points,
+        remark: student.remark,
+        position: student.position
       });
     } catch (fsErr) {
       console.warn("Firestore update student error:", fsErr);
@@ -1325,10 +1428,16 @@ export default function App() {
     try {
       await saveTeacherToFirestore({
         id: docId,
+        numericId: validId,
         name: teacherWithId.name,
+        gender: teacherWithId.gender || 'Male',
+        schoolRole: teacherWithId.schoolRole || 'Subject Teacher',
         phone: teacherWithId.phone || '',
         email: teacherWithId.email || '',
         subject: teacherWithId.subjects?.[0] || '',
+        subjects: teacherWithId.subjects || [],
+        initial: teacherWithId.initial || '',
+        excludeInvigilation: teacherWithId.excludeInvigilation ?? false,
         schoolId: schoolId
       });
     } catch (fsErr) {
@@ -1363,10 +1472,16 @@ export default function App() {
       const docId = t.firestoreDocId || `tch_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
       saveTeacherToFirestore({
         id: docId,
+        numericId: t.id,
         name: t.name,
+        gender: t.gender || 'Male',
+        schoolRole: t.schoolRole || 'Subject Teacher',
         phone: t.phone || '',
         email: t.email || '',
         subject: t.subjects?.[0] || '',
+        subjects: t.subjects || [],
+        initial: t.initial || '',
+        excludeInvigilation: t.excludeInvigilation ?? false,
         schoolId: schoolId
       }).catch(e => console.warn("Firestore bulk teacher save error:", e));
     }
@@ -1399,10 +1514,16 @@ export default function App() {
     try {
       await saveTeacherToFirestore({
         id: fsDocId,
+        numericId: teacher.id,
         name: teacher.name,
+        gender: teacher.gender || 'Male',
+        schoolRole: teacher.schoolRole || 'Subject Teacher',
         phone: teacher.phone || '',
         email: teacher.email || '',
         subject: teacher.subjects?.[0] || '',
+        subjects: teacher.subjects || [],
+        initial: teacher.initial || '',
+        excludeInvigilation: teacher.excludeInvigilation ?? false,
         schoolId: schoolId
       });
     } catch (fsErr) {

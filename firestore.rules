@@ -7,7 +7,7 @@ service cloud.firestore {
     }
 
     function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+      return id is string && id.size() >= 1 && id.size() <= 256;
     }
 
     // Connection testing doc
@@ -30,8 +30,7 @@ service cloud.firestore {
     match /students/{studentId} {
       allow read: if true;
       allow create, update: if isValidId(studentId)
-        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 150
-        && request.resource.data.className is string && request.resource.data.className.size() <= 50
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 250
         && request.resource.data.schoolId is string && request.resource.data.schoolId.size() <= 128;
       allow delete: if isValidId(studentId);
     }
@@ -40,7 +39,7 @@ service cloud.firestore {
     match /teachers/{teacherId} {
       allow read: if true;
       allow create, update: if isValidId(teacherId)
-        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 150
+        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 250
         && request.resource.data.schoolId is string && request.resource.data.schoolId.size() <= 128;
       allow delete: if isValidId(teacherId);
     }
@@ -51,8 +50,13 @@ service cloud.firestore {
       allow create, update, delete: if isValidId(schoolId);
     }
 
-    // Daily Attendance collection
+    // Daily Attendance & Period Attendance collections
     match /daily_attendance/{attendanceId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(attendanceId);
+    }
+
+    match /period_attendance/{attendanceId} {
       allow read: if true;
       allow create, update, delete: if isValidId(attendanceId);
     }
@@ -60,12 +64,16 @@ service cloud.firestore {
     // School Data snapshot collection
     match /school_data/{schoolId} {
       allow read: if true;
-      allow create, update: if isValidId(schoolId);
-      allow delete: if isValidId(schoolId);
+      allow create, update, delete: if isValidId(schoolId);
     }
 
     // Academic & Operations collections
     match /timetables/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /timetable_assignments/{docId} {
       allow read: if true;
       allow create, update, delete: if isValidId(docId);
     }
@@ -86,6 +94,11 @@ service cloud.firestore {
     }
 
     match /exam_records/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /exam_results/{docId} {
       allow read: if true;
       allow create, update, delete: if isValidId(docId);
     }
@@ -130,6 +143,52 @@ service cloud.firestore {
     match /discipline_records/{recordId} {
       allow read: if true;
       allow create, update, delete: if isValidId(recordId);
+    }
+
+    // Finance, SMS & Resources collections
+    match /sms_logs/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /sms_wallet/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /ream_paper_records/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /remedial_timetable/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /remedial_attendance/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /fee_structures/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /student_invoices/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /fee_payments/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
+    }
+
+    match /activity_logs/{docId} {
+      allow read: if true;
+      allow create, update, delete: if isValidId(docId);
     }
   }
 }

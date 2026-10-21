@@ -464,7 +464,7 @@ export const TANZANIAN_TEMPLATE_PERIOD_SETTINGS = [
   { id: 35, day: 'Friday', name: 'Period 7', start: '14:00', end: '15:00' }
 ];
 
-export const INITIAL_PERIOD_SETTINGS: any[] = [];
+export const INITIAL_PERIOD_SETTINGS: any[] = TANZANIAN_TEMPLATE_PERIOD_SETTINGS;
 
 export const TANZANIAN_TEMPLATE_STREAM_SETTINGS = [
   { id: 101, className: 'Nursery', level: 'PRE_PRIMARY' as const, streams: ['STREAM A', 'STREAM B'] },
@@ -486,7 +486,7 @@ export const TANZANIAN_TEMPLATE_STREAM_SETTINGS = [
   { id: 6, className: 'Form 6', level: 'ACSEE' as const, streams: ['PCM', 'PCB', 'HKL'] }
 ];
 
-export const INITIAL_STREAM_SETTINGS: any[] = [];
+export const INITIAL_STREAM_SETTINGS: any[] = TANZANIAN_TEMPLATE_STREAM_SETTINGS;
 
 export const TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS = [
   // Form 1 STREAM A
@@ -522,7 +522,7 @@ export const TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS = [
   { id: 222, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 6 (12:00-12:40)', teacherId: 101, subject: 'Weekly Test', activityType: 'weekly_test' as const, room: 'Exam Hall / Class 1A', customNote: 'Weekly evaluation test' }
 ];
 
-export const INITIAL_TIMETABLE_ASSIGNMENTS: any[] = [];
+export const INITIAL_TIMETABLE_ASSIGNMENTS: any[] = TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS;
 
 export const INITIAL_STUDENTS: Student[] = [
   { id: 1, name: 'Amina Juma Mohamed', regNo: 'S0123/0001/2026', sex: 'F', className: 'Form 1', stream: 'STREAM A', subjects: ['Basic Mathematics', 'English Language', 'Biology', 'History', 'Kiswahili', 'Physics', 'Chemistry'], dob: '2010-05-15', status: 'ACTIVE', parentPhone: '0712345678' },

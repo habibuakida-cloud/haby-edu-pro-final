@@ -13,26 +13,46 @@ import { db, handleFirestoreError, OperationType } from './firebaseClient';
 
 export interface FirestoreStudent {
   id: string;
+  numericId?: number;
+  regNo?: string;
   name: string;
   className: string;
   gender?: string;
   parentPhone?: string;
+  phone?: string;
   feeStatus: 'PAID' | 'UNPAID';
   schoolId: string;
   createdAt?: string;
   updatedAt?: string;
   dob?: string;
   stream?: string;
+  subjects?: string[];
+  marks?: Record<string, any>;
+  total?: number;
+  average?: number;
+  grade?: string;
+  division?: string;
+  points?: number;
+  remark?: string;
+  position?: number;
 }
 
 export interface FirestoreTeacher {
   id: string;
+  numericId?: number;
   name: string;
+  gender?: string;
+  schoolRole?: string;
   phone?: string;
   email?: string;
   subject?: string;
+  subjects?: string[];
+  initial?: string;
+  excludeInvigilation?: boolean;
+  assignedClasses?: any[];
   schoolId: string;
   createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface FirestoreSchool {
@@ -65,6 +85,11 @@ export const DEFAULT_PRIMARY_SCHOOL: FirestoreSchool = {
   address: 'Tanzania',
   package: 'Pro Enterprise'
 };
+
+function sanitizeDocId(rawId: string, prefix: string): string {
+  const cleaned = String(rawId || '').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+  return cleaned || `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+}
 
 // ==========================================
 // 1. STUDENTS FIRESTORE METHODS
@@ -99,17 +124,21 @@ export function subscribeToStudents(
 }
 
 export async function saveStudentToFirestore(student: FirestoreStudent): Promise<void> {
-  const studentId = student.id || `std_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const studentId = sanitizeDocId(student.id, 'std');
   const studentRef = doc(db, STUDENTS_COL, studentId);
   const now = new Date().toISOString();
   
-  const payload = {
+  const rawPayload: Record<string, any> = {
     ...student,
     id: studentId,
+    name: String(student.name || 'Student').trim(),
+    className: String(student.className || 'Form 1').trim(),
+    schoolId: String(student.schoolId || DEFAULT_PRIMARY_SCHOOL.id).trim(),
     feeStatus: student.feeStatus || 'UNPAID',
     createdAt: student.createdAt || now,
     updatedAt: now
   };
+  const payload = Object.fromEntries(Object.entries(rawPayload).filter(([, v]) => v !== undefined));
 
   try {
     await setDoc(studentRef, payload, { merge: true });
@@ -122,23 +151,25 @@ export async function updateStudentFeeStatus(
   studentId: string, 
   feeStatus: 'PAID' | 'UNPAID'
 ): Promise<void> {
-  const studentRef = doc(db, STUDENTS_COL, studentId);
+  const cleanId = sanitizeDocId(studentId, 'std');
+  const studentRef = doc(db, STUDENTS_COL, cleanId);
   try {
     await updateDoc(studentRef, {
       feeStatus,
       updatedAt: new Date().toISOString()
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, `${STUDENTS_COL}/${studentId}`);
+    handleFirestoreError(error, OperationType.UPDATE, `${STUDENTS_COL}/${cleanId}`);
   }
 }
 
 export async function deleteStudentFromFirestore(studentId: string): Promise<void> {
-  const studentRef = doc(db, STUDENTS_COL, studentId);
+  const cleanId = sanitizeDocId(studentId, 'std');
+  const studentRef = doc(db, STUDENTS_COL, cleanId);
   try {
     await deleteDoc(studentRef);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${STUDENTS_COL}/${studentId}`);
+    handleFirestoreError(error, OperationType.DELETE, `${STUDENTS_COL}/${cleanId}`);
   }
 }
 
@@ -175,13 +206,18 @@ export function subscribeToTeachers(
 }
 
 export async function saveTeacherToFirestore(teacher: FirestoreTeacher): Promise<void> {
-  const teacherId = teacher.id || `tch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+  const teacherId = sanitizeDocId(teacher.id, 'tch');
   const teacherRef = doc(db, TEACHERS_COL, teacherId);
-  const payload = {
+  const now = new Date().toISOString();
+  const rawPayload: Record<string, any> = {
     ...teacher,
     id: teacherId,
-    createdAt: teacher.createdAt || new Date().toISOString()
+    name: String(teacher.name || 'Teacher').trim(),
+    schoolId: String(teacher.schoolId || DEFAULT_PRIMARY_SCHOOL.id).trim(),
+    createdAt: teacher.createdAt || now,
+    updatedAt: now
   };
+  const payload = Object.fromEntries(Object.entries(rawPayload).filter(([, v]) => v !== undefined));
 
   try {
     await setDoc(teacherRef, payload, { merge: true });
@@ -191,11 +227,12 @@ export async function saveTeacherToFirestore(teacher: FirestoreTeacher): Promise
 }
 
 export async function deleteTeacherFromFirestore(teacherId: string): Promise<void> {
-  const teacherRef = doc(db, TEACHERS_COL, teacherId);
+  const cleanId = sanitizeDocId(teacherId, 'tch');
+  const teacherRef = doc(db, TEACHERS_COL, cleanId);
   try {
     await deleteDoc(teacherRef);
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${TEACHERS_COL}/${teacherId}`);
+    handleFirestoreError(error, OperationType.DELETE, `${TEACHERS_COL}/${cleanId}`);
   }
 }
 
@@ -272,7 +309,7 @@ export async function saveSchoolToFirestore(
   school: Partial<FirestoreSchool> & { name: string }
 ): Promise<FirestoreSchool> {
   const schoolId = school.id && school.id.trim() 
-    ? school.id.trim() 
+    ? sanitizeDocId(school.id.trim(), 'sch')
     : `sch_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
     
   const schoolRef = doc(db, SCHOOLS_COL, schoolId);
@@ -313,19 +350,20 @@ export async function saveSchoolToFirestore(
 }
 
 export async function deleteSchoolFromFirestore(schoolId: string): Promise<void> {
-  const schoolRef = doc(db, SCHOOLS_COL, schoolId);
+  const cleanId = sanitizeDocId(schoolId, 'sch');
+  const schoolRef = doc(db, SCHOOLS_COL, cleanId);
   try {
     await deleteDoc(schoolRef);
     try {
       const stored = localStorage.getItem('haby_registered_schools');
       if (stored) {
         const list: FirestoreSchool[] = JSON.parse(stored);
-        const filtered = list.filter(s => s.id !== schoolId);
+        const filtered = list.filter(s => s.id !== cleanId);
         localStorage.setItem('haby_registered_schools', JSON.stringify(filtered));
       }
     } catch (e) {}
   } catch (error) {
-    handleFirestoreError(error, OperationType.DELETE, `${SCHOOLS_COL}/${schoolId}`);
+    handleFirestoreError(error, OperationType.DELETE, `${SCHOOLS_COL}/${cleanId}`);
     throw error;
   }
 }
