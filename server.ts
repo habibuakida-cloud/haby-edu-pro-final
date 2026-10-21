@@ -549,12 +549,29 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
 
     // 4. Exams, Exam Records & Exam Results
     const rawExams = pickNonEmptyArray(raw.exams, DEFAULT_APP_DATA.exams);
+    const firstExamUuid = rawExams.length > 0
+      ? toDeterministicUuid(`exm_${validSchoolUuid}_${rawExams[0].id || rawExams[0].name}`)
+      : null;
     if (rawExams.length > 0) {
-      await upsertTableRecords('exams', schema.exams, rawExams.map((e: any) => ({
-        ...e,
-        id: toDeterministicUuid(`exm_${validSchoolUuid}_${e.id || e.name}`),
-        schoolId: validSchoolUuid,
-      })));
+      const canonicalExamIds: string[] = [];
+      const examPayloads = rawExams.map((e: any) => {
+        const eid = toDeterministicUuid(`exm_${validSchoolUuid}_${e.id || e.name}`);
+        canonicalExamIds.push(eid);
+        return {
+          ...e,
+          id: eid,
+          schoolId: validSchoolUuid,
+        };
+      });
+      await upsertTableRecords('exams', schema.exams, examPayloads);
+      try {
+        await db.delete(schema.exams).where(
+          and(
+            eq(schema.exams.schoolId, validSchoolUuid as any),
+            notInArray(schema.exams.id, canonicalExamIds as any)
+          )
+        );
+      } catch (cleanupErr) {}
     }
 
     const examRecs = pickNonEmptyArray(raw.examinationRecords, raw.examination_records, DEFAULT_APP_DATA.examinationRecords);
@@ -568,6 +585,33 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
         averageScore: String(r.averageScore ?? r.averageMarks ?? 0),
         rank: Number(r.rank ?? r.positionInClass ?? (idx + 1)),
       })));
+    }
+
+    // Populate exam_results for students who have subject marks
+    if (firstExamUuid && studentPayloads.length > 0) {
+      const examResultRows: any[] = [];
+      for (const s of studentPayloads.slice(0, 60)) {
+        const marksObj = s.marks && typeof s.marks === 'object' ? s.marks : {};
+        for (const [subjName, scoreVal] of Object.entries(marksObj)) {
+          const numericScore = typeof scoreVal === 'number' ? Math.round(scoreVal) : Number(scoreVal);
+          if (isNaN(numericScore)) continue;
+          const subjUuid = toDeterministicUuid(`subj_${validSchoolUuid}_${subjName}`);
+          const gradeStr = numericScore >= 75 ? 'A' : numericScore >= 65 ? 'B' : numericScore >= 45 ? 'C' : numericScore >= 30 ? 'D' : 'F';
+          examResultRows.push({
+            id: toDeterministicUuid(`exres_${validSchoolUuid}_${firstExamUuid}_${s.id}_${subjName}`),
+            schoolId: validSchoolUuid,
+            examId: firstExamUuid,
+            studentId: s.id,
+            subjectId: subjUuid,
+            marks: numericScore,
+            grade: gradeStr,
+            remarks: gradeStr === 'A' ? 'Excellent' : gradeStr === 'B' ? 'Very Good' : gradeStr === 'C' ? 'Good' : gradeStr === 'D' ? 'Satisfactory' : 'Fail',
+          });
+        }
+      }
+      if (examResultRows.length > 0) {
+        await upsertTableRecords('exam_results', schema.examResults, examResultRows.slice(0, 300));
+      }
     }
 
     // 5. Timetable Assignments & Timetables
