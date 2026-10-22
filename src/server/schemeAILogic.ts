@@ -58,6 +58,8 @@ export interface AISchemeRequest {
   teacherName?: string;
   schoolName?: string;
   periodsPerWeek?: number;
+  topics?: string[];
+  language: 'Kiswahili' | 'English';
 }
 
 export interface AILessonPlanRequest {
@@ -72,6 +74,7 @@ export interface AILessonPlanRequest {
   schoolName?: string;
   registeredStudentsCount?: number;
   presentStudentsCount?: number;
+  language: 'Kiswahili' | 'English';
 }
 
 export async function generateAISchemeOfWork(req: AISchemeRequest) {
@@ -88,12 +91,13 @@ Generate a complete, 100% authentic, highly detailed 12-week Tanzanian Scheme of
 - Periods Per Week: ${req.periodsPerWeek || 4}
 - Teacher Name: ${req.teacherName || 'Subject Teacher'}
 - School Name: ${req.schoolName || 'Tanzania Secondary School'}
+- Language: ${req.language}
+- Specific Topics to cover: ${req.topics && req.topics.length > 0 ? req.topics.join(', ') : 'Standard NECTA syllabus topics for this subject'}
 
 CRITICAL REQUIREMENT:
 - All topics, subtopics, competences, learning activities, teaching activities, materials, assessment methods, and references MUST be 100% SPECIFIC TO ${req.subject.toUpperCase()} FOR ${req.className}.
-- DO NOT return Physics topics or generic templates if the subject is ${req.subject}.
+- The output MUST be entirely in ${req.language}.
 - Use official TIE (Tanzania Institute of Education) textbook references for ${req.subject}.
-- If ${req.subject} is Kiswahili, write the scheme details in Kiswahili. If ${req.subject} is English or Science, write in English.
 
 Return a JSON object matching this structure:
 {
@@ -102,7 +106,7 @@ Return a JSON object matching this structure:
   "items": [
     {
       "weekNumber": 1,
-      "datesOrMonth": "Week 1 (12 Jan - 16 Jan)",
+      "datesOrMonth": "Week 1",
       "mainTopicOrCompetence": "Main competence or main topic",
       "subTopicOrSpecificCompetence": "Specific competence or subtopic",
       "learningActivitiesOrObjectives": "Learner activities or specific objectives",
@@ -118,7 +122,7 @@ Return a JSON object matching this structure:
     {
       "weekNumber": 1,
       "date": "2026-01-12",
-      "periodTime": "Period 2 & 3 (08:40 - 10:00)",
+      "periodTime": "Period 2 & 3",
       "subTopicTaught": "Subtopic taught",
       "workCoveredSummary": "Summary of work covered and student engagement",
       "studentsPresent": 43,

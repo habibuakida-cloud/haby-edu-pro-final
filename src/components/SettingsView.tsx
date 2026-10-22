@@ -25,7 +25,7 @@ import { DatabaseStatusView } from './DatabaseStatusView';
 import { TermCalendarView } from './Calendar/TermCalendarView';
 import { AcademicCalendarView } from './Calendar/AcademicCalendarView';
 import { useAuth } from '../context/AuthContext';
-import { SUBJECT_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
+import { SUBJECT_NAMES_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_APP_DATA } from '../constants/defaults';
 import { saveSchoolData } from '../lib/dataService';
 import { fetchSchoolsFromFirestore, saveSchoolToFirestore, saveStudentToFirestore, saveTeacherToFirestore } from '../lib/firestoreService';
 import { CommunicationSettings } from './CommunicationSettings';
@@ -2084,7 +2084,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                    {SUBJECT_LIST.map(subject => {
+                    {SUBJECT_NAMES_LIST.map(subject => {
                       const isChecked = newAssignedSubjects.includes(subject);
                       return (
                         <label

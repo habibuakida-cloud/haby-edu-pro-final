@@ -53,6 +53,7 @@ import { BulkWhatsAppModal } from './BulkWhatsAppModal';
 import { TopPerformersLeaderboard } from './TopPerformersLeaderboard';
 import { GenderSummary, formatGenderSummaryText } from '../common/GenderSummary';
 import { HabyEduProLogo } from '../common/HabyEduProLogo';
+import { PerformanceInsightModal } from './PerformanceInsightModal';
 
 interface ExaminationRecordsViewProps {
   students: Student[];
@@ -156,6 +157,29 @@ export const ExaminationRecordsView: React.FC<ExaminationRecordsViewProps> = ({
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState<boolean>(false);
   const [isBulkWhatsAppOpen, setIsBulkWhatsAppOpen] = useState<boolean>(false);
   const [isPdfExportModalOpen, setIsPdfExportModalOpen] = useState<boolean>(false);
+  const [isInsightModalOpen, setIsInsightModalOpen] = useState<boolean>(false);
+  const [performanceInsight, setPerformanceInsight] = useState<string | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+
+  const fetchPerformanceInsight = async () => {
+    setIsAnalyzing(true);
+    try {
+      const response = await fetch('/api/performance-insight', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ examinationRecords: filteredRecords })
+      });
+      const data = await response.json();
+      setPerformanceInsight(data.insight);
+      setIsInsightModalOpen(true);
+    } catch (e) {
+      console.error(e);
+      setPerformanceInsight('Failed to generate insight.');
+      setIsInsightModalOpen(true);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
 
   // Available Academic Years from records
   const availableYears = useMemo(() => {
@@ -517,6 +541,18 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
               <Share2 className="w-4 h-4 text-emerald-200" />
               <span>Send Bulk Results to WhatsApp (Whole Class)</span>
             </button>
+
+            <button
+              type="button"
+              onClick={fetchPerformanceInsight}
+              disabled={isAnalyzing}
+              className="px-4 py-2.5 bg-gradient-to-r from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white font-black rounded-xl text-xs shadow-md flex items-center gap-2 transition cursor-pointer active:scale-[0.98] border border-purple-400"
+              title="Generate AI Performance Insight"
+            >
+              {isAnalyzing ? <RotateCcw className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 text-purple-200" />}
+              <span>{isAnalyzing ? 'Analyzing...' : 'Performance Insight'}</span>
+            </button>
+
 
             <button
               type="button"
@@ -1642,6 +1678,11 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
           </div>
         </div>
       )}
+      <PerformanceInsightModal 
+        isOpen={isInsightModalOpen} 
+        onClose={() => setIsInsightModalOpen(false)} 
+        insight={performanceInsight} 
+      />
     </div>
   );
 };

@@ -133,78 +133,9 @@ export const SECONDARY_SUBJECTS = [
   'Mikondo'
 ];
 
-export const SUBJECT_LIST = [
-  // Primary & Pre-Primary Subjects (Tanzanian Curriculum)
-  'Kiswahili',
-  'English Language',
-  'Mathematics (Hisabati)',
-  'Science and Technology (Sayansi na Teknolojia)',
-  'Social Studies (Maarifa ya Jamii)',
-  'Civic and Moral Education (Uraia na Maadili)',
-  'Vocational Skills (Stadi za Kazi)',
-  'Kusoma (Reading)',
-  'Kuandika (Writing)',
-  'Kuhesabu (Arithmetic)',
-  'Afya na Mazingira (Health & Environment)',
-  'Sanaa na Michezo (Arts & Sports)',
-  'Kuhesabu na Namba (Numeracy)',
-  'Kusoma na Kuwasiliana (Literacy)',
-  'Lugha ya Kiingereza ya Awali (Early English)',
-  'Afya na Mazingira ya Mtoto',
-  'Sanaa, Muziki na Michezo ya Awali',
-  'Maadili na Malezi Bora',
-  // Secondary O-Level & A-Level Subjects
-  'Mathematics',
-  'Basic Mathematics',
-  'Physics',
-  'Chemistry',
-  'Biology',
-  'Geography',
-  'History',
-  'Civics',
-  'Computer Studies',
-  'ICT / TEHAMA',
-  'Commerce',
-  'Book Keeping',
-  'Economics',
-  'Agriculture',
-  'Business Studies',
-  'Islamic Religious Education',
-  'Christian Religious Education',
-  'Elimu ya Dini ya Kiislamu',
-  'Elimu ya Dini ya Kikristo',
-  'Religious Studies (Elimu ya Dini ya Kiislamu / Kikristo)',
-  'Fine Art',
-  'Home Economics',
-  'Physical Education',
-  'French',
-  'French (Kifaransa)',
-  'Arabic',
-  'German',
-  'General Studies',
-  'Advanced Mathematics',
-  'Basic Applied Mathematics',
-  'Accountancy',
-  'Computer Science',
-  'Divinity',
-  'Historia Ya Tanzania Na Maadili',
-  'Literature in English',
-  'Academic Communications',
-  'Mikondo',
-  // Extra-curricular / special meal & activity periods
-  'Religion',
-  'Praying',
-  'Prayer & Devotion',
-  'Breakfast',
-  'Lunch',
-  'Environmental Day',
-  'Sports and Games',
-  'Debates',
-  'General Assembly',
-  'Clubs & Societies',
-  'Library & Private Study',
-  'Weekly Test'
-];
+import { SUBJECT_LIST } from './nectaSubjects.js';
+export { SUBJECT_LIST };
+export const SUBJECT_NAMES_LIST = SUBJECT_LIST.map(s => s.name);
 
 export const POPULAR_SUBJECTS = SUBJECT_LIST;
 
@@ -1014,7 +945,17 @@ export const DEFAULT_APP_DATA: AppData = {
   savedTimetableRecords: [],
   savedInvigilationRecords: [],
   subjectPaperConfigs: {},
-  academicTermDates: {},
+  academicTermDates: {
+    yearOpeningDate: '2026-01-13',
+    midTerm1BreakStart: '2026-03-27',
+    midTerm1BreakEnd: '2026-04-08',
+    terminalBreakStart: '2026-06-05',
+    terminalBreakEnd: '2026-07-06',
+    midTerm2BreakStart: '2026-09-04',
+    midTerm2BreakEnd: '2026-09-14',
+    annualBreakStart: '2026-12-04',
+    annualBreakEnd: '2027-01-11'
+  },
   communicationTemplates: [
     {
       id: 'default-results-sms',

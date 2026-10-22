@@ -69,18 +69,41 @@ export const TermCalendarView: React.FC<TermCalendarViewProps> = ({
 
   return (
     <div className="space-y-6">
-      <div className="bg-gradient-to-br from-[#1e3a8a] to-[#3b82f6] text-white p-6 rounded-2xl shadow-lg relative overflow-hidden">
+      <div className="bg-gradient-to-br from-[#1e3a8a] to-[#3b82f6] text-white p-6 rounded-2xl shadow-lg relative overflow-hidden flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="relative z-10">
           <div className="flex items-center gap-3 mb-2">
             <div className="p-2 bg-white/20 rounded-lg backdrop-blur-md">
               <Calendar className="w-6 h-6 text-yellow-300" />
             </div>
-            <h2 className="text-xl font-bold tracking-tight">Ratiba ya Kalenda ya Shule (Academic Calendar)</h2>
+            <h2 className="text-xl font-bold tracking-tight">Ratiba ya Kalenda ya Shule (Academic Calendar 2026)</h2>
           </div>
           <p className="text-blue-100 text-xs font-medium max-w-2xl leading-relaxed">
-            Panga tarehe za muhimu kwa mwaka mzima. Taarifa hizi zitatumika kiotomatiki kwenye ripoti za maendeleo ya wanafunzi, 
-            mipango kazi ya walimu (Schemes of Work), na ufuatiliaji wa masomo.
+            Panga tarehe za muhimu kwa mwaka mzima kulingana na muongozo wa Wizara ya Elimu (Tanzania 2026). 
+            Hii inatumika kwenye Scheme of Work, Ripoti na Uratibu wa Masomo.
           </p>
+        </div>
+        <div className="relative z-10 flex-shrink-0">
+          <button
+            onClick={() => {
+              if (onUpdateAcademicTermDates) {
+                onUpdateAcademicTermDates({
+                  yearOpeningDate: '2026-01-13',
+                  midTerm1BreakStart: '2026-03-27',
+                  midTerm1BreakEnd: '2026-04-08',
+                  terminalBreakStart: '2026-06-05',
+                  terminalBreakEnd: '2026-07-06',
+                  midTerm2BreakStart: '2026-09-04',
+                  midTerm2BreakEnd: '2026-09-14',
+                  annualBreakStart: '2026-12-04',
+                  annualBreakEnd: '2027-01-11'
+                });
+              }
+            }}
+            className="px-4 py-2.5 bg-yellow-400 hover:bg-yellow-300 text-slate-900 font-black rounded-xl text-xs transition-all shadow-md flex items-center gap-2 cursor-pointer"
+          >
+            <Sparkles className="w-4 h-4" />
+            Weka Template Rasmi ya 2026
+          </button>
         </div>
         {/* Background decorative elements */}
         <div className="absolute top-0 right-0 w-64 h-64 bg-white/5 rounded-full -mr-20 -mt-20 blur-3xl" />

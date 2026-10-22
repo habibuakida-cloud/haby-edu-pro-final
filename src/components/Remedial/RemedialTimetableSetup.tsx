@@ -45,7 +45,8 @@ import {
   NURSERY_SUBJECTS_LIST,
   LOWER_PRIMARY_SUBJECTS_LIST,
   UPPER_PRIMARY_SUBJECTS_LIST,
-  SECONDARY_SUBJECTS
+  SECONDARY_SUBJECTS,
+  SUBJECT_LIST
 } from '../../constants/defaults';
 import { Teacher, SchoolInfo, Student } from '../../types';
 import { exportRemedialTimetablePDF } from '../../utils/remedialPdfExport';
@@ -223,22 +224,12 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
 
   // Dynamic subjects based on chosen class in Form
   const dynamicSubjects = useMemo(() => {
-    const c = formData.class_name;
-    if (NURSERY_CLASSES.includes(c)) return NURSERY_SUBJECTS_LIST;
-    if (c === 'Standard 1' || c === 'Standard 2' || c === 'Class 1' || c === 'Class 2') return LOWER_PRIMARY_SUBJECTS_LIST;
-    if (PRIMARY_CLASSES.includes(c) || c.toLowerCase().includes('class') || c.toLowerCase().includes('std')) return UPPER_PRIMARY_SUBJECTS_LIST;
-    return SECONDARY_SUBJECTS;
+    return SUBJECT_LIST.map(s => s.name);
   }, [formData.class_name]);
 
   // Dynamic subjects for generator
   const generatorSubjects = useMemo(() => {
-    const c = generatorConfig.target_class;
-    if (generatorConfig.scope === 'LEVEL_SECONDARY') return SECONDARY_SUBJECTS;
-    if (generatorConfig.scope === 'LEVEL_PRIMARY') return UPPER_PRIMARY_SUBJECTS_LIST;
-    if (NURSERY_CLASSES.includes(c)) return NURSERY_SUBJECTS_LIST;
-    if (c === 'Standard 1' || c === 'Standard 2' || c === 'Class 1' || c === 'Class 2') return LOWER_PRIMARY_SUBJECTS_LIST;
-    if (PRIMARY_CLASSES.includes(c) || c.toLowerCase().includes('class') || c.toLowerCase().includes('std')) return UPPER_PRIMARY_SUBJECTS_LIST;
-    return SECONDARY_SUBJECTS;
+    return SUBJECT_LIST.map(s => s.name);
   }, [generatorConfig.target_class, generatorConfig.scope]);
 
   // Keep selected subject valid when class level changes

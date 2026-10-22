@@ -700,9 +700,9 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
 
   // Filter subjects for the multi-select search
   const searchedSubjects = useMemo(() => {
-    if (!subjectSearch.trim()) return SUBJECT_LIST;
+    if (!subjectSearch.trim()) return SUBJECT_LIST.map(s => s.name);
     const q = subjectSearch.toLowerCase();
-    return SUBJECT_LIST.filter(s => s.toLowerCase().includes(q));
+    return SUBJECT_LIST.filter(s => s.name.toLowerCase().includes(q)).map(s => s.name);
   }, [subjectSearch]);
 
   // Timetable slots for viewing teacher

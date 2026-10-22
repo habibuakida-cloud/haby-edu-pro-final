@@ -163,6 +163,7 @@ export interface PeriodSetting {
   className?: string; // e.g. "Darasa la 1", "Form 1", or "All Classes"
   streamName?: string; // e.g. "Mkondo A", "All Streams"
   isLocked?: boolean;
+  locked?: boolean;
   activityType?: string;
 }
 
@@ -702,6 +703,7 @@ export interface AppData {
   academicTermDates?: AcademicTermDates;
   communicationTemplates?: CommunicationTemplate[];
   calendarEvents?: CalendarEvent[];
+  pastPapers?: PastPaper[];
 }
 
 export interface CalendarEvent {
@@ -898,3 +900,15 @@ export interface SmsLog {
   error?: string;
 }
 
+
+export interface PastPaper {
+  id: string;
+  subjectName: string;
+  level: string;
+  year: number;
+  examType: string;
+  paperType: string;
+  fileUrl: string;
+  markingSchemeUrl?: string;
+  createdAt?: string;
+}

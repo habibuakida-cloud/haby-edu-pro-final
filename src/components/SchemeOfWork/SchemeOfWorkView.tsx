@@ -28,6 +28,7 @@ import {
   ALL_SCHOOL_CLASSES, 
   POPULAR_SUBJECTS 
 } from '../../constants/defaults';
+import { TANZANIA_SCHEMES_KNOWLEDGE_BASE } from '../../utils/schemeOfWorkGenerator';
 
 interface SchemeOfWorkViewProps {
   schoolInfo: SchoolInfo;
@@ -55,6 +56,8 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
   const [selectedTerm, setSelectedTerm] = useState<'Term 1' | 'Term 2' | 'Full Year'>('Term 1');
   const [academicYear, setAcademicYear] = useState<string>('2026');
   const [periodsPerWeek, setPeriodsPerWeek] = useState<number>(4);
+  const [topics, setTopics] = useState<string>('');
+  const [language, setLanguage] = useState<'Kiswahili' | 'English'>('English');
 
   // Active sub-tab: 'scheme' vs 'logbook'
   const [activeTab, setActiveTab] = useState<'scheme' | 'logbook'>('scheme');
@@ -116,7 +119,9 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           term: selectedTerm,
           teacherName: currentUser?.fullName || 'Teacher',
           schoolName: schoolInfo.name || 'HABY EDU PRO',
-          periodsPerWeek
+          periodsPerWeek,
+          topics: topics.split(',').map(t => t.trim()).filter(Boolean),
+          language
         })
       });
 
@@ -391,6 +396,24 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+          {/* Syllabus Selector */}
+          <div className="col-span-2">
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Select Syllabus (Auto-fill)</label>
+            <select
+              onChange={e => {
+                const template = TANZANIA_SCHEMES_KNOWLEDGE_BASE[e.target.value];
+                if (template) {
+                  setSelectedSubject(template.subject);
+                  setTopics(template.weeks.map(w => (curriculumType === 'NEW_CBC_2023' ? w.cbc.mainCompetence : w.old.mainTopic)).join(', '));
+                  showToast(`Auto-filled topics for ${template.subject}`);
+                }
+              }}
+              className="w-full px-2.5 py-1.5 text-xs font-semibold border border-blue-300 rounded-xl bg-blue-50 focus:bg-white"
+            >
+              <option value="">-- Choose Syllabus --</option>
+              {Object.keys(TANZANIA_SCHEMES_KNOWLEDGE_BASE).map(s => <option key={s} value={s}>{s} Syllabus</option>)}
+            </select>
+          </div>
           {/* Subject */}
           <div>
             <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Subject</label>
@@ -474,6 +497,67 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
               <option value="Term 2">Term 2</option>
               <option value="Full Year">Full Year (Mwaka Mzima)</option>
             </select>
+          </div>
+          
+          {/* Topics & Language */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Language</label>
+            <select
+              value={language}
+              onChange={e => setLanguage(e.target.value as any)}
+              className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 focus:bg-white"
+            >
+              <option value="English">English</option>
+              <option value="Kiswahili">Kiswahili</option>
+            </select>
+          </div>
+          <div className="col-span-2">
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Manage Topics</label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {topics.split(',').map(t => t.trim()).filter(Boolean).map((topic, idx) => (
+                <span key={idx} className="px-2 py-1 bg-blue-100 text-blue-800 text-[10px] font-bold rounded-lg flex items-center gap-1">
+                  {topic}
+                  <button 
+                    onClick={() => setTopics(topics.split(',').map(t => t.trim()).filter(Boolean).filter((_, i) => i !== idx).join(', '))}
+                    className="hover:text-blue-900"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="Enter topic..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const val = e.currentTarget.value.trim();
+                    if (val) {
+                      const newTopics = topics.split(',').map(t => t.trim()).filter(Boolean);
+                      setTopics([...newTopics, val].join(', '));
+                      e.currentTarget.value = '';
+                    }
+                  }
+                }}
+                className="flex-1 px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 focus:bg-white"
+              />
+              <button
+                type="button"
+                onClick={(e) => {
+                  const input = e.currentTarget.previousElementSibling as HTMLInputElement;
+                  const val = input.value.trim();
+                  if (val) {
+                    const newTopics = topics.split(',').map(t => t.trim()).filter(Boolean);
+                    setTopics([...newTopics, val].join(', '));
+                    input.value = '';
+                  }
+                }}
+                className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold"
+              >
+                Add
+              </button>
+            </div>
           </div>
 
           {/* Action Buttons */}

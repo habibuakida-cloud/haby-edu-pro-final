@@ -188,8 +188,8 @@ export const EditSlotModal: React.FC<EditSlotModalProps> = ({
                 className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <optgroup label="Academic Subjects">
-                  {SUBJECT_LIST.filter(s => !EXTRA_CURRICULAR_ACTIVITIES.some(a => a.name === s)).map(s => (
-                    <option key={s} value={s}>{s}</option>
+                  {SUBJECT_LIST.filter(s => !EXTRA_CURRICULAR_ACTIVITIES.some(a => a.name === s.name)).map(s => (
+                    <option key={s.code} value={s.name}>{s.name}</option>
                   ))}
                 </optgroup>
                 <optgroup label="Extra-Curricular / Special Periods">

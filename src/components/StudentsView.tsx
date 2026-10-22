@@ -129,7 +129,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [feeStatus, setFeeStatus] = useState<'PAID' | 'UNPAID'>('UNPAID');
   const [passportPhoto, setPassportPhoto] = useState<string>('');
   const [selectedSubjects, setSelectedSubjects] = useState<string[]>([
-    'English Language', 'Kiswahili', 'Mathematics', 'Biology', 'Chemistry', 'Physics'
+    '11', '12', '13', '17', '19', '18' // Corresponding to default subjects codes
   ]);
   const [subjectSearch, setSubjectSearch] = useState('');
   const [showAutoFillNotice, setShowAutoFillNotice] = useState(false);
@@ -171,7 +171,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   }, [students]);
 
   // List filters & sorting (with gender-grouped alphabetical arrangement per user request)
-  const [activeTab, setActiveTab] = useState<'form' | 'register_list' | 'classes_streams' | 'parents_list' | 'class_lists'>('classes_streams');
+  const [activeTab, setActiveTab] = useState<'form' | 'register_list' | 'classes_streams' | 'subject_registration' | 'parents_list' | 'class_lists'>('subject_registration');
   
   // DB Parents list for Parent Directory
   const [dbParents, setDbParents] = useState<any[]>([]);
@@ -920,8 +920,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     ? (className === 'Standard 1' || className === 'Standard 2' ? LOWER_PRIMARY_SUBJECTS_LIST : UPPER_PRIMARY_SUBJECTS_LIST)
     : SECONDARY_SUBJECTS;
 
-  const filteredSubjects = availableSubjectsForStudent.filter(s => 
-    s.toLowerCase().includes(subjectSearch.toLowerCase())
+  const filteredSubjects = SUBJECT_LIST.filter(s => 
+    s.name.toLowerCase().includes(subjectSearch.toLowerCase())
   );
 
   // Filter and sort registered students according to registration
@@ -1153,6 +1153,17 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         </div>
       </div>
 
+      {selectedStudentIds.length > 0 && (
+        <div className="bg-slate-900 text-white p-3 rounded-xl flex items-center justify-between shadow-lg">
+          <span className="text-sm font-bold">{selectedStudentIds.length} Students Selected</span>
+          <div className="flex gap-2">
+            <button onClick={() => setShowBulkEnrollModal(true)} className="px-3 py-1.5 bg-blue-600 rounded-lg text-xs font-bold">Enroll Subjects</button>
+            <button onClick={() => setShowBulkRemoveSubjectModal(true)} className="px-3 py-1.5 bg-red-600 rounded-lg text-xs font-bold">Delete Subjects</button>
+            <button onClick={() => setShowBulkDeleteModal(true)} className="px-3 py-1.5 bg-gray-600 rounded-lg text-xs font-bold">Delete Students</button>
+          </div>
+        </div>
+      )}
+
       {/* Sub-Navigation Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-xs">
         <div className="flex items-center gap-2 flex-wrap">
@@ -1191,6 +1202,18 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>Registered Students List ({students.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('subject_registration')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeTab === 'subject_registration'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+            }`}
+          >
+            <BookOpen className="w-4 h-4" />
+            <span>Class-wise Subject Reg</span>
           </button>
           <button
             type="button"
@@ -1269,6 +1292,45 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Subject Registration Tab */}
+      {activeTab === 'subject_registration' && (
+        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
+          <h2 className="text-xl font-bold text-[#1f4d8b]">Class-wise Subject Registration</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <select
+              value={classFilter === 'ALL' ? '' : classFilter}
+              onChange={e => setClassFilter(e.target.value || 'ALL')}
+              className="p-2 border border-slate-300 rounded-lg text-sm"
+            >
+              <option value="">Select Class</option>
+              {allAvailableClassesList.map(c => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          {classFilter !== 'ALL' && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-left">
+                <thead>
+                  <tr className="border-b font-bold text-slate-500">
+                    <th className="p-2">Reg No</th>
+                    <th className="p-2">Student Name</th>
+                    <th className="p-2">Subjects (Codes)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sortedFilteredStudents.filter(s => s.className === classFilter).map(s => (
+                    <tr key={s.id} className="border-b hover:bg-slate-50">
+                      <td className="p-2">{s.regNo}</td>
+                      <td className="p-2">{s.name}</td>
+                      <td className="p-2 font-mono text-blue-700">{(s.subjects || []).join(', ')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Registration Form Tab */}
       {activeTab === 'form' && (
@@ -1567,58 +1629,48 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               </div>
             </div>
 
-            {/* Subjects Selection */}
-            <div className="space-y-2 pt-2 border-t border-slate-200">
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-slate-600 uppercase">
-                  Enrolled Subjects ({selectedSubjects.length} selected)
-                </label>
-                {showAutoFillNotice && (
-                  <span className="text-xs font-bold text-emerald-600 animate-fade-in">
-                    ✓ Compulsory & combination subjects auto-filled for ACSEE
-                  </span>
-                )}
+            {/* Subjects Selection: Replaced checkboxes with dropdown + chips */}
+            <div className="space-y-3 pt-2 border-t border-slate-200">
+              <label className="text-xs font-bold text-slate-600 uppercase">
+                Enrolled Subjects
+              </label>
+
+              <div className="flex flex-wrap gap-2 mb-2">
+                {selectedSubjects.map(code => {
+                  const subject = SUBJECT_LIST.find(s => s.code === code);
+                  return (
+                    <span key={code} className="px-2 py-1 bg-blue-100 text-blue-900 text-[10px] font-bold rounded-lg flex items-center gap-1 border border-blue-200">
+                      {subject ? `${subject.name} (${subject.code})` : code}
+                      <button 
+                        type="button"
+                        onClick={() => setSelectedSubjects(selectedSubjects.filter(s => s !== code))}
+                        className="hover:text-blue-900"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  );
+                })}
               </div>
 
               <div className="relative">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
-                <input
-                  type="text"
-                  placeholder="Search subject..."
-                  value={subjectSearch}
-                  onChange={e => setSubjectSearch(e.target.value)}
-                  className="w-full pl-9 pr-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
-                />
-              </div>
-
-              <div className="max-h-44 overflow-y-auto p-2 border border-slate-200 rounded-lg bg-slate-50/50 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5">
-                {filteredSubjects.map(sub => {
-                  const checked = selectedSubjects.includes(sub);
-                  return (
-                    <label
-                      key={sub}
-                      className={`flex items-center gap-2 p-2 rounded-md border text-xs cursor-pointer select-none transition-colors ${
-                        checked
-                          ? 'bg-blue-50 border-blue-200 text-blue-900 font-semibold'
-                          : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-100'
-                      }`}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={e => {
-                          if (e.target.checked) {
-                            setSelectedSubjects([...selectedSubjects, sub]);
-                          } else {
-                            setSelectedSubjects(selectedSubjects.filter(s => s !== sub));
-                          }
-                        }}
-                        className="w-3.5 h-3.5 rounded text-blue-600"
-                      />
-                      <span className="truncate">{sub}</span>
-                    </label>
-                  );
-                })}
+                <select
+                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500"
+                  onChange={(e) => {
+                    const code = e.target.value;
+                    if (code && !selectedSubjects.includes(code)) {
+                      setSelectedSubjects([...selectedSubjects, code]);
+                    }
+                  }}
+                  value=""
+                >
+                  <option value="">+ Add Subject (Search/Select)...</option>
+                  {filteredSubjects.map(sub => (
+                    <option key={sub.code} value={sub.code} disabled={selectedSubjects.includes(sub.code)}>
+                      {sub.name} ({sub.code})
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
@@ -3673,6 +3725,66 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           }
         }}
       />
+      {/* Bulk Modals (Enroll / Remove Subjects / Delete) */}
+      {showBulkEnrollModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+            <h2 className="text-lg font-black text-slate-900 mb-4">Bulk Enroll Subjects ({selectedStudentIds.length} students)</h2>
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">Select subjects to add to all selected students:</p>
+              <div className="max-h-60 overflow-y-auto space-y-2 border p-3 rounded-lg">
+                {SUBJECT_LIST.map(sub => (
+                  <label key={sub.code} className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={bulkEnrollSubjects.includes(sub.name)}
+                      onChange={(e) => {
+                        if (e.target.checked) setBulkEnrollSubjects([...bulkEnrollSubjects, sub.name]);
+                        else setBulkEnrollSubjects(bulkEnrollSubjects.filter(s => s !== sub.name));
+                      }}
+                    />
+                    <span className="text-sm text-slate-700">{sub.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowBulkEnrollModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600">Cancel</button>
+              <button onClick={handleConfirmBulkEnroll} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold">Enroll Subjects</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showBulkRemoveSubjectModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-lg shadow-2xl">
+            <h2 className="text-lg font-black text-slate-900 mb-4">Bulk Delete Subjects ({selectedStudentIds.length} students)</h2>
+            <div className="space-y-4">
+              <p className="text-sm text-slate-600">Select subjects to remove from all selected students:</p>
+              <div className="max-h-60 overflow-y-auto space-y-2 border p-3 rounded-lg">
+                {SUBJECT_LIST.map(sub => (
+                  <label key={sub.code} className="flex items-center gap-2 cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={bulkRemoveSubjects.includes(sub.name)}
+                      onChange={(e) => {
+                        if (e.target.checked) setBulkRemoveSubjects([...bulkRemoveSubjects, sub.name]);
+                        else setBulkRemoveSubjects(bulkRemoveSubjects.filter(s => s !== sub.name));
+                      }}
+                    />
+                    <span className="text-sm text-slate-700">{sub.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+            <div className="flex justify-end gap-3 mt-6">
+              <button onClick={() => setShowBulkRemoveSubjectModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600">Cancel</button>
+              <button onClick={handleConfirmBulkRemoveSubjects} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold">Delete Subjects</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

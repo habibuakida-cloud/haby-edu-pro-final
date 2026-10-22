@@ -59,6 +59,7 @@ export type ActiveView =
   | 'remedialtimetable'
   | 'remedialanalyzer'
   | 'reampapers'
+  | 'pastpapers'
   | 'nectaregs'
   | 'laboratory'
   | 'examsettings'
@@ -130,6 +131,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
       { id: 'evaluationanalysis', label: 'Evaluation Analysis', description: 'Subject teacher evaluation & class performance audit' },
       { id: 'dailytracker', label: 'Daily Ticker', description: 'Real-time academic activity ticker & lesson log' },
       { id: 'reampapers', label: 'Ream Paper Records', description: 'Usimamizi wa ream papers zilizoletwa na wanafunzi', badge: 'REAMS' },
+      { id: 'pastpapers', label: 'Past Paper Center', description: 'Download past papers, marking schemes & exam resources', badge: 'NEW' },
       { id: 'nectaregs', label: 'NECTA Reg. Numbers Studio', description: 'Jenereta ya namba za usajili za NECTA zenye boda na mitindo maridadi', badge: 'NECTA' }
     ]
   },

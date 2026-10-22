@@ -11,7 +11,7 @@ import {
   Info
 } from 'lucide-react';
 import { InvigilationSession, EducationLevel } from '../../types';
-import { SUBJECT_LIST, DEFAULT_CLASSES } from '../../constants/defaults';
+import { SUBJECT_NAMES_LIST, DEFAULT_CLASSES } from '../../constants/defaults';
 
 export const INVIGILATION_ALLOWED_SESSIONS = ['SESSION I', 'SESSION II', 'SESSION III'] as const;
 export type InvigilationSessionType = typeof INVIGILATION_ALLOWED_SESSIONS[number];
@@ -59,7 +59,7 @@ export const SessionEditModal: React.FC<SessionEditModalProps> = ({
   );
   const [start, setStart] = useState(initialSession?.start || '08:00');
   const [end, setEnd] = useState(initialSession?.end || '10:30');
-  const [subject, setSubject] = useState(initialSession?.subject || SUBJECT_LIST[0]);
+  const [subject, setSubject] = useState(initialSession?.subject || SUBJECT_NAMES_LIST[0]);
   const [customSubject, setCustomSubject] = useState('');
   const [isCustomSubject, setIsCustomSubject] = useState(false);
   const [level, setLevel] = useState<'CSEE' | 'ACSEE'>(initialSession?.level === 'ACSEE' ? 'ACSEE' : 'CSEE');
@@ -376,7 +376,7 @@ export const SessionEditModal: React.FC<SessionEditModalProps> = ({
                   onChange={e => setSubject(e.target.value)}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
                 >
-                  {SUBJECT_LIST.map(s => (
+                  {SUBJECT_NAMES_LIST.map(s => (
                     <option key={s} value={s}>{s}</option>
                   ))}
                 </select>

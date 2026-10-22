@@ -11,6 +11,7 @@ import { generateAITimetable } from './src/server/timetableAILogic.ts';
 import { generateAISchemeOfWork, generateAILessonPlan } from './src/server/schemeAILogic.ts';
 import { fetchAndParseNectaUrl } from './src/server/nectaFetchLogic.ts';
 import { normalizeTzPhone, sendBeemSMS } from './src/server/smsUtils.ts';
+import { generatePerformanceInsight } from './src/server/aiPerformance.ts';
 import {
   queryTimetable,
   saveTimetable,
@@ -156,6 +157,7 @@ const TABLE_KEY_MAP: Record<string, any> = {
   duty_streams: schema.dutyStreams,
   duty_weekly_assignments: schema.dutyWeeklyAssignments,
   duty_daily_reports: schema.dutyDailyReports,
+  past_papers: schema.pastPapers,
 };
 
 function resolveColumn(tableObj: any, colName: string): { jsKey: string; colDef: any } | null {
@@ -264,13 +266,22 @@ async function normalizeRecordForTable(tableObj: any, rawRecord: Record<string, 
       if (jsKey === 'endTime') rawVal = rawRecord.end || rawRecord.end_time || '08:40';
       if (jsKey === 'periodTime') rawVal = rawRecord.period_time || '16:00-17:00';
       if (jsKey === 'dayOfWeek') rawVal = rawRecord.day || rawRecord.day_of_week || 'Monday';
+      if (jsKey === 'roomName') rawVal = rawRecord.room_name || rawRecord.roomName || rawRecord.room_no || rawRecord.name || 'ROOM 01';
+      if (jsKey === 'totalCandidates') rawVal = rawRecord.total_candidates ?? rawRecord.totalCandidates ?? rawRecord.total_seats ?? 0;
+      if (jsKey === 'gridLayout') rawVal = rawRecord.grid_layout || rawRecord.gridLayout || {};
     }
 
     if (rawVal !== undefined) {
       result[jsKey] = coerceColumnValue(colDef, jsKey, rawVal);
     } else if (!isUpdate) {
       if (jsKey === 'id') {
-        result.id = colDef.columnType === 'PgUUID' ? crypto.randomUUID() : `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        if (tableObj === schema.sittingPlans) {
+          const sId = toDeterministicUuid(rawRecord.school_id || rawRecord.schoolId || DEFAULT_SCHOOL_UUID, true);
+          const rName = String(rawRecord.room_name || rawRecord.roomName || rawRecord.room_no || rawRecord.name || 'ROOM 01').trim();
+          result.id = toDeterministicUuid(`sitplan_${sId}_${rName}`);
+        } else {
+          result.id = colDef.columnType === 'PgUUID' ? crypto.randomUUID() : `rec_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        }
       } else if (jsKey === 'schoolId') {
         result.schoolId = DEFAULT_SCHOOL_UUID;
       } else if (colDef.notNull && !colDef.hasDefault) {
@@ -1008,11 +1019,17 @@ function scheduleRelationalSync(schoolId: string, snapshotData: Record<string, a
 // DB API
 app.get('/api/db/school-data', async (req, res) => {
   const { schoolId } = req.query as { schoolId: string };
-  const resolvedId = schoolId || DEFAULT_SCHOOL_UUID;
+  const s = String(schoolId || '').trim();
+  const resolvedId = (!s || s === 'DEMO_SCHOOL' || s === 'DEFAULT_PRIMARY_SCHOOL_ID') ? DEFAULT_SCHOOL_UUID : s;
   try {
-    const data = await db.query.schoolData.findFirst({
+    let data = await db.query.schoolData.findFirst({
       where: eq(schema.schoolData.schoolId, resolvedId),
     });
+    if (!data && s && s !== resolvedId) {
+      data = await db.query.schoolData.findFirst({
+        where: eq(schema.schoolData.schoolId, s),
+      });
+    }
     if (data) {
       const dual = toDualCaseRow(schema.schoolData, data);
       const isDemo = resolvedId === DEFAULT_SCHOOL_UUID;
@@ -1044,10 +1061,12 @@ app.get('/api/db/school-data', async (req, res) => {
 });
 
 app.post('/api/db/school-data', async (req, res) => {
-  const { schoolId, payload } = req.body;
-  if (!schoolId) {
+  const { schoolId: rawSchoolId, payload } = req.body;
+  if (!rawSchoolId) {
     return res.status(400).json({ error: 'schoolId is required' });
   }
+  const s = String(rawSchoolId).trim();
+  const schoolId = (!s || s === 'DEMO_SCHOOL' || s === 'DEFAULT_PRIMARY_SCHOOL_ID') ? DEFAULT_SCHOOL_UUID : s;
   try {
     const raw = payload || {};
     const existing = await db.query.schoolData.findFirst({
@@ -1063,17 +1082,31 @@ app.post('/api/db/school-data', async (req, res) => {
     const resolvedDutyRosterData = pickNonEmptyObject(raw.dutyRosterData, raw.duty_roster_data, existing?.dutyRosterData);
 
     const normalizedData = {
-      id: raw.id || schoolId,
+      id: schoolId,
       schoolId: schoolId,
-      schoolInfo: pickNonEmptyObject(raw.schoolInfo, raw.school_info, existing?.schoolInfo, DEFAULT_APP_DATA.schoolInfo),
+      schoolInfo: {
+        ...((DEFAULT_APP_DATA.schoolInfo as Record<string, any>) || {}),
+        ...((existing?.schoolInfo as Record<string, any>) || {}),
+        ...(raw.school_info || {}),
+        ...(raw.schoolInfo || {}),
+      },
       timetableAssignments: pickNonEmptyArray(raw.timetableAssignments, raw.timetable_assignments, existing?.timetableAssignments, DEFAULT_APP_DATA.timetableAssignments),
       periodSettings: pickNonEmptyArray(raw.periodSettings, raw.period_settings, existing?.periodSettings, DEFAULT_APP_DATA.periodSettings),
       streamSettings: pickNonEmptyArray(raw.streamSettings, raw.stream_settings, existing?.streamSettings, DEFAULT_APP_DATA.streamSettings),
-      institutionalPolicy: pickNonEmptyObject(raw.institutionalPolicy, raw.institutional_policy, existing?.institutionalPolicy, DEFAULT_APP_DATA.institutionalPolicy),
+      institutionalPolicy: {
+        ...((DEFAULT_APP_DATA.institutionalPolicy as Record<string, any>) || {}),
+        ...((existing?.institutionalPolicy as Record<string, any>) || {}),
+        ...(raw.institutional_policy || {}),
+        ...(raw.institutionalPolicy || {}),
+      },
       sessions: pickNonEmptyArray(raw.sessions, existing?.sessions, DEFAULT_APP_DATA.sessions),
       supervisors: pickNonEmptyArray(raw.supervisors, existing?.supervisors, DEFAULT_APP_DATA.supervisors),
       selectedInvigilators: pickNonEmptyArray(raw.selectedInvigilators, raw.selected_invigilators, existing?.selectedInvigilators, DEFAULT_APP_DATA.selectedInvigilators),
-      invigilationAssignments: pickNonEmptyObject(raw.invigilationAssignments, raw.invigilation_assignments, existing?.invigilationAssignments),
+      invigilationAssignments: {
+        ...((existing?.invigilationAssignments as Record<string, any>) || {}),
+        ...(raw.invigilation_assignments || {}),
+        ...(raw.invigilationAssignments || {}),
+      },
       dailyAttendance: {
         ...((existing?.dailyAttendance as Record<string, any>) || {}),
         ...(raw.daily_attendance || {}),
@@ -1101,7 +1134,11 @@ app.post('/api/db/school-data', async (req, res) => {
       examinationRecords: pickNonEmptyArray(raw.examinationRecords, raw.examination_records, existing?.examinationRecords, isDemo ? DEFAULT_APP_DATA.examinationRecords : []),
       disciplineRecords: resolvedDisciplineRecords,
       dutyRosterData: resolvedDutyRosterData,
-      academicTermDates: pickNonEmptyObject(raw.academicTermDates, raw.academic_term_dates, existing?.academicTermDates),
+      academicTermDates: {
+        ...((existing?.academicTermDates as Record<string, any>) || {}),
+        ...(raw.academic_term_dates || {}),
+        ...(raw.academicTermDates || {}),
+      },
       updatedAt: new Date(),
     };
 
@@ -1117,6 +1154,44 @@ app.post('/api/db/school-data', async (req, res) => {
   } catch (err: any) {
     console.error('Error saving school-data:', err?.message || err);
     res.status(500).json({ error: 'Failed to save school data', details: err?.message });
+  }
+});
+
+// Past Papers API
+app.get('/api/past-papers', async (req, res) => {
+  const { schoolId, level, subjectName } = req.query as { schoolId: string, level?: string, subjectName?: string };
+  const resolvedId = schoolId || DEFAULT_SCHOOL_UUID;
+  try {
+    const filters: any = { schoolId: resolvedId };
+    if (level) filters.level = level;
+    if (subjectName) filters.subjectName = subjectName;
+
+    const papers = await db.select().from(schema.pastPapers).where(buildWhereClause(schema.pastPapers, filters));
+    res.json(papers);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch past papers' });
+  }
+});
+
+app.post('/api/past-papers', async (req, res) => {
+  const { schoolId, ...paperData } = req.body;
+  const resolvedId = schoolId || DEFAULT_SCHOOL_UUID;
+  try {
+    const normalized = await normalizeRecordForTable(schema.pastPapers, { ...paperData, schoolId: resolvedId }, false);
+    const result = await db.insert(schema.pastPapers).values(normalized as any).returning();
+    res.json(result[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to add past paper' });
+  }
+});
+
+app.delete('/api/past-papers/:id', async (req, res) => {
+  const { id } = req.params;
+  try {
+    await db.delete(schema.pastPapers).where(eq(schema.pastPapers.id, id));
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete past paper' });
   }
 });
 
@@ -1440,7 +1515,18 @@ app.get('/api/db/diagnostics', async (req, res) => {
   }
 });
 
+app.post('/api/performance-insight', async (req, res) => {
+  try {
+    const { examinationRecords } = req.body;
+    const insight = await generatePerformanceInsight(examinationRecords);
+    res.json({ success: true, insight });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || String(err) });
+  }
+});
+
 app.post('/api/db/sync-all', async (req, res) => {
+
   try {
     const { schoolId = DEFAULT_SCHOOL_UUID, payload } = req.body || {};
     let sourceData: any = payload;

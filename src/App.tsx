@@ -35,6 +35,7 @@ import { DailyTeachingTrackerView } from './components/DailyTeachingTrackerView'
 import { EvaluationAnalysisView } from './components/EvaluationAnalysisView';
 import { ReamPaperModule } from './components/Academic/ReamPaperModule';
 import { NectaRegistrationView } from './components/Academic/NectaRegistrationView';
+import { PastPaperCenter } from './components/Academic/PastPaperCenter';
 import { RemedialTimetableSetup } from './components/Remedial/RemedialTimetableSetup';
 import { RemedialDailyTracker } from './components/Remedial/RemedialDailyTracker';
 import { RemedialPaymentAnalyzer } from './components/Remedial/RemedialPaymentAnalyzer';
@@ -72,7 +73,8 @@ import {
   getStudents, 
   getTeachers, 
   getExams,
-  getUsers
+  getUsers,
+  getPastPapers
 } from './lib/dataService';
 import { testFirestoreConnection } from './lib/firebaseClient';
 import { 
@@ -119,11 +121,14 @@ export default function App() {
 
     if (typeof window !== 'undefined') {
       try {
-        const local = localStorage.getItem(`haby_school_data_snapshot_${schoolId}`) || localStorage.getItem(`haby_school_data_${schoolId}`);
-        console.log("App init: Loading from localStorage for school:", schoolId, "Data found:", !!local);
+        const local =
+          localStorage.getItem(`haby_school_data_snapshot_${schoolId}`) ||
+          localStorage.getItem(`haby_school_data_${schoolId}`) ||
+          localStorage.getItem(`haby_school_data_snapshot_${DEFAULT_PRIMARY_SCHOOL_ID}`) ||
+          localStorage.getItem(`haby_school_data_${DEFAULT_PRIMARY_SCHOOL_ID}`);
         if (local) {
           const parsed = JSON.parse(local);
-          if (parsed && typeof parsed === 'object') {
+          if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
             return { 
               ...DEFAULT_APP_DATA, 
               ...parsed,
@@ -132,10 +137,9 @@ export default function App() {
             };
           }
         }
-      } catch (e) { console.error("App init: Error loading from localStorage:", e); }
+      } catch (e) { console.error("App init: Error loading localStorage:", e); }
     }
     
-    console.log("App init: Using default app data base. isDemo:", schoolId === DEFAULT_PRIMARY_SCHOOL_ID);
     if (schoolId !== DEFAULT_PRIMARY_SCHOOL_ID) {
       return {
         ...DEFAULT_APP_DATA,
@@ -150,6 +154,11 @@ export default function App() {
     }
     return DEFAULT_APP_DATA;
   });
+
+  const dataRef = useRef<AppData>(data);
+  useEffect(() => {
+    dataRef.current = data;
+  }, [data]);
 
   const [verifyStudentRegNo, setVerifyStudentRegNo] = useState<string | null>(() => {
     if (typeof window !== 'undefined') {
@@ -369,6 +378,14 @@ export default function App() {
           (async () => {
             try {
               const data = await getExams(schoolId);
+              return { data, error: null };
+            } catch (err: any) {
+              return { data: null, error: err };
+            }
+          })(),
+          (async () => {
+            try {
+              const data = await getPastPapers(schoolId);
               return { data, error: null };
             } catch (err: any) {
               return { data: null, error: err };
@@ -776,23 +793,22 @@ export default function App() {
 
   const updateRemoteData = useCallback(async (updates: Partial<AppData>) => {
     setSaveStatus('saving');
-    const schoolId = userAccount?.schoolId || getCurrentSchoolId();
+    const schoolId = userAccount?.schoolId || getCurrentSchoolId() || DEFAULT_PRIMARY_SCHOOL_ID;
     const schoolKey = `haby_school_data_${schoolId}`;
 
-    let nextData: AppData = {} as AppData;
-    setData(prev => {
-      nextData = { 
-        ...prev, 
-        ...updates
-      };
-      return nextData;
-    });
+    const nextData: AppData = {
+      ...dataRef.current,
+      ...updates
+    };
+    dataRef.current = nextData;
+    setData(nextData);
 
     // Persist lightweight snapshot to localStorage and full data to IndexedDB
     try {
       const { usalRecords: _omitUsal, ...lightSnapshot } = nextData as any;
       const serialized = JSON.stringify(lightSnapshot);
       localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, serialized);
+      localStorage.setItem(`haby_school_data_${schoolId}`, serialized);
       if (nextData.timetableAssignments) {
         localStorage.setItem(`haby_timetable_assignments_${schoolId}`, JSON.stringify(nextData.timetableAssignments));
       }
@@ -1970,6 +1986,7 @@ export default function App() {
               examinationRecords={data.examinationRecords || []}
               dutyRosterData={data.dutyRosterData}
               dailyAttendance={data.dailyAttendance || {}}
+              academicTermDates={data.academicTermDates}
             />
           )}
 
@@ -2020,6 +2037,12 @@ export default function App() {
               }}
               onNavigateToDiscipline={student => setActiveView('discipline')}
               examinationRecords={data.examinationRecords || []}
+            />
+          )}
+          {activeView === 'pastpapers' && (
+            <PastPaperCenter
+              pastPapers={data.pastPapers || []}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
             />
           )}
 
@@ -2611,7 +2634,7 @@ export default function App() {
 
           {activeView === 'sittingplan' && (
             <SittingPlan
-              schoolId={userAccount?.schoolId || 'DEMO_SCHOOL'}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
               schoolInfo={data.schoolInfo}
               onBack={() => setActiveView('invigilation')}
             />

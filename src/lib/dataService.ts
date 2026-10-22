@@ -112,3 +112,12 @@ export async function getWeeklyAttendance(...args: any[]): Promise<any[]> {
     return [];
   }
 }
+
+/**
+ * Fetch past papers
+ */
+export async function getPastPapers(schoolId: string) {
+  const response = await fetch(`/api/db/past-papers?schoolId=${schoolId}`);
+  if (!response.ok) return [];
+  return await response.json();
+}

@@ -29,8 +29,10 @@ import {
   UserCheck,
   FileSpreadsheet,
   Award,
-  BookOpen
+  BookOpen,
+  FileText
 } from 'lucide-react';
+import { PastPaperAdmin } from './PastPaperAdmin';
 import { db, DEFAULT_PRIMARY_SCHOOL_ID, supabase } from '../../lib/dbClient';
 import { collection, query, getDocs, doc, setDoc, deleteDoc, addDoc, getDoc } from 'firebase/firestore';
 import { saveSchoolToFirestore, fetchSchoolsFromFirestore } from '../../lib/firestoreService';
@@ -87,14 +89,18 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   const [schoolMetrics, setSchoolMetrics] = useState<Record<string, SchoolSummaryMetrics>>({});
   const [loading, setLoading] = useState(true);
   const [loadingMetrics, setLoadingMetrics] = useState(false);
-  const [activeTab, setActiveTab] = useState<'schools' | 'admins'>('schools');
+  const [activeTab, setActiveTab] = useState<'schools' | 'admins' | 'past-papers'>('schools');
   const [schoolsViewMode, setSchoolsViewMode] = useState<'grid' | 'table'>('grid');
   const [searchQuery, setSearchQuery] = useState('');
   const [supabaseStatus, setSupabaseStatus] = useState<'checking' | 'connected' | 'error'>('checking');
 
+  // ... (inside the component)
+
+
   // Modals
   const [isAddSchoolOpen, setIsAddSchoolOpen] = useState(false);
   const [isAddAdminOpen, setIsAddAdminOpen] = useState(false);
+
 
   // Form states - School
   const [newSchoolName, setNewSchoolName] = useState('');
@@ -596,6 +602,17 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
             <Users className="w-4 h-4" />
             <span>Watawala (school_admins) ({schoolAdmins.length})</span>
           </button>
+          <button
+            onClick={() => setActiveTab('past-papers')}
+            className={`px-4 py-2 rounded-lg text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+              activeTab === 'past-papers' 
+                ? 'bg-blue-600 text-white shadow-xs' 
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <FileText className="w-4 h-4" />
+            <span>Past Papers Center</span>
+          </button>
         </div>
 
         <div className="relative w-full sm:w-72">
@@ -609,6 +626,8 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
           />
         </div>
       </div>
+
+      {activeTab === 'past-papers' && <PastPaperAdmin />}
 
       {/* TAB 1: SCHOOLS DIRECTORY & TABLE */}
       {activeTab === 'schools' && (

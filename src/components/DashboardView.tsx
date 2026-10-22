@@ -33,7 +33,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting, DisciplineRecord, TeacherAssignment, ExaminationRecord, DutyRosterData, DailyRollCallRecord } from '../types';
+import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting, DisciplineRecord, TeacherAssignment, ExaminationRecord, DutyRosterData, DailyRollCallRecord, AcademicTermDates } from '../types';
 import { subDays, subMonths, format, startOfDay } from 'date-fns';
 import { NURSERY_CLASSES, PRIMARY_CLASSES, SECONDARY_CLASSES } from '../constants/defaults';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
@@ -44,6 +44,8 @@ import { isSameClass } from '../utils/reportCardUtils';
 import { TeacherDailyScheduleSummary } from './Dashboard/TeacherDailyScheduleSummary';
 import { MarkEntryProgressCard } from './Dashboard/MarkEntryProgressCard';
 import { MonthlyAttendanceTrendsWidget } from './Dashboard/MonthlyAttendanceTrendsWidget';
+import { SubjectPerformanceTrendsWidget } from './Dashboard/SubjectPerformanceTrendsWidget';
+import { AcademicTermPlanner } from './Dashboard/AcademicTermPlanner';
 import { CommandPaletteModal } from './common/CommandPaletteModal';
 import { QuickAddStudentModal } from './Students/QuickAddStudentModal';
 import { SmartDashboardWidget } from './SmartDashboardWidget';
@@ -73,6 +75,7 @@ interface DashboardViewProps {
   examinationRecords?: ExaminationRecord[];
   dutyRosterData?: DutyRosterData;
   dailyAttendance?: Record<string, any>;
+  academicTermDates?: AcademicTermDates;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -98,7 +101,8 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   teacherAssignments = [],
   examinationRecords = [],
   dutyRosterData,
-  dailyAttendance = {}
+  dailyAttendance = {},
+  academicTermDates
 }) => {
   const displayStudentCount = supabaseStudentCount !== undefined ? supabaseStudentCount : students.length;
   const [activeLevelFilter, setActiveLevelFilter] = useState<'ALL' | 'PRIMARY' | 'PRE_PRIMARY' | 'SECONDARY'>('ALL');
@@ -779,6 +783,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         disciplineRecords={disciplineRecords}
         onNavigateToDiscipline={() => handleNavigate('discipline')}
       />
+      
+      <SubjectPerformanceTrendsWidget examinationRecords={examinationRecords} />
+
 
       {/* STUDENT ENROLLMENT BY GENDER & CLASS LEVEL (RECHARTS BAR CHART) */}
       <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">
@@ -829,6 +836,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </ResponsiveContainer>
         </div>
       </div>
+
+      {/* Academic Term Planner */}
+      <AcademicTermPlanner termDates={academicTermDates} />
 
       {/* STUDENT ENROLLMENT GROWTH OVER THE LAST 12 MONTHS (RECHARTS LINE CHART) */}
       <div className="bg-white border border-slate-200/80 rounded-3xl p-5 sm:p-6 shadow-xs space-y-4">

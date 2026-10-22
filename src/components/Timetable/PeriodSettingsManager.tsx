@@ -21,7 +21,9 @@ import {
   Users,
   Sparkles,
   Library,
-  FileCheck
+  FileCheck,
+  Lock,
+  Unlock
 } from 'lucide-react';
 import { PeriodSetting, TimetableAssignment, StreamSetting } from '../../types';
 import { DAYS_OF_WEEK, EXTRA_CURRICULAR_ACTIVITIES, TANZANIAN_TEMPLATE_PERIOD_SETTINGS, DEFAULT_CLASSES } from '../../constants/defaults';
@@ -229,8 +231,49 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     else setFormEnd(res);
   };
 
+  // Toggle lock state for a period
+  const handleToggleLock = (p: PeriodSetting) => {
+    const isLockedState = Boolean(p.locked || p.isLocked);
+    const updated = periodSettings.map(item => {
+      if (item.id === p.id) {
+        return {
+          ...item,
+          locked: !isLockedState,
+          isLocked: !isLockedState
+        };
+      }
+      return item;
+    });
+    onUpdatePeriodSettings(updated);
+    showFeedback(`Kipindi cha "${p.name}" (${p.day}) kime${!isLockedState ? 'fungwa (Locked 🔒)' : 'funguliwa (Unlocked 🔓)'}.`, 'success');
+  };
+
+  // Bulk lock/unlock
+  const handleBulkLock = (lockState: boolean) => {
+    if (selectedIds.length === 0) {
+      showFeedback('Chagua angalau kipindi kimoja.', 'info');
+      return;
+    }
+    const updated = periodSettings.map(item => {
+      if (selectedIds.includes(item.id)) {
+        return {
+          ...item,
+          locked: lockState,
+          isLocked: lockState
+        };
+      }
+      return item;
+    });
+    onUpdatePeriodSettings(updated);
+    showFeedback(`Vipindi ${selectedIds.length} vime${lockState ? 'fungwa (Locked 🔒)' : 'funguliwa (Unlocked 🔓)'}.`, 'success');
+  };
+
   // Start editing a period (loads into top form and scrolls to it)
   const handleStartEdit = (p: PeriodSetting) => {
+    if (p.locked || p.isLocked) {
+      showFeedback(`Kipindi hiki "${p.name}" (${p.day}) kimefungwa (Locked 🔒). Tafadhali kifungue kwanza ili uweze kukihariri.`, 'error');
+      return;
+    }
     setEditingPeriodId(p.id);
     setFormDays([p.day]);
     setFormName(p.name);
@@ -254,6 +297,10 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
 
   // Start inline table editing
   const handleStartInlineEdit = (p: PeriodSetting) => {
+    if (p.locked || p.isLocked) {
+      showFeedback(`Kipindi hiki "${p.name}" (${p.day}) kimefungwa (Locked 🔒). Tafadhali kifungue kwanza ili uweze kukihariri.`, 'error');
+      return;
+    }
     setInlineEditingId(p.id);
     setInlineDay(p.day);
     setInlineName(p.name);
@@ -445,6 +492,10 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
 
   // Immediate deletion without blocking modal or alert
   const promptDeletePeriod = (p: PeriodSetting) => {
+    if (p.locked || p.isLocked) {
+      showFeedback(`Kipindi "${p.name}" (${p.day}) kimefungwa (Locked 🔒). Tafadhali kifungue kwanza ili uweze kukifuta.`, 'error');
+      return;
+    }
     const targetId = p.id;
 
     // Check affected assignments
@@ -1378,6 +1429,11 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
                       <div className="flex items-center gap-2">
                         {getPeriodIcon(p.name)}
                         <span className="font-bold text-slate-800">{p.name}</span>
+                        {(p.locked || p.isLocked) && (
+                          <span className="px-1.5 py-0.2 text-[9px] font-bold bg-amber-100 text-amber-900 border border-amber-300 rounded-full flex items-center gap-0.5">
+                            <Lock className="w-2.5 h-2.5" /> Locked
+                          </span>
+                        )}
                         {isTopEditing && (
                           <span className="px-1.5 py-0.2 text-[9px] font-bold bg-amber-200 text-amber-900 rounded">
                             Active in Form
@@ -1405,12 +1461,28 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
                     </td>
                     <td className="p-2.5 text-center">
                       <div className="flex items-center justify-center gap-1">
+                        {/* Lock / Unlock Toggle Button */}
+                        <button
+                          type="button"
+                          onClick={() => handleToggleLock(p)}
+                          className={`p-1.5 rounded transition-colors cursor-pointer ${
+                            p.locked || p.isLocked 
+                              ? 'bg-amber-100 text-amber-800 hover:bg-amber-200' 
+                              : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                          }`}
+                          title={p.locked || p.isLocked ? 'Unlock period (Currently Locked 🔒)' : 'Lock period (Click to Lock)'}
+                        >
+                          {p.locked || p.isLocked ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                        </button>
+
                         {/* Edit Button (Loads into top form OR inline) */}
                         <button
                           type="button"
                           onClick={() => handleStartInlineEdit(p)}
-                          className="px-2 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded flex items-center gap-1 transition-colors cursor-pointer"
-                          title="Edit period inline"
+                          className={`px-2 py-1 text-[11px] font-bold rounded flex items-center gap-1 transition-colors ${
+                            p.locked || p.isLocked ? 'opacity-50 bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 cursor-pointer'
+                          }`}
+                          title={p.locked || p.isLocked ? 'Period is locked (Unlock to edit)' : 'Edit period inline'}
                         >
                           <Edit2 className="w-3 h-3" />
                           Edit
@@ -1420,8 +1492,10 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
                         <button
                           type="button"
                           onClick={() => handleStartEdit(p)}
-                          className="p-1 text-slate-500 hover:text-slate-800 hover:bg-slate-100 rounded transition-colors"
-                          title="Load into top period editor"
+                          className={`p-1 rounded transition-colors ${
+                            p.locked || p.isLocked ? 'opacity-50 text-slate-300 cursor-not-allowed' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100 cursor-pointer'
+                          }`}
+                          title={p.locked || p.isLocked ? 'Period is locked' : 'Load into top period editor'}
                         >
                           <Clock className="w-3.5 h-3.5" />
                         </button>
@@ -1430,8 +1504,10 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
                         <button
                           type="button"
                           onClick={() => promptDeletePeriod(p)}
-                          className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded transition-colors cursor-pointer"
-                          title={`Delete ${p.name}`}
+                          className={`p-1 rounded transition-colors ${
+                            p.locked || p.isLocked ? 'opacity-50 text-slate-300 cursor-not-allowed' : 'text-rose-500 hover:text-rose-700 hover:bg-rose-50 cursor-pointer'
+                          }`}
+                          title={p.locked || p.isLocked ? 'Period is locked (Cannot delete)' : `Delete ${p.name}`}
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>

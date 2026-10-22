@@ -764,3 +764,27 @@ export const dutyDailyReports = pgTable('duty_daily_reports', {
 });
 
 
+export const curriculumStandards = pgTable('curriculum_standards', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  subjectName: text('subject_name').notNull(),
+  level: text('level').notNull(), // Form 1, Form 2, etc
+  curriculumType: text('curriculum_type').notNull(), // 'NEW_2023', 'OLD'
+  topic: text('topic').notNull(),
+  subTopic: text('sub_topic'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const pastPapers = pgTable('past_papers', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  subjectName: text('subject_name').notNull(),
+  level: text('level').notNull(),
+  year: integer('year').notNull(),
+  examType: text('exam_type').notNull(), // 'CSEE', 'ACSEE', 'PSLE', 'MIDTERM'
+  paperType: text('paper_type').default('Paper 1'), // Paper 1, Paper 2, etc.
+  fileUrl: text('file_url').notNull(),
+  markingSchemeUrl: text('marking_scheme_url'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+

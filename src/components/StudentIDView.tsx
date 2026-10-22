@@ -840,6 +840,20 @@ export const StudentIDView: React.FC<StudentIDViewProps> = ({
           </button>
 
           <button
+            onClick={() => {
+              setBatchPrintMode(true);
+              setTimeout(() => {
+                window.print();
+              }, 300);
+            }}
+            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer flex items-center gap-1.5 shadow-xs"
+            title="Generate print-friendly PDF file containing ID cards for all students in selected class"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>Batch Export PDF ({filteredStudents.length})</span>
+          </button>
+
+          <button
             onClick={() => setBatchPrintMode(!batchPrintMode)}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition-colors cursor-pointer ${
               batchPrintMode 

@@ -19,7 +19,7 @@ import {
   Eye
 } from 'lucide-react';
 import { Teacher, TeacherEvaluation, SchoolInfo, UserAccount, StreamSetting } from '../types';
-import { DEFAULT_CLASSES, SUBJECT_LIST } from '../constants/defaults';
+import { DEFAULT_CLASSES, SUBJECT_NAMES_LIST } from '../constants/defaults';
 import { TeachingPeriodTrackingView } from './TeachingPeriodTrackingView';
 
 interface TeacherEvaluationViewProps {
@@ -97,7 +97,7 @@ export const TeacherEvaluationView: React.FC<TeacherEvaluationViewProps> = ({
   const [selectedTeacherId, setSelectedTeacherId] = useState<number>(teachers[0]?.id || 0);
   const [selectedClass, setSelectedClass] = useState<string>('Form 1');
   const [selectedStream, setSelectedStream] = useState<string>('STREAM A');
-  const [selectedSubject, setSelectedSubject] = useState<string>(SUBJECT_LIST[0]);
+  const [selectedSubject, setSelectedSubject] = useState<string>(SUBJECT_NAMES_LIST[0]);
   const [topicTaught, setTopicTaught] = useState<string>('');
   const [periodName, setPeriodName] = useState<string>('Period 1 (08:00 - 08:40)');
   const [evalDate, setEvalDate] = useState<string>(new Date().toISOString().split('T')[0]);
@@ -522,7 +522,7 @@ export const TeacherEvaluationView: React.FC<TeacherEvaluationViewProps> = ({
                     onChange={e => setSelectedSubject(e.target.value)}
                     className="w-full bg-white border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-semibold text-slate-800"
                   >
-                    {SUBJECT_LIST.map(s => (
+                    {SUBJECT_NAMES_LIST.map(s => (
                       <option key={s} value={s}>{s}</option>
                     ))}
                   </select>

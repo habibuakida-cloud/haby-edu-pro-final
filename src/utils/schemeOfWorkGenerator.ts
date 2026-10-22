@@ -1428,3 +1428,30 @@ export const generateAutoSchemeOfWork = (
     updatedAt: new Date().toISOString()
   };
 };
+
+// Auto-populate knowledge base for all major Tanzanian primary and secondary subjects
+[
+  'Biology',
+  'Basic Mathematics',
+  'Hisabati',
+  'English Language',
+  'Kiswahili',
+  'Geography',
+  'History',
+  'Civics',
+  'Commerce',
+  'Bookkeeping',
+  'Information and Computer Studies (ICS)',
+  'Agricultural Science',
+  'Science & Technology',
+  'Social Studies',
+  'General Studies',
+  'Economics',
+  'Literature',
+  'Elimu ya Dini ya Kiislamu (EDK)'
+].forEach(subName => {
+  if (!TANZANIA_SCHEMES_KNOWLEDGE_BASE[subName]) {
+    TANZANIA_SCHEMES_KNOWLEDGE_BASE[subName] = getSubjectSchemeTemplate(subName, 'Form 3', 'Term 1', 'NEW_CBC_2023');
+  }
+});
+
