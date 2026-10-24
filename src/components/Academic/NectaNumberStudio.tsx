@@ -1,24 +1,30 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   Sparkles, 
   Printer, 
-  Settings, 
   Check, 
   Palette, 
   Layers, 
   Hash, 
-  UserCheck, 
   Award, 
   Copy, 
-  FileText,
-  Sliders,
-  ShieldCheck
+  Users,
+  Download,
+  Save,
+  RefreshCw,
+  X,
+  CheckCircle2,
+  Database
 } from 'lucide-react';
 import { SchoolInfo, Student } from '../../types';
+import { downloadFile, escapeCSV } from '../../utils/export';
 
 interface NectaNumberStudioProps {
+  schoolId?: string;
   schoolInfo?: SchoolInfo;
   students?: Student[];
+  onUpdateStudents?: (students: Student[]) => void;
+  onSaveSchoolInfo?: (schoolInfo: SchoolInfo) => void;
 }
 
 type BorderStyleOption = 
@@ -40,39 +46,217 @@ type BorderStyleOption =
   | 'shadow-3d';
 type FontFamilyOption = 'font-sans' | 'font-serif' | 'font-mono' | 'font-display' | 'font-georgia' | 'font-impact' | 'font-courier';
 
+const nectaStudioMemoryCache = new Map<string, any>();
+
 export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
+  schoolId = 'DEMO_SCHOOL',
   schoolInfo,
-  students = []
+  students = [],
+  onUpdateStudents,
+  onSaveSchoolInfo
 }) => {
-  // Configuration State
-  const schoolPrefix = schoolInfo?.schoolNumber || schoolInfo?.name?.substring(0, 4)?.toUpperCase() || 'S1551';
+  const storageKey = `haby_necta_studio_${schoolId}`;
+
+  const initialSaved = useMemo(() => {
+    if (nectaStudioMemoryCache.has(schoolId)) {
+      return nectaStudioMemoryCache.get(schoolId);
+    }
+    const fromSchoolInfo = (schoolInfo as any)?.nectaStudioConfig;
+    if (fromSchoolInfo && typeof fromSchoolInfo === 'object') {
+      nectaStudioMemoryCache.set(schoolId, fromSchoolInfo);
+      return fromSchoolInfo;
+    }
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed && typeof parsed === 'object') {
+            nectaStudioMemoryCache.set(schoolId, parsed);
+            return parsed;
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load saved NECTA studio config:', e);
+      }
+    }
+    return null;
+  }, [schoolId, storageKey]);
+
+  const rawSchoolNum = schoolInfo?.schoolNumber || 'S1551';
+  const defaultPrefix = rawSchoolNum.startsWith('S') || rawSchoolNum.startsWith('P')
+    ? rawSchoolNum
+    : `S${rawSchoolNum}`;
   const defaultStart = schoolInfo?.nectaStartNumber || '0001';
-  const defaultEnd = schoolInfo?.nectaEndNumber || '0200';
+  const defaultEnd = schoolInfo?.nectaEndNumber || String(Math.max(students.length, 50)).padStart(4, '0');
 
-  const [prefix, setPrefix] = useState<string>(schoolPrefix.startsWith('S') ? schoolPrefix : `S${schoolPrefix}`);
-  const [startNum, setStartNum] = useState<string>(defaultStart);
-  const [endNum, setEndNum] = useState<string>(defaultEnd);
-  
-  // Generation Mode State
-  const [genMode, setGenMode] = useState<'range' | 'custom' | 'isal'>('range');
-  const [customListText, setCustomListText] = useState<string>('S1551/0001, S1551/0002, S1551/0003');
-  const [isalInputText, setIsalInputText] = useState<string>('');
-  
-  // Styling State - default to the official report card border requested by user
-  const [borderStyle, setBorderStyle] = useState<BorderStyleOption>('report-card-tz');
-  const [borderColor, setBorderColor] = useState<string>('#D4AF37'); // Gold
-  const [fontFamily, setFontFamily] = useState<FontFamilyOption>('font-serif');
-  const [fontSize, setFontSize] = useState<string>('text-4xl');
-  const [isBold, setIsBold] = useState<boolean>(true);
-  const [isItalic, setIsItalic] = useState<boolean>(false);
-  const [textColor, setTextColor] = useState<string>('#1E293B'); // Slate 800
-  const [cardBg, setCardBg] = useState<string>('#FFFDF9'); // Parchment white
-  const [borderWidth, setBorderWidth] = useState<number>(3);
-  const [cardSize, setCardSize] = useState<'normal' | 'large' | 'compact'>('normal');
+  const [prefix, setPrefix] = useState<string>(() => initialSaved?.prefix || defaultPrefix);
+  const [startNum, setStartNum] = useState<string>(() => initialSaved?.startNum || defaultStart);
+  const [endNum, setEndNum] = useState<string>(() => initialSaved?.endNum || defaultEnd);
+  const [includeYearSuffix, setIncludeYearSuffix] = useState<boolean>(() => initialSaved?.includeYearSuffix ?? false);
+  const [regYear, setRegYear] = useState<string>(() => initialSaved?.regYear || String(new Date().getFullYear()));
 
-  // Student assignments (numberIndex -> studentId)
-  const [assignments, setAssignments] = useState<Record<string, string>>({});
+  // Generation Mode State: 'students' | 'range' | 'custom' | 'isal'
+  const [genMode, setGenMode] = useState<'students' | 'range' | 'custom' | 'isal'>(() => initialSaved?.genMode || (students.length > 0 ? 'students' : 'range'));
+  const [selectedClass, setSelectedClass] = useState<string>(() => initialSaved?.selectedClass || 'ALL');
+  const [selectedStream, setSelectedStream] = useState<string>(() => initialSaved?.selectedStream || 'ALL');
+  const [studentSortOrder, setStudentSortOrder] = useState<'girls_first' | 'boys_first' | 'alpha' | 'existing'>(() => initialSaved?.studentSortOrder || 'girls_first');
+
+  const [customListText, setCustomListText] = useState<string>(() => initialSaved?.customListText || 'S1551/0001, S1551/0002, S1551/0003');
+  const [isalInputText, setIsalInputText] = useState<string>(() => initialSaved?.isalInputText || '');
+  
+  // Styling State
+  const [borderStyle, setBorderStyle] = useState<BorderStyleOption>(() => initialSaved?.borderStyle || 'report-card-tz');
+  const [borderColor, setBorderColor] = useState<string>(() => initialSaved?.borderColor || '#D4AF37');
+  const [fontFamily, setFontFamily] = useState<FontFamilyOption>(() => initialSaved?.fontFamily || 'font-serif');
+  const [fontSize, setFontSize] = useState<string>(() => initialSaved?.fontSize || 'text-4xl');
+  const [isBold, setIsBold] = useState<boolean>(() => initialSaved?.isBold ?? true);
+  const [isItalic, setIsItalic] = useState<boolean>(() => initialSaved?.isItalic ?? false);
+  const [textColor, setTextColor] = useState<string>(() => initialSaved?.textColor || '#1E293B');
+  const [cardBg, setCardBg] = useState<string>(() => initialSaved?.cardBg || '#FFFDF9');
+  const [borderWidth, setBorderWidth] = useState<number>(() => initialSaved?.borderWidth || 3);
+  const [cardSize, setCardSize] = useState<'normal' | 'large' | 'compact'>(() => initialSaved?.cardSize || 'normal');
+
+  // Student assignments (numberString -> studentId)
+  const [assignments, setAssignments] = useState<Record<string, string>>(() => {
+    if (initialSaved?.assignments && typeof initialSaved.assignments === 'object' && Object.keys(initialSaved.assignments).length > 0) {
+      return initialSaved.assignments;
+    }
+    const autoMap: Record<string, string> = {};
+    students.forEach(s => {
+      if (s.regNo) {
+        autoMap[s.regNo] = String(s.id);
+      }
+    });
+    return autoMap;
+  });
+
   const [copiedText, setCopiedText] = useState<string | null>(null);
+  const [isSavingToDb, setIsSavingToDb] = useState<boolean>(false);
+
+  // Available classes and streams from students
+  const availableClasses = useMemo(() => {
+    const set = new Set<string>(['Form 1', 'Form 2', 'Form 3', 'Form 4', 'Form 5', 'Form 6', 'Standard 4', 'Standard 7']);
+    students.forEach(s => {
+      if (s.className && s.className.trim()) set.add(s.className.trim());
+    });
+    return Array.from(set);
+  }, [students]);
+
+  const availableStreams = useMemo(() => {
+    const set = new Set<string>(['A', 'B', 'C']);
+    students.forEach(s => {
+      const st = (s.stream || s.combination || '').trim().replace(/^STREAM\s+/i, '');
+      if (st) set.add(st.toUpperCase());
+    });
+    return Array.from(set).sort();
+  }, [students]);
+
+  // Filtered & sorted students for 'students' mode
+  const filteredSortedStudents = useMemo(() => {
+    const list = students.filter(s => {
+      if (selectedClass !== 'ALL' && s.className !== selectedClass) return false;
+      if (selectedStream !== 'ALL') {
+        const st = (s.stream || s.combination || '').trim().replace(/^STREAM\s+/i, '').toUpperCase();
+        if (st !== selectedStream.toUpperCase()) return false;
+      }
+      return true;
+    });
+
+    return [...list].sort((a, b) => {
+      const aName = (a.name || a.fullName || '').trim();
+      const bName = (b.name || b.fullName || '').trim();
+      const aIsGirl = (a.gender || '').toLowerCase().startsWith('f') || a.sex === 'F';
+      const bIsGirl = (b.gender || '').toLowerCase().startsWith('f') || b.sex === 'F';
+
+      if (studentSortOrder === 'girls_first') {
+        if (aIsGirl && !bIsGirl) return -1;
+        if (!aIsGirl && bIsGirl) return 1;
+        return aName.localeCompare(bName);
+      }
+      if (studentSortOrder === 'boys_first') {
+        if (!aIsGirl && bIsGirl) return -1;
+        if (aIsGirl && !bIsGirl) return 1;
+        return aName.localeCompare(bName);
+      }
+      if (studentSortOrder === 'alpha') {
+        return aName.localeCompare(bName);
+      }
+      return (a.regNo || '').localeCompare(b.regNo || '', undefined, { numeric: true });
+    });
+  }, [students, selectedClass, selectedStream, studentSortOrder]);
+
+  // Format a single candidate number given index
+  const formatCandidateNumber = (seqIndex: number, padLen: number = 4) => {
+    const cleanPrefix = (prefix || 'S1551').trim().replace(/\/+$/, '');
+    const padded = String(Math.max(1, seqIndex)).padStart(padLen, '0');
+    if (includeYearSuffix && regYear.trim()) {
+      return `${cleanPrefix}/${padded}/${regYear.trim()}`;
+    }
+    return `${cleanPrefix}/${padded}`;
+  };
+
+  // Auto-persist studio configuration to memory & localStorage whenever settings change
+  useEffect(() => {
+    const snapshot = {
+      prefix,
+      startNum,
+      endNum,
+      includeYearSuffix,
+      regYear,
+      genMode,
+      selectedClass,
+      selectedStream,
+      studentSortOrder,
+      customListText,
+      isalInputText,
+      borderStyle,
+      borderColor,
+      fontFamily,
+      fontSize,
+      isBold,
+      isItalic,
+      textColor,
+      cardBg,
+      borderWidth,
+      cardSize,
+      assignments,
+      updatedAt: new Date().toISOString()
+    };
+    nectaStudioMemoryCache.set(schoolId, snapshot);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(storageKey, JSON.stringify(snapshot));
+      } catch (e) {
+        console.warn('Could not save NECTA studio config to localStorage:', e);
+      }
+    }
+  }, [
+    schoolId,
+    storageKey,
+    prefix,
+    startNum,
+    endNum,
+    includeYearSuffix,
+    regYear,
+    genMode,
+    selectedClass,
+    selectedStream,
+    studentSortOrder,
+    customListText,
+    isalInputText,
+    borderStyle,
+    borderColor,
+    fontFamily,
+    fontSize,
+    isBold,
+    isItalic,
+    textColor,
+    cardBg,
+    borderWidth,
+    cardSize,
+    assignments
+  ]);
 
   const handleIsalFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -102,20 +286,201 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
       const regex = /[A-Z0-9.\/_-]+/g;
       const rawTokens = isalInputText.match(regex) || [];
       const filtered = rawTokens.filter(t => t.includes('/') && t.length >= 6);
-      return filtered.length > 0 ? Array.from(new Set(filtered)) : [`${prefix}/0001`];
+      return filtered.length > 0 ? Array.from(new Set(filtered)) : [formatCandidateNumber(1, 4)];
+    }
+    if (genMode === 'students') {
+      const start = Math.max(1, parseInt(startNum, 10) || 1);
+      const padLength = Math.max(startNum.length, 4);
+      if (filteredSortedStudents.length === 0) {
+        return [formatCandidateNumber(start, padLength)];
+      }
+      return filteredSortedStudents.map((_, idx) => formatCandidateNumber(start + idx, padLength));
     }
 
-    const start = parseInt(startNum, 10) || 1;
-    const end = parseInt(endNum, 10) || 200;
+    const start = Math.max(1, parseInt(startNum, 10) || 1);
+    const rawEnd = Math.max(start, parseInt(endNum, 10) || 200);
+    // Cap range at 1000 cards at once to prevent UI freeze
+    const safeEnd = Math.min(rawEnd, start + 999);
     const list: string[] = [];
     const padLength = Math.max(startNum.length, endNum.length, 4);
 
-    for (let i = start; i <= end; i++) {
-      const padded = String(i).padStart(padLength, '0');
-      list.push(`${prefix}/${padded}`);
+    for (let i = start; i <= safeEnd; i++) {
+      list.push(formatCandidateNumber(i, padLength));
     }
     return list;
-  }, [genMode, customListText, isalInputText, prefix, startNum, endNum]);
+  }, [genMode, customListText, isalInputText, prefix, startNum, endNum, includeYearSuffix, regYear, filteredSortedStudents]);
+
+  // Auto-generate and assign numbers to filtered students + save to database
+  const handleGenerateAndAssignToStudents = () => {
+    const start = Math.max(1, parseInt(startNum, 10) || 1);
+    const padLength = Math.max(startNum.length, 4);
+
+    const targetStudents = genMode === 'students' ? filteredSortedStudents : students;
+    if (targetStudents.length === 0) {
+      setCopiedText('Hakuna wanafunzi waliopatikana kwenye darasa lililochaguliwa!');
+      setTimeout(() => setCopiedText(null), 4000);
+      return;
+    }
+
+    setIsSavingToDb(true);
+    const newAssignments: Record<string, string> = { ...assignments };
+    const updatedStudentMap = new Map<string, string>();
+
+    targetStudents.forEach((student, idx) => {
+      const generatedNo = genMode === 'students'
+        ? formatCandidateNumber(start + idx, padLength)
+        : (generatedNumbers[idx] || formatCandidateNumber(start + idx, padLength));
+      newAssignments[generatedNo] = String(student.id);
+      updatedStudentMap.set(String(student.id), generatedNo);
+    });
+
+    setAssignments(newAssignments);
+
+    const lastIndex = start + targetStudents.length - 1;
+    const formattedEnd = String(lastIndex).padStart(padLength, '0');
+    setEndNum(formattedEnd);
+
+    if (onUpdateStudents) {
+      const updatedAllStudents = students.map(s => {
+        const assignedNo = updatedStudentMap.get(String(s.id));
+        if (assignedNo) {
+          return {
+            ...s,
+            regNo: assignedNo
+          };
+        }
+        return s;
+      });
+      onUpdateStudents(updatedAllStudents);
+    }
+
+    if (onSaveSchoolInfo && schoolInfo) {
+      onSaveSchoolInfo({
+        ...schoolInfo,
+        schoolNumber: prefix,
+        nectaStartNumber: startNum,
+        nectaEndNumber: formattedEnd,
+        ...({
+          nectaStudioConfig: {
+            prefix,
+            startNum,
+            endNum: formattedEnd,
+            includeYearSuffix,
+            regYear,
+            genMode,
+            selectedClass,
+            selectedStream,
+            studentSortOrder,
+            borderStyle,
+            borderColor,
+            fontFamily,
+            fontSize,
+            isBold,
+            isItalic,
+            textColor,
+            cardBg,
+            borderWidth,
+            cardSize,
+            assignments: newAssignments
+          }
+        } as any)
+      });
+    }
+
+    setTimeout(() => {
+      setIsSavingToDb(false);
+      setCopiedText(
+        `Namba ${targetStudents.length} za usajili (${formatCandidateNumber(start, padLength)} hadi ${formatCandidateNumber(lastIndex, padLength)}) zimezalishwa na kuhifadhiwa kwenye Database kwa wanafunzi!`
+      );
+      setTimeout(() => setCopiedText(null), 5000);
+    }, 300);
+  };
+
+  // Save current studio settings & manual card assignments to database
+  const handleSaveStudioToDatabase = () => {
+    setIsSavingToDb(true);
+
+    // Sync any manual card assignments to student.regNo if onUpdateStudents is available
+    if (onUpdateStudents && Object.keys(assignments).length > 0) {
+      const studentToRegMap = new Map<string, string>();
+      Object.entries(assignments).forEach(([numStr, stId]) => {
+        if (stId) {
+          studentToRegMap.set(String(stId), numStr);
+        }
+      });
+
+      if (studentToRegMap.size > 0) {
+        const updatedStudents = students.map(s => {
+          const newReg = studentToRegMap.get(String(s.id));
+          return newReg ? { ...s, regNo: newReg } : s;
+        });
+        onUpdateStudents(updatedStudents);
+      }
+    }
+
+    if (onSaveSchoolInfo && schoolInfo) {
+      onSaveSchoolInfo({
+        ...schoolInfo,
+        schoolNumber: prefix,
+        nectaStartNumber: startNum,
+        nectaEndNumber: endNum,
+        ...({
+          nectaStudioConfig: {
+            prefix,
+            startNum,
+            endNum,
+            includeYearSuffix,
+            regYear,
+            genMode,
+            selectedClass,
+            selectedStream,
+            studentSortOrder,
+            customListText,
+            isalInputText,
+            borderStyle,
+            borderColor,
+            fontFamily,
+            fontSize,
+            isBold,
+            isItalic,
+            textColor,
+            cardBg,
+            borderWidth,
+            cardSize,
+            assignments
+          }
+        } as any)
+      });
+    }
+
+    setTimeout(() => {
+      setIsSavingToDb(false);
+      setCopiedText('Mpangilio wa Namba za NECTA na Kadi umehifadhiwa kikamilifu kwenye Database!');
+      setTimeout(() => setCopiedText(null), 4000);
+    }, 250);
+  };
+
+  const handleExportCSV = () => {
+    const headers = ['S/N', 'NECTA Index / Reg No', 'Student Full Name', 'Gender', 'Class', 'Stream'];
+    const rows = generatedNumbers.map((numStr, idx) => {
+      const assignedId = assignments[numStr];
+      const studentObj =
+        students.find(s => String(s.id) === String(assignedId)) ||
+        (genMode === 'students' ? filteredSortedStudents[idx] : students.find(s => s.regNo === numStr));
+      return [
+        String(idx + 1),
+        numStr,
+        studentObj ? (studentObj.name || studentObj.fullName || '') : '',
+        studentObj ? (studentObj.gender || '') : '',
+        studentObj ? (studentObj.className || '') : '',
+        studentObj ? (studentObj.stream || studentObj.combination || '') : ''
+      ];
+    });
+    const csvContent = [headers.map(escapeCSV).join(','), ...rows.map(r => r.map(escapeCSV).join(','))].join('\n');
+    downloadFile(`NECTA_Registration_Numbers_${prefix.replace(/[^a-zA-Z0-9]/g, '_')}.csv`, csvContent, 'text/csv;charset=utf-8');
+    setCopiedText('Faili la CSV la Namba za NECTA limepakuliwa kikamilifu!');
+    setTimeout(() => setCopiedText(null), 4000);
+  };
 
   const borderOptions: { id: BorderStyleOption; label: string; desc: string }[] = [
     { id: 'report-card-tz', label: '🎓 Boda ya Ripoti za Wanafunzi (Official Flag Gradient)', desc: 'Boda halisi ya taifa inayotumika kwenye ripoti za matokeo za wanafunzi' },
@@ -172,7 +537,6 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
     { name: 'Lavender Blush', hex: '#FAF5FF' }
   ];
 
-  // Helper to render card border & background CSS based on borderStyle and borderColor
   const getCardStyle = (style: BorderStyleOption, color: string, width: number, bg: string): React.CSSProperties => {
     switch (style) {
       case 'report-card-tz':
@@ -275,7 +639,7 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
   const handleCopyAll = () => {
     const text = generatedNumbers.join('\n');
     navigator.clipboard.writeText(text);
-    setCopiedText('Namba zote zimenakiliwa!');
+    setCopiedText(`Namba zote (${generatedNumbers.length}) zimenakiliwa!`);
     setTimeout(() => setCopiedText(null), 3000);
   };
 
@@ -312,105 +676,228 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
           }
         }
       `}</style>
+
       {/* Header Banner */}
       <div className="bg-gradient-to-r from-amber-900 via-amber-800 to-amber-950 text-white rounded-3xl p-6 md:p-8 shadow-xl print:hidden">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
             <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase tracking-widest mb-1">
-              <Sparkles className="w-4 h-4" /> NECTA Exam Center Registration & Index Studio
+              <Sparkles className="w-4 h-4" /> NECTA Exam Center Registration &amp; Index Studio
             </div>
             <h1 className="text-2xl md:text-3xl font-black font-serif text-amber-100">
               Jenereta ya Namba za Usajili na Mpangilio wa Boda
             </h1>
             <p className="text-amber-200 text-sm mt-1 max-w-2xl">
-              Tengeneza namba za usajili za NECTA (Mfano: {prefix}/0001 hadi {prefix}/0200) zikiwa na mitindo maridadi ya boda, rangi za kuvutia, na fonti maalum kwa ajili ya kadi za wanafunzi na kumbukumbu za shule.
+              Zalisha namba za mtihani/usajili za NECTA (Mfano: {formatCandidateNumber(1, 4)} hadi {formatCandidateNumber(generatedNumbers.length || 200, 4)}), kabidhi wanafunzi wa darasa husika kiotomatiki (Wasichana Kwanza A–Z kisha Wavulana A–Z), na hifadhi moja kwa moja kwenye Database.
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <button
-              onClick={handleCopyAll}
-              className="px-4 py-2.5 bg-amber-700/80 hover:bg-amber-600 text-white rounded-xl font-bold text-sm flex items-center gap-2 transition shadow-md cursor-pointer"
+              type="button"
+              onClick={handleSaveStudioToDatabase}
+              disabled={isSavingToDb}
+              className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-black text-xs sm:text-sm flex items-center gap-2 transition shadow-md cursor-pointer"
             >
-              <Copy className="w-4 h-4" /> Nakili Namba Zote
+              <Database className="w-4 h-4" />
+              <span>{isSavingToDb ? 'Inahifadhi...' : 'Hifadhi Database'}</span>
             </button>
             <button
-              onClick={handlePrint}
-              className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-amber-950 rounded-xl font-black text-sm flex items-center gap-2 transition shadow-lg cursor-pointer"
+              type="button"
+              onClick={handleExportCSV}
+              className="px-4 py-2.5 bg-amber-700/80 hover:bg-amber-600 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition shadow-md cursor-pointer"
             >
-              <Printer className="w-4 h-4" /> Chapisha Kadi / Orodha
+              <Download className="w-4 h-4" /> Export CSV
+            </button>
+            <button
+              type="button"
+              onClick={handleCopyAll}
+              className="px-4 py-2.5 bg-amber-700/80 hover:bg-amber-600 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition shadow-md cursor-pointer"
+            >
+              <Copy className="w-4 h-4" /> Nakili Namba
+            </button>
+            <button
+              type="button"
+              onClick={handlePrint}
+              className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-amber-950 rounded-xl font-black text-xs sm:text-sm flex items-center gap-2 transition shadow-lg cursor-pointer"
+            >
+              <Printer className="w-4 h-4" /> Chapisha Kadi (A4)
             </button>
           </div>
         </div>
       </div>
 
       {copiedText && (
-        <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 px-4 py-3 rounded-2xl flex items-center gap-2 font-medium shadow-sm animate-fade-in print:hidden">
-          <Check className="w-5 h-5 text-emerald-600" /> {copiedText}
+        <div className="bg-emerald-50 border border-emerald-300 text-emerald-900 px-4 py-3 rounded-2xl flex items-center justify-between gap-2 font-bold text-xs sm:text-sm shadow-sm animate-fade-in print:hidden">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            <span>{copiedText}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setCopiedText(null)}
+            className="text-emerald-700 hover:text-emerald-950 p-1 cursor-pointer"
+          >
+            <X className="w-4 h-4" />
+          </button>
         </div>
       )}
 
       {/* Configuration & Styling Control Panel */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 print:hidden">
-        {/* Box 1: Range, Custom Feed & ISAL Parser */}
+        {/* Box 1: Range, Class Auto-Generator, Custom Feed & ISAL Parser */}
         <div className="bg-white rounded-3xl p-6 border border-slate-200/80 shadow-sm space-y-4">
           <div className="flex items-center gap-2 text-amber-900 font-bold text-base border-b border-slate-100 pb-3">
             <Hash className="w-5 h-5 text-amber-700" /> 1. Chanzo cha Namba (Generation Source)
           </div>
 
-          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 bg-slate-100 p-1.5 rounded-xl">
+            <button
+              type="button"
+              onClick={() => setGenMode('students')}
+              className={`py-1.5 px-2 text-[11px] font-bold rounded-lg transition cursor-pointer ${genMode === 'students' ? 'bg-amber-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+            >
+              Wanafunzi ({students.length})
+            </button>
             <button
               type="button"
               onClick={() => setGenMode('range')}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${genMode === 'range' ? 'bg-amber-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              className={`py-1.5 px-2 text-[11px] font-bold rounded-lg transition cursor-pointer ${genMode === 'range' ? 'bg-amber-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
               Range
             </button>
             <button
               type="button"
               onClick={() => setGenMode('custom')}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${genMode === 'custom' ? 'bg-amber-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              className={`py-1.5 px-2 text-[11px] font-bold rounded-lg transition cursor-pointer ${genMode === 'custom' ? 'bg-amber-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
-              Custom Feed
+              Custom
             </button>
             <button
               type="button"
               onClick={() => setGenMode('isal')}
-              className={`flex-1 py-1.5 text-xs font-bold rounded-lg transition cursor-pointer ${genMode === 'isal' ? 'bg-amber-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+              className={`py-1.5 px-2 text-[11px] font-bold rounded-lg transition cursor-pointer ${genMode === 'isal' ? 'bg-amber-900 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
             >
-              Upload ISAL
+              ISAL File
             </button>
           </div>
           
-          <div>
-            <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-              Namba ya Kituo / Shule (Prefix)
-            </label>
-            <input
-              type="text"
-              value={prefix}
-              onChange={e => setPrefix(e.target.value)}
-              placeholder="Mf: S1551"
-              className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                Namba ya Kituo (Prefix)
+              </label>
+              <input
+                type="text"
+                value={prefix}
+                onChange={e => setPrefix(e.target.value)}
+                placeholder="Mf: S1551 au S.0123"
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1">
+                Kuanzia Namba (Start)
+              </label>
+              <input
+                type="text"
+                value={startNum}
+                onChange={e => setStartNum(e.target.value)}
+                placeholder="0001"
+                className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
+              />
+            </div>
           </div>
 
-          {genMode === 'range' && (
-            <div className="grid grid-cols-2 gap-3 animate-fade-in">
-              <div>
-                <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Kuanzia Namba
-                </label>
-                <input
-                  type="text"
-                  value={startNum}
-                  onChange={e => setStartNum(e.target.value)}
-                  placeholder="0001"
-                  className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
-                />
+          {/* Optional Year Suffix Toggle */}
+          <div className="flex items-center justify-between gap-2 bg-slate-50 px-3 py-2 rounded-xl border border-slate-200/80">
+            <label className="flex items-center gap-2 text-xs font-bold text-slate-700 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={includeYearSuffix}
+                onChange={e => setIncludeYearSuffix(e.target.checked)}
+                className="w-4 h-4 rounded text-amber-900 focus:ring-amber-500"
+              />
+              <span>Ongeza Mwaka Mwishoni (Mf: /{regYear})</span>
+            </label>
+            {includeYearSuffix && (
+              <input
+                type="text"
+                value={regYear}
+                onChange={e => setRegYear(e.target.value)}
+                className="w-20 px-2 py-1 text-xs font-mono font-bold bg-white border border-slate-300 rounded-lg text-center"
+                placeholder="2026"
+              />
+            )}
+          </div>
+
+          {genMode === 'students' && (
+            <div className="space-y-3 animate-fade-in bg-amber-50/50 p-3.5 rounded-2xl border border-amber-200/70">
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
+                    Chagua Darasa (Class)
+                  </label>
+                  <select
+                    value={selectedClass}
+                    onChange={e => setSelectedClass(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                  >
+                    <option value="ALL">Wanafunzi Wote ({students.length})</option>
+                    {availableClasses.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
+                    Mkondo (Stream)
+                  </label>
+                  <select
+                    value={selectedStream}
+                    onChange={e => setSelectedStream(e.target.value)}
+                    className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                  >
+                    <option value="ALL">Mikondo Yote</option>
+                    {availableStreams.map(st => (
+                      <option key={st} value={st}>Stream {st}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
+
+              <div>
+                <label className="block text-[11px] font-bold uppercase text-slate-600 mb-1">
+                  Mpangilio wa Majina (NECTA Sequencing Order)
+                </label>
+                <select
+                  value={studentSortOrder}
+                  onChange={e => setStudentSortOrder(e.target.value as any)}
+                  className="w-full px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-800"
+                >
+                  <option value="girls_first">Wasichana Kwanza A–Z, kisha Wavulana A–Z (NECTA Standard)</option>
+                  <option value="boys_first">Wavulana Kwanza A–Z, kisha Wasichana A–Z</option>
+                  <option value="alpha">Alfabeti A–Z (Changanya Jinsia)</option>
+                  <option value="existing">Mpangilio wa Sasa wa Usajili</option>
+                </select>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleGenerateAndAssignToStudents}
+                disabled={isSavingToDb}
+                className="w-full py-2.5 px-4 bg-gradient-to-r from-amber-800 to-amber-950 hover:from-amber-700 hover:to-amber-900 text-white rounded-xl font-black text-xs flex items-center justify-center gap-2 shadow-md transition cursor-pointer"
+              >
+                <RefreshCw className={`w-4 h-4 ${isSavingToDb ? 'animate-spin' : ''}`} />
+                <span>Zalisha &amp; Hifadhi Namba kwa Wanafunzi ({filteredSortedStudents.length})</span>
+              </button>
+            </div>
+          )}
+
+          {genMode === 'range' && (
+            <div className="space-y-3 animate-fade-in">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
-                  Mpaka Namba
+                  Mpaka Namba (End Number)
                 </label>
                 <input
                   type="text"
@@ -420,6 +907,16 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
                   className="w-full px-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-amber-500"
                 />
               </div>
+              {students.length > 0 && (
+                <button
+                  type="button"
+                  onClick={handleGenerateAndAssignToStudents}
+                  className="w-full py-2 px-3 bg-amber-100 hover:bg-amber-200 text-amber-950 rounded-xl font-bold text-xs flex items-center justify-center gap-1.5 transition cursor-pointer"
+                >
+                  <Users className="w-3.5 h-3.5" />
+                  <span>Gawa Namba Hizi kwa Wanafunzi &amp; Hifadhi Database</span>
+                </button>
+              )}
             </div>
           )}
 
@@ -466,8 +963,11 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
             </div>
           )}
 
-          <div className="pt-2 text-xs text-slate-500 bg-amber-50/60 p-3 rounded-xl border border-amber-200/50">
-            Jumla ya namba zilizozalishwa: <span className="font-bold text-amber-900">{generatedNumbers.length}</span> {generatedNumbers.length > 0 ? `(Mfano: ${generatedNumbers[0]})` : ''}
+          <div className="pt-2 text-xs text-slate-600 bg-amber-50/60 p-3 rounded-xl border border-amber-200/50 flex items-center justify-between">
+            <span>
+              Jumla ya namba: <strong className="font-black text-amber-900">{generatedNumbers.length}</strong>{' '}
+              {generatedNumbers.length > 0 ? `(${generatedNumbers[0]} → ${generatedNumbers[generatedNumbers.length - 1]})` : ''}
+            </span>
           </div>
         </div>
 
@@ -644,24 +1144,39 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
               Orodha na Kadi Zilizopambwa ({generatedNumbers.length} Namba)
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Kila namba imeundwa kwa mtindo wa kipekee wa boda na fonti uliochagua hapo juu. Tayari kwa matumizi na kuchapishwa.
+              Kila namba imeundwa kwa mtindo wa kipekee wa boda na fonti uliochagua. Mabadiliko yote yanahifadhiwa moja kwa moja.
             </p>
           </div>
-          <div className="text-xs font-bold text-amber-900 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200 print:hidden">
-            Shule: {schoolInfo?.name || 'Tanzania Secondary School'}
+          <div className="flex flex-wrap items-center gap-2 print:hidden">
+            {Object.keys(assignments).length > 0 && onUpdateStudents && (
+              <button
+                type="button"
+                onClick={handleSaveStudioToDatabase}
+                className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition"
+              >
+                <Save className="w-3.5 h-3.5" />
+                <span>Sawazisha Namba Kwenye Daftari la Wanafunzi</span>
+              </button>
+            )}
+            <div className="text-xs font-bold text-amber-900 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-200">
+              Shule: {schoolInfo?.name || 'Tanzania Secondary School'}
+            </div>
           </div>
         </div>
 
-        {/* Cards Grid - Exactly 2 columns with cutting guide dotted lines and large numbers */}
+        {/* Cards Grid - 2 columns with cutting guide dotted lines and large numbers */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 print:grid-cols-2 print:gap-6">
           {generatedNumbers.map((numStr, idx) => {
             const fontClass = fontOptions.find(f => f.id === fontFamily)?.styleClass || 'font-serif';
-            const assignedStudentId = assignments[numStr];
-            const studentObj = students.find(s => String(s.id) === String(assignedStudentId));
+            const explicitStudentId = assignments[numStr];
+            const autoStudent = genMode === 'students' ? filteredSortedStudents[idx] : students.find(s => s.regNo === numStr);
+            const studentObj = explicitStudentId
+              ? students.find(s => String(s.id) === String(explicitStudentId))
+              : autoStudent;
 
             return (
               <div
-                key={numStr}
+                key={`${numStr}-${idx}`}
                 className="p-3 bg-slate-100/70 border-2 border-dashed border-slate-400 rounded-3xl print:border-black print:bg-white"
                 title="Kipande cha kukata (Cutting line)"
               >
@@ -681,7 +1196,7 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
                     #{idx + 1}
                   </span>
 
-                  {/* The Registration Number - Using custom fontSize, bold, italic */}
+                  {/* The Registration Number */}
                   <div 
                     className={`${fontClass} ${isBold ? 'font-black' : 'font-normal'} ${isItalic ? 'italic' : ''} ${fontSize} text-center select-all tracking-wider my-3`}
                     style={{ color: textColor }}
@@ -692,22 +1207,43 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
                   {/* Assigned Student info or selector */}
                   <div className="mt-3 w-full pt-3 border-t border-slate-200/60 text-center">
                     {studentObj ? (
-                      <div className="text-xs font-bold text-slate-800 truncate" title={studentObj.name || studentObj.fullName}>
-                        Mwanafunzi: {studentObj.name || studentObj.fullName}
+                      <div className="flex items-center justify-between gap-2 px-2">
+                        <div className="text-xs font-bold text-slate-800 truncate flex-1 text-center" title={studentObj.name || studentObj.fullName}>
+                          {studentObj.name || studentObj.fullName}{' '}
+                          <span className="text-[10px] font-semibold text-slate-500">
+                            ({studentObj.className || 'Form'}{studentObj.gender ? ` • ${studentObj.gender.charAt(0)}` : ''})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setAssignments(prev => {
+                              const next = { ...prev };
+                              next[numStr] = '';
+                              return next;
+                            });
+                          }}
+                          className="p-1 text-slate-400 hover:text-rose-600 rounded print:hidden cursor-pointer"
+                          title="Badilisha au ondoa mwanafunzi huyu"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
                       </div>
                     ) : (
                       <select
-                        value={assignedStudentId || ''}
+                        value={explicitStudentId || ''}
                         onChange={e => {
                           const val = e.target.value;
                           setAssignments(prev => ({ ...prev, [numStr]: val }));
                         }}
-                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-slate-600 focus:outline-none print:hidden font-medium"
+                        className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-slate-600 focus:outline-none print:hidden font-medium"
                         title="Mkabidhi mwanafunzi"
                       >
                         <option value="">+ Mkabidhi Mwanafunzi...</option>
                         {students.map(s => (
-                          <option key={s.id} value={s.id}>{s.name || s.fullName} ({s.className || 'Form'})</option>
+                          <option key={s.id} value={s.id}>
+                            {s.name || s.fullName} ({s.className || 'Form'} • {s.regNo || 'No Reg'})
+                          </option>
                         ))}
                       </select>
                     )}
@@ -721,3 +1257,4 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
     </div>
   );
 };
+

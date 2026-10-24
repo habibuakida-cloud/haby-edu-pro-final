@@ -252,10 +252,11 @@ export const SmartAttendanceModule: React.FC<SmartAttendanceModuleProps> = ({
       if (!s) return false;
       const sClass = (s.className || '').toLowerCase();
       const matchClass = selClassLower === 'all' || sClass === selClassLower;
-      const matchStream = selectedStream === 'all' ||
+      const selStreamUpper = (selectedStream || 'all').toUpperCase();
+      const matchStream = selStreamUpper === 'ALL' ||
         (s.stream ? (
-          s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === selectedStream.toUpperCase() ||
-          s.stream.toUpperCase().includes(selectedStream.toUpperCase())
+          (s.stream || '').toUpperCase().replace(/^STREAM\s+/i, '') === selStreamUpper.replace(/^STREAM\s+/i, '') ||
+          (s.stream || '').toUpperCase().includes(selStreamUpper)
         ) : true);
       return matchClass && matchStream;
     });
@@ -435,10 +436,11 @@ export const SmartAttendanceModule: React.FC<SmartAttendanceModuleProps> = ({
       if (!s) return false;
       const sClass = (s.className || '').toLowerCase();
       const matchClass = selClassLower === 'all' || sClass === selClassLower;
-      const matchStream = selectedStream === 'all' ||
+      const selStreamUpper = (selectedStream || 'all').toUpperCase();
+      const matchStream = selStreamUpper === 'ALL' ||
         (s.stream ? (
-          s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === selectedStream.toUpperCase() ||
-          s.stream.toUpperCase().includes(selectedStream.toUpperCase())
+          (s.stream || '').toUpperCase().replace(/^STREAM\s+/i, '') === selStreamUpper.replace(/^STREAM\s+/i, '') ||
+          (s.stream || '').toUpperCase().includes(selStreamUpper)
         ) : true);
       const matchSearch = !qLower ||
         (s.name || '').toLowerCase().includes(qLower) ||

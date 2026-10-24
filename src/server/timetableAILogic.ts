@@ -88,7 +88,15 @@ export interface GenerateTimetableResponse {
 const DEFAULT_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
 export function generateHeuristicTimetable(req: GenerateTimetableRequest): GenerateTimetableResponse {
-  const targetDays = req.targetDays && req.targetDays.length > 0 ? req.targetDays : DEFAULT_DAYS;
+  const configuredDaysSet = new Set(
+    (req.periodSettings || [])
+      .map(p => (p.day || '').trim().toLowerCase())
+      .filter(d => d.length > 0 && d !== 'all')
+  );
+  const rawTargetDays = req.targetDays && req.targetDays.length > 0 ? req.targetDays : DEFAULT_DAYS;
+  const targetDays = configuredDaysSet.size > 0
+    ? rawTargetDays.filter(d => configuredDaysSet.has(d.trim().toLowerCase()))
+    : rawTargetDays;
   const targetClass = req.targetClass || 'ALL';
   const targetStream = req.targetStream || 'ALL';
   const overwriteAcademic = req.options?.overwriteAcademic ?? false;
@@ -195,10 +203,10 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
 
   const periodsByDay: Record<string, typeof req.periodSettings> = {};
   targetDays.forEach(d => {
-    const list = req.periodSettings.filter(p => p.day === d);
+    const list = req.periodSettings.filter(p => (p.day || '').trim().toLowerCase() === d.trim().toLowerCase());
     if (list.length > 0) {
       periodsByDay[d] = list;
-    } else {
+    } else if (!req.periodSettings || req.periodSettings.length === 0) {
       periodsByDay[d] = [
         { id: 1, day: d, name: 'Period 1', start: '08:00', end: '08:40' },
         { id: 2, day: d, name: 'Period 2', start: '08:40', end: '09:20' },
@@ -208,6 +216,9 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
         { id: 6, day: d, name: 'Period 6', start: '12:00', end: '12:40' },
         { id: 7, day: d, name: 'Period 7', start: '14:00', end: '14:40' }
       ];
+    } else {
+      // Explicitly exclude unconfigured days when periodSettings has entries
+      periodsByDay[d] = [];
     }
   });
 
@@ -271,7 +282,10 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
           }
         }
 
-        const lowerName = p.name.toLowerCase();
+        const lowerName = (p.name || '').toLowerCase();
+        if (Boolean((p as any).isLocked || (p as any).locked || (p as any).isBreak)) {
+          return;
+        }
         if (lowerName.includes('break') || lowerName.includes('chai') || lowerName.includes('recess')) {
           generatedAssignments.push({
             id: ++nextId,
@@ -486,7 +500,15 @@ export async function generateAITimetable(req: GenerateTimetableRequest): Promis
       }
     });
 
-    const targetDays = req.targetDays && req.targetDays.length > 0 ? req.targetDays : DEFAULT_DAYS;
+    const configuredDaysSet = new Set(
+      (req.periodSettings || [])
+        .map(p => (p.day || '').trim().toLowerCase())
+        .filter(d => d.length > 0 && d !== 'all')
+    );
+    const rawTargetDays = req.targetDays && req.targetDays.length > 0 ? req.targetDays : DEFAULT_DAYS;
+    const targetDays = configuredDaysSet.size > 0
+      ? rawTargetDays.filter(d => configuredDaysSet.has(d.trim().toLowerCase()))
+      : rawTargetDays;
     const targetClass = req.targetClass || 'ALL';
     const targetStream = req.targetStream || 'ALL';
 
@@ -607,6 +629,9 @@ Respond strictly with a JSON object adhering to this schema:
 
     parsed.assignments.forEach((raw: any) => {
       const day = raw.day || 'Monday';
+      if (configuredDaysSet.size > 0 && !configuredDaysSet.has(day.trim().toLowerCase())) {
+        return;
+      }
       const period = raw.period || `${raw.periodName || 'Period 1'} (08:00-08:40)`;
       const key = `${day}_${period}`;
 

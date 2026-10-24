@@ -33,7 +33,8 @@ import {
   TimetableAssignment, 
   Teacher, 
   PeriodSetting, 
-  StreamSetting 
+  StreamSetting,
+  SubjectPeriodAllocation
 } from '../../types';
 import { 
   generateTimetableIntegrityReport, 
@@ -53,6 +54,7 @@ interface TimetableIntegrityReportModalProps {
   teachers: Teacher[];
   periodSettings: PeriodSetting[];
   streamSettings: StreamSetting[];
+  subjectPeriodAllocations?: SubjectPeriodAllocation[];
   schoolName: string;
   onUpdateAssignments: (assignments: TimetableAssignment[]) => void;
   onEditSlot?: (slot: { className: string; stream: string; day: string; period: string; assignment?: TimetableAssignment }) => void;
@@ -66,6 +68,7 @@ export const TimetableIntegrityReportModal: React.FC<TimetableIntegrityReportMod
   teachers,
   periodSettings,
   streamSettings,
+  subjectPeriodAllocations = [],
   schoolName,
   onUpdateAssignments,
   onEditSlot,
@@ -94,9 +97,10 @@ export const TimetableIntegrityReportModal: React.FC<TimetableIntegrityReportMod
       teachers,
       periodSettings,
       streamSettings,
-      policies
+      policies,
+      subjectPeriodAllocations
     );
-  }, [assignments, teachers, periodSettings, streamSettings, policies]);
+  }, [assignments, teachers, periodSettings, streamSettings, policies, subjectPeriodAllocations]);
 
   // Filtered conflicts
   const filteredConflicts = useMemo(() => {

@@ -13,6 +13,9 @@ import {
   InvigilationSession
 } from '../types';
 import { DAYS_OF_WEEK } from '../constants/defaults';
+import { isSameClass } from './reportCardUtils';
+import { romanize } from './classStreamUtils';
+import { isSameStream, isSamePeriod, normalizeStreamName, getConfiguredDays, getPeriodsForDayFromSettings, StreamProgressionReport, TeacherProgressionReport } from '../lib/timetableService';
 
 export interface TimetablePdfExportOptions {
   viewMode: 'general' | 'class' | 'teacher';
@@ -76,61 +79,41 @@ function timeToMinutes(timeStr?: string): number {
 }
 
 /**
- * Retrieve exact periods for a given day from periodSettings, sorted chronologically
+ * Retrieve exact periods for a given day from periodSettings, sorted chronologically.
+ * Does NOT fall back to another day's periods if the requested day has no periods set.
  */
 function getPeriodsForDay(day: string, periodSettings: PeriodSetting[]) {
-  const forDay = (periodSettings || []).filter(
-    p => p && (p.day === day || p.day === 'All')
-  );
+  const forDay = getPeriodsForDayFromSettings(day, periodSettings);
 
   if (forDay.length > 0) {
-    return [...forDay]
-      .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start))
-      .map(p => ({
-        name: p.name,
-        timeRange: p.start && p.end ? `${p.start} - ${p.end}` : (p as any).timeRange || '',
-        isBreak: Boolean(p.isBreak) || 
-          p.name.toLowerCase().includes('break') || 
-          p.name.toLowerCase().includes('lunch') || 
-          p.name.toLowerCase().includes('chai') || 
-          p.name.toLowerCase().includes('chakula')
-      }));
+    return forDay.map(p => ({
+      name: p.name,
+      timeRange: p.start && p.end ? `${p.start} - ${p.end}` : (p as any).timeRange || '',
+      isBreak: Boolean(p.isBreak) ||
+        p.name.toLowerCase().includes('break') ||
+        p.name.toLowerCase().includes('lunch') ||
+        p.name.toLowerCase().includes('chai') ||
+        p.name.toLowerCase().includes('chakula')
+    }));
   }
 
-  // Fallback to any configured periods
-  const anyConfigured = (periodSettings || []).filter(p => p && p.name);
-  if (anyConfigured.length > 0) {
-    const map = new Map<string, PeriodSetting>();
-    anyConfigured.forEach(p => {
-      const trimmed = (p.name || '').trim();
-      if (trimmed && !map.has(trimmed)) map.set(trimmed, p);
-    });
-    return Array.from(map.values())
-      .sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start))
-      .map(p => ({
-        name: p.name,
-        timeRange: p.start && p.end ? `${p.start} - ${p.end}` : (p as any).timeRange || '',
-        isBreak: Boolean(p.isBreak) || 
-          p.name.toLowerCase().includes('break') || 
-          p.name.toLowerCase().includes('lunch') || 
-          p.name.toLowerCase().includes('chai') || 
-          p.name.toLowerCase().includes('chakula')
-      }));
+  // Only use standard defaults if periodSettings is completely empty and day is not Saturday/Sunday
+  if ((!periodSettings || periodSettings.length === 0) && day.toLowerCase() !== 'saturday' && day.toLowerCase() !== 'sunday') {
+    return [
+      { name: 'PERIOD 1', timeRange: '08:00 - 08:40', isBreak: false },
+      { name: 'PERIOD 2', timeRange: '08:40 - 09:20', isBreak: false },
+      { name: 'CHAI / BREAK', timeRange: '09:20 - 09:50', isBreak: true },
+      { name: 'PERIOD 3', timeRange: '09:50 - 10:30', isBreak: false },
+      { name: 'PERIOD 4', timeRange: '10:30 - 11:10', isBreak: false },
+      { name: 'CHAKULA / LUNCH', timeRange: '11:10 - 12:00', isBreak: true },
+      { name: 'PERIOD 5', timeRange: '12:00 - 12:40', isBreak: false },
+      { name: 'PERIOD 6', timeRange: '12:40 - 01:20', isBreak: false },
+      { name: 'PERIOD 7', timeRange: '01:20 - 02:00', isBreak: false },
+      { name: 'PERIOD 8', timeRange: '02:00 - 02:40', isBreak: false }
+    ];
   }
 
-  // Standard Secondary default periods
-  return [
-    { name: 'PERIOD 1', timeRange: '08:00 - 08:40', isBreak: false },
-    { name: 'PERIOD 2', timeRange: '08:40 - 09:20', isBreak: false },
-    { name: 'CHAI / BREAK', timeRange: '09:20 - 09:50', isBreak: true },
-    { name: 'PERIOD 3', timeRange: '09:50 - 10:30', isBreak: false },
-    { name: 'PERIOD 4', timeRange: '10:30 - 11:10', isBreak: false },
-    { name: 'CHAKULA / LUNCH', timeRange: '11:10 - 12:00', isBreak: true },
-    { name: 'PERIOD 5', timeRange: '12:00 - 12:40', isBreak: false },
-    { name: 'PERIOD 6', timeRange: '12:40 - 01:20', isBreak: false },
-    { name: 'PERIOD 7', timeRange: '01:20 - 02:00', isBreak: false },
-    { name: 'PERIOD 8', timeRange: '02:00 - 02:40', isBreak: false }
-  ];
+  return [];
 }
 
 /**
@@ -234,7 +217,10 @@ export async function exportTimetablePDF(options: TimetablePdfExportOptions): Pr
   // One pristine A4 landscape page per day, structured exactly like the system!
   // =========================================================================
   if (viewMode === 'general') {
-    const activeDays = DAYS_OF_WEEK.filter(d => selectedDay === 'All' || selectedDay === d);
+    const configuredDays = getConfiguredDays(periodSettings);
+    const activeDays = configuredDays.filter(
+      d => (selectedDay === 'All' || selectedDay === d) && getPeriodsForDay(d, periodSettings).length > 0
+    );
 
     // Identify all classes to display
     const DEFAULT_CLASSES = ['Form 1', 'Form 2', 'Form 3', 'Form 4'];
@@ -345,33 +331,14 @@ export async function exportTimetablePDF(options: TimetablePdfExportOptions): Pr
           }
 
           const normDay = day.trim().toLowerCase();
-          const normClass = pair.className.trim().toLowerCase();
-          const normPeriod = period.name.trim().toLowerCase();
 
           const match = assignments.find(a => {
-            if (!a) return false;
+            if (!a || !a.subject) return false;
             const aDay = (a.day || '').trim().toLowerCase();
             if (aDay !== normDay) return false;
-
-            const aClass = (a.className || '').trim().toLowerCase();
-            if (aClass !== normClass) return false;
-
-            if (pair.stream && pair.stream !== 'ALL' && a.stream) {
-              const aStream = a.stream.trim().toLowerCase();
-              const targetStream = pair.stream.trim().toLowerCase();
-              if (!aStream.includes(targetStream) && !targetStream.includes(aStream)) {
-                return false;
-              }
-            }
-
-            const aPName = (a.periodName || a.period || '').trim().toLowerCase();
-            if (aPName === normPeriod) return true;
-            if (aPName.startsWith(normPeriod)) return true;
-            if (period.timeRange && a.period && a.period.includes(period.timeRange)) return true;
-
-            const aBase = aPName.split('(')[0].trim();
-            const targetBase = normPeriod.split('(')[0].trim();
-            return aBase === targetBase;
+            if (!isSameClass(a.className, pair.className)) return false;
+            if (pair.stream && pair.stream !== 'ALL' && !isSameStream(a.stream, pair.stream)) return false;
+            return isSamePeriod(a.period, a.periodName, period.name);
           });
 
           if (match) {
@@ -547,7 +514,7 @@ export async function exportTimetablePDF(options: TimetablePdfExportOptions): Pr
 
   // =========================================================================
   // VIEW MODE 2: CLASS TIMETABLE (RATIBA YA DARASA)
-  // Days down rows, Periods across columns, with workload table & signatures!
+  // Day-by-Day Horizontal Timeline: Each day displays its own Period & Exact Time header on top!
   // =========================================================================
   } else if (viewMode === 'class') {
     const classLabel = selectedClass.toUpperCase();
@@ -557,31 +524,46 @@ export async function exportTimetablePDF(options: TimetablePdfExportOptions): Pr
       `MWAKA WA MASOMO: ${new Date().getFullYear()}`
     );
 
-    // Get periods from configured periodSettings
-    const classPeriods = getPeriodsForDay('Monday', periodSettings);
+    const configuredDays = getConfiguredDays(periodSettings);
+    const activeDays = configuredDays.filter(
+      d => (selectedDay === 'All' || !selectedDay || selectedDay === d) && getPeriodsForDay(d, periodSettings).length > 0
+    );
+    const classAssignments = assignments.filter(a =>
+      a &&
+      a.subject &&
+      isSameClass(a.className, selectedClass) &&
+      (selectedStream === 'All' || isSameStream(a.stream, selectedStream))
+    );
 
-    const tableHead = [
-      ['SIKU (DAY)', ...classPeriods.map(p => (p.timeRange ? `${p.name.toUpperCase()}\n${p.timeRange}` : p.name.toUpperCase()))]
-    ];
+    activeDays.forEach((day) => {
+      const dayPeriods = getPeriodsForDay(day, periodSettings);
+      if (dayPeriods.length === 0) return;
+      const dayColor = getDayThemeColor(day);
 
-    const tableBody = DAYS_OF_WEEK.map(day => {
-      const rowCells: string[] = [day.toUpperCase()];
+      if (y + 28 > pageHeight - 12) {
+        doc.addPage('a4', 'landscape');
+        y = margin;
+      }
 
-      classPeriods.forEach(period => {
+      // Per-Day Header Row with exact Period Name & Time Range on top for THIS day
+      const tableHead = [
+        [
+          `${day.toUpperCase()}\n(MUDA & VIPINDI)`,
+          ...dayPeriods.map(p => (p.timeRange ? `${p.name.toUpperCase()}\n${p.timeRange}` : p.name.toUpperCase()))
+        ]
+      ];
+
+      const rowCells: string[] = ['MASOMO &\nMWALIMU'];
+      dayPeriods.forEach(period => {
         if (period.isBreak) {
           rowCells.push(`[${period.name}]\nMapumziko`);
           return;
         }
 
-        const normPeriod = period.name.split(' (')[0].trim().toLowerCase();
-        const match = assignments.find(a => {
-          if (!a) return false;
-          const matchDay = (a.day || '').toLowerCase() === day.toLowerCase();
-          const matchClass = (a.className || '').toLowerCase() === selectedClass.toLowerCase();
-          const matchStream = selectedStream === 'All' || !a.stream || a.stream.toLowerCase().includes(selectedStream.toLowerCase());
-          const aPeriod = (a.periodName || a.period || '').split(' (')[0].trim().toLowerCase();
-          return matchDay && matchClass && matchStream && (aPeriod === normPeriod || aPeriod.includes(normPeriod));
-        });
+        const match = classAssignments.find(a =>
+          (a.day || '').trim().toLowerCase() === day.toLowerCase() &&
+          isSamePeriod(a.period, a.periodName, period.name)
+        );
 
         if (match) {
           const tObj = match.teacherId !== undefined ? teacherMap.get(match.teacherId) : null;
@@ -590,170 +572,122 @@ export async function exportTimetablePDF(options: TimetablePdfExportOptions): Pr
           const roomText = match.room ? `[${match.room}]` : '';
           rowCells.push(`${getSubjectShortName(match.subject)}\n${tName}${roomText ? ` ${roomText}` : ''}`.trim());
         } else {
-          rowCells.push('—');
+          rowCells.push('Huru\n(Free)');
         }
       });
 
-      return rowCells;
-    });
+      const dayColWidth = 26;
+      const remainingWidth = contentWidth - dayColWidth;
+      const periodColWidth = remainingWidth / dayPeriods.length;
 
-    const dayColWidth = 26;
-    const remainingWidth = contentWidth - dayColWidth;
-    const periodColWidth = remainingWidth / classPeriods.length;
-
-    const columnStyles: Record<number, any> = {
-      0: { cellWidth: dayColWidth, fontStyle: 'bold', halign: 'center', valign: 'middle', fillColor: [241, 245, 249], fontSize: 7 }
-    };
-    classPeriods.forEach((p, idx) => {
-      columnStyles[idx + 1] = {
-        cellWidth: periodColWidth,
-        halign: 'center',
-        valign: 'middle',
-        fontSize: 6.8
+      const columnStyles: Record<number, any> = {
+        0: { cellWidth: dayColWidth, fontStyle: 'bold', halign: 'center', valign: 'middle', fillColor: [241, 245, 249], fontSize: 6.2 }
       };
-    });
-
-    autoTable(doc, {
-      startY: y,
-      head: tableHead,
-      body: tableBody,
-      theme: 'grid',
-      headStyles: {
-        fillColor: [30, 58, 138],
-        textColor: [255, 255, 255],
-        fontSize: 7.2,
-        fontStyle: 'bold',
-        halign: 'center',
-        valign: 'middle',
-        cellPadding: 2.2
-      },
-      bodyStyles: {
-        fontSize: 6.8,
-        valign: 'middle',
-        textColor: [30, 41, 59],
-        cellPadding: 2.2
-      },
-      alternateRowStyles: {
-        fillColor: [248, 250, 252]
-      },
-      columnStyles,
-      margin: { left: margin, right: margin },
-      didDrawCell: (data) => {
-        if (data.section === 'body' && data.column.index > 0) {
-          const period = classPeriods[data.column.index - 1];
-          if (period && period.isBreak) {
-            doc.setFillColor(254, 243, 199);
-            doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(6.5);
-            doc.setTextColor(146, 64, 14);
-            doc.text(data.cell.text, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2, {
-              align: 'center',
-              baseline: 'middle'
-            });
-          } else if (data.cell.text && data.cell.text.length > 0 && data.cell.text[0] !== '—') {
-            const theme = getSubjectTheme(data.cell.text[0]);
-            doc.setFillColor(theme.bg[0], theme.bg[1], theme.bg[2]);
-            doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(6.8);
-            doc.setTextColor(theme.text[0], theme.text[1], theme.text[2]);
-            doc.text(data.cell.text[0], data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 - 2, {
-              align: 'center',
-              baseline: 'middle'
-            });
-            if (data.cell.text.length > 1) {
-              doc.setFont('helvetica', 'normal');
-              doc.setFontSize(6);
-              doc.setTextColor(51, 65, 85);
-              doc.text(data.cell.text.slice(1).join(' '), data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 2.5, {
-                align: 'center',
-                baseline: 'middle'
-              });
-            }
-          }
-        }
-      }
-    });
-
-    y = (doc as any).lastAutoTable.finalY + 5;
-
-    // Subject Workload Summary Breakdown
-    const classAssignments = assignments.filter(a => 
-      (a.className || '').toLowerCase() === selectedClass.toLowerCase() &&
-      (selectedStream === 'All' || !a.stream || a.stream.toLowerCase().includes(selectedStream.toLowerCase()))
-    );
-
-    const subjectStats = new Map<string, { count: number; teacher: string }>();
-    classAssignments.forEach(a => {
-      const sub = a.subject || 'Somo';
-      const tObj = a.teacherId !== undefined ? teacherMap.get(a.teacherId) : null;
-      const tName = tObj ? `${tObj.name} (${tObj.initial || '--'})` : (a as any).teacher || 'Mwalimu';
-      if (!subjectStats.has(sub)) {
-        subjectStats.set(sub, { count: 0, teacher: tName });
-      }
-      subjectStats.get(sub)!.count += 1;
-    });
-
-    if (subjectStats.size > 0 && y + 30 <= pageHeight) {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(7.5);
-      doc.setTextColor(30, 58, 138);
-      doc.text('MCHANGANUO WA MASOMO NA WALIMU (SUBJECT & TEACHER ALLOCATION SUMMARY):', margin, y);
-      y += 3.5;
-
-      const subTableBody = Array.from(subjectStats.entries()).map(([sub, data], idx) => [
-        idx + 1,
-        sub.toUpperCase(),
-        data.teacher,
-        `${data.count} Vipindi / Wiki`
-      ]);
+      dayPeriods.forEach((_, idx) => {
+        columnStyles[idx + 1] = {
+          cellWidth: periodColWidth,
+          halign: 'center',
+          valign: 'middle',
+          fontSize: 6.2
+        };
+      });
 
       autoTable(doc, {
         startY: y,
-        head: [['#', 'SOMO LA MASOMO', 'MWALIMU HUSIKA', 'IDADI YA VIPINDI / WIKI']],
-        body: subTableBody,
-        theme: 'striped',
-        headStyles: { fillColor: [51, 65, 85], textColor: [255, 255, 255], fontSize: 6.5, fontStyle: 'bold' },
-        bodyStyles: { fontSize: 6.5, cellPadding: 1.5 },
-        columnStyles: {
-          0: { cellWidth: 10, halign: 'center' },
-          1: { cellWidth: 70, fontStyle: 'bold' },
-          2: { cellWidth: 90 },
-          3: { cellWidth: 50, halign: 'center', fontStyle: 'bold' }
+        head: tableHead,
+        body: [rowCells],
+        theme: 'grid',
+        headStyles: {
+          fillColor: dayColor,
+          textColor: [255, 255, 255],
+          fontSize: 6.2,
+          fontStyle: 'bold',
+          halign: 'center',
+          valign: 'middle',
+          cellPadding: 1.6
         },
-        margin: { left: margin, right: margin }
+        bodyStyles: {
+          fontSize: 6.2,
+          valign: 'middle',
+          textColor: [30, 41, 59],
+          cellPadding: 2.0,
+          minCellHeight: 11
+        },
+        columnStyles,
+        margin: { left: margin, right: margin },
+        didDrawCell: (data) => {
+          if (data.section === 'body' && data.column.index > 0) {
+            const period = dayPeriods[data.column.index - 1];
+            if (period && period.isBreak) {
+              doc.setFillColor(254, 243, 199);
+              doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(5.8);
+              doc.setTextColor(146, 64, 14);
+              doc.text(data.cell.text, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2, {
+                align: 'center',
+                baseline: 'middle'
+              });
+            } else if (data.cell.text && data.cell.text.length > 0 && !data.cell.text[0].startsWith('Huru')) {
+              const theme = getSubjectTheme(data.cell.text[0]);
+              doc.setFillColor(theme.bg[0], theme.bg[1], theme.bg[2]);
+              doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(6.4);
+              doc.setTextColor(theme.text[0], theme.text[1], theme.text[2]);
+              doc.text(data.cell.text[0], data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 - 1.8, {
+                align: 'center',
+                baseline: 'middle'
+              });
+              if (data.cell.text.length > 1) {
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(5.6);
+                doc.setTextColor(51, 65, 85);
+                doc.text(data.cell.text.slice(1).join(' '), data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 2.2, {
+                  align: 'center',
+                  baseline: 'middle'
+                });
+              }
+            }
+          }
+        }
       });
 
-      y = (doc as any).lastAutoTable.finalY + 6;
-    }
+      y = (doc as any).lastAutoTable.finalY + 2.5;
+    });
+
+    y += 2;
 
     // Signatures
+    if (y + 12 > pageHeight - 5) {
+      doc.addPage('a4', 'landscape');
+      y = margin + 4;
+    }
     const signColWidth = contentWidth / 3;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
+    doc.setFontSize(6.5);
     doc.setTextColor(30, 41, 59);
 
-    doc.text('Mwalimu wa Darasa (Class Teacher):', margin + 2, y + 3);
+    doc.text('Mwalimu wa Darasa (Class Teacher):', margin + 2, y + 2.5);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.2);
-    doc.text('Sahihi: _______________________   Tarehe: ___________', margin + 2, y + 7.5);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
-    doc.text('Mwalimu wa Taaluma (Academic Master):', margin + signColWidth + 2, y + 3);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.2);
-    doc.text('Sahihi: _______________________   Tarehe: ___________', margin + signColWidth + 2, y + 7.5);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
-    doc.text('Mkuu wa Shule (Head of School):', margin + signColWidth * 2 + 2, y + 3);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.2);
-    doc.text(`Muhuri: [ ${schoolInfo?.principal || 'HEAD OF SCHOOL'} ]`, margin + signColWidth * 2 + 2, y + 7.5);
-
     doc.setFontSize(6);
+    doc.text('Sahihi: _______________________   Tarehe: ___________', margin + 2, y + 6.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.text('Mwalimu wa Taaluma (Academic Master):', margin + signColWidth + 2, y + 2.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.text('Sahihi: _______________________   Tarehe: ___________', margin + signColWidth + 2, y + 6.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.text('Mkuu wa Shule (Head of School):', margin + signColWidth * 2 + 2, y + 2.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.text(`Muhuri: [ ${schoolInfo?.principal || 'HEAD OF SCHOOL'} ]`, margin + signColWidth * 2 + 2, y + 6.5);
+
+    doc.setFontSize(5.8);
     doc.setTextColor(148, 163, 184);
     doc.text(
       `HabyEduPro3A • Ratiba Rasmi ya Darasa • ${selectedClass} (${selectedStream}) • Tarehe: ${new Date().toLocaleDateString('en-GB')}`,
@@ -764,15 +698,13 @@ export async function exportTimetablePDF(options: TimetablePdfExportOptions): Pr
 
   // =========================================================================
   // VIEW MODE 3: TEACHER INDIVIDUAL SCHEDULE (RATIBA YA MWALIMU)
-  // Days down rows, Periods across columns, particulars card & signatures!
+  // Day-by-Day Horizontal Timeline: Each day displays its own Period & Exact Time header on top!
   // =========================================================================
   } else if (viewMode === 'teacher') {
-    const teacher = teachers.find(t => t.id === selectedTeacherId) || teachers[0];
+    const teacher = teachers.find(t => Number(t.id) === Number(selectedTeacherId)) || teachers[0];
     const teacherAssignments = assignments.filter(a => {
-      if (!teacher) return false;
-      const matchId = a.teacherId === teacher.id;
-      const aT = (('teacher' in a ? (a as any).teacher : '') || '').toLowerCase();
-      return matchId || aT === teacher.name.toLowerCase() || (teacher.initial && aT === teacher.initial.toLowerCase()) || aT.includes(teacher.name.toLowerCase());
+      if (!a || !teacher || !a.subject || !a.className) return false;
+      return Number(a.teacherId) === Number(teacher.id);
     });
 
     drawOfficialHeader(
@@ -782,165 +714,185 @@ export async function exportTimetablePDF(options: TimetablePdfExportOptions): Pr
 
     // Particulars Card
     doc.setFillColor(241, 245, 249);
-    doc.roundedRect(margin, y, contentWidth, 11, 1.5, 1.5, 'F');
+    doc.roundedRect(margin, y, contentWidth, 9.5, 1.2, 1.2, 'F');
     doc.setDrawColor(203, 213, 225);
-    doc.roundedRect(margin, y, contentWidth, 11, 1.5, 1.5, 'S');
+    doc.roundedRect(margin, y, contentWidth, 9.5, 1.2, 1.2, 'S');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.8);
+    doc.setFontSize(7.2);
     doc.setTextColor(30, 41, 59);
-    doc.text(`Mwalimu: ${teacher?.name || 'N/A'} (Kifupisho / Initial: ${teacher?.initial || '--'})`, margin + 4, y + 4.5);
-    doc.text(`Wadhifa: ${teacher?.schoolRole || 'Mwalimu wa Masomo'}`, margin + 105, y + 4.5);
-    doc.text(`Mzigo wa Wiki: ${teacherAssignments.length} / ${teacher?.maxPeriodsPerWeek || 20} Vipindi`, pageWidth - margin - 4, y + 4.5, { align: 'right' });
+    doc.text(`Mwalimu: ${teacher?.name || 'N/A'} (Initial: ${teacher?.initial || '--'})`, margin + 4, y + 4);
+    doc.text(`Wadhifa: ${teacher?.schoolRole || 'Mwalimu wa Masomo'}`, margin + 105, y + 4);
+    doc.text(`Vipindi Wiki: ${teacherAssignments.length} / ${teacher?.maxPeriodsPerWeek || 20} Vipindi`, pageWidth - margin - 4, y + 4, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7);
+    doc.setFontSize(6.5);
     doc.setTextColor(100, 116, 139);
     const subList = teacher?.subjects?.join(', ') || 'Masomo Yote';
-    doc.text(`Masomo Anayofundisha: ${subList.length > 95 ? subList.substring(0, 93) + '..' : subList}`, margin + 4, y + 8.5);
+    doc.text(`Masomo Anayofundisha: ${subList.length > 95 ? subList.substring(0, 93) + '..' : subList}`, margin + 4, y + 7.6);
 
-    y += 14;
+    y += 11.5;
 
-    const teacherPeriods = getPeriodsForDay('Monday', periodSettings);
+    const configuredDays = getConfiguredDays(periodSettings);
+    const activeDays = configuredDays.filter(
+      d => (selectedDay === 'All' || !selectedDay || selectedDay === d) && getPeriodsForDay(d, periodSettings).length > 0
+    );
 
-    const tableHead = [
-      ['SIKU (DAY)', ...teacherPeriods.map(p => (p.timeRange ? `${p.name.toUpperCase()}\n${p.timeRange}` : p.name.toUpperCase()))]
-    ];
+    activeDays.forEach((day) => {
+      const dayPeriods = getPeriodsForDay(day, periodSettings);
+      if (dayPeriods.length === 0) return;
+      const dayColor = getDayThemeColor(day);
 
-    const tableBody = DAYS_OF_WEEK.map(day => {
-      const rowCells: string[] = [day.toUpperCase()];
+      if (y + 26 > pageHeight - 12) {
+        doc.addPage('a4', 'landscape');
+        y = margin;
+      }
 
-      teacherPeriods.forEach(period => {
+      // Per-Day Header Row with exact Period Name & Time Range on top for THIS day
+      const tableHead = [
+        [
+          `${day.toUpperCase()}\n(MUDA & VIPINDI)`,
+          ...dayPeriods.map(p => (p.timeRange ? `${p.name.toUpperCase()}\n${p.timeRange}` : p.name.toUpperCase()))
+        ]
+      ];
+
+      const rowCells: string[] = ['SOMO &\nDARASA'];
+      dayPeriods.forEach(period => {
         if (period.isBreak) {
           rowCells.push(`[${period.name}]\nMapumziko`);
           return;
         }
 
-        const normPeriod = period.name.split(' (')[0].trim().toLowerCase();
-        const match = teacherAssignments.find(a => {
-          const matchDay = (a.day || '').toLowerCase() === day.toLowerCase();
-          const aPeriod = (a.periodName || a.period || '').split(' (')[0].trim().toLowerCase();
-          return matchDay && (aPeriod === normPeriod || aPeriod.includes(normPeriod));
-        });
+        const match = teacherAssignments.find(a =>
+          (a.day || '').trim().toLowerCase() === day.toLowerCase() &&
+          isSamePeriod(a.period, a.periodName, period.name)
+        );
 
         if (match) {
-          const roomText = match.room ? `[${match.room}]` : '';
-          rowCells.push(`${getSubjectShortName(match.subject)}\n${match.className} ${match.stream || ''}\n${roomText}`.trim());
+          const numMatch = (match.className || '').replace(/[^0-9]/g, '');
+          const romanPart = numMatch ? romanize(parseInt(numMatch, 10)) : (match.className || '').replace(/Form\s*/i, '').trim();
+          const streamPart = normalizeStreamName(match.stream).toUpperCase();
+          const classBadge = `${romanPart}${streamPart && streamPart !== 'ALL' ? streamPart : ''}`;
+          const roomText = match.room ? ` [${match.room}]` : '';
+          rowCells.push(`${getSubjectShortName(match.subject)}\n${classBadge}${roomText}`.trim());
         } else {
-          rowCells.push('—');
+          rowCells.push('Huru\n(Free)');
         }
       });
 
-      return rowCells;
-    });
+      const dayColWidth = 26;
+      const remainingWidth = contentWidth - dayColWidth;
+      const periodColWidth = remainingWidth / dayPeriods.length;
 
-    const dayColWidth = 26;
-    const remainingWidth = contentWidth - dayColWidth;
-    const periodColWidth = remainingWidth / teacherPeriods.length;
-
-    const columnStyles: Record<number, any> = {
-      0: { cellWidth: dayColWidth, fontStyle: 'bold', halign: 'center', valign: 'middle', fillColor: [241, 245, 249], fontSize: 7 }
-    };
-    teacherPeriods.forEach((p, idx) => {
-      columnStyles[idx + 1] = {
-        cellWidth: periodColWidth,
-        halign: 'center',
-        valign: 'middle',
-        fontSize: 6.8
+      const columnStyles: Record<number, any> = {
+        0: { cellWidth: dayColWidth, fontStyle: 'bold', halign: 'center', valign: 'middle', fillColor: [241, 245, 249], fontSize: 6.2 }
       };
-    });
+      dayPeriods.forEach((_, idx) => {
+        columnStyles[idx + 1] = {
+          cellWidth: periodColWidth,
+          halign: 'center',
+          valign: 'middle',
+          fontSize: 6.2
+        };
+      });
 
-    autoTable(doc, {
-      startY: y,
-      head: tableHead,
-      body: tableBody,
-      theme: 'grid',
-      headStyles: {
-        fillColor: [30, 58, 138],
-        textColor: [255, 255, 255],
-        fontSize: 7.2,
-        fontStyle: 'bold',
-        halign: 'center',
-        valign: 'middle',
-        cellPadding: 2.2
-      },
-      bodyStyles: {
-        fontSize: 6.8,
-        valign: 'middle',
-        textColor: [30, 41, 59],
-        cellPadding: 2.2
-      },
-      alternateRowStyles: {
-        fillColor: [248, 250, 252]
-      },
-      columnStyles,
-      margin: { left: margin, right: margin },
-      didDrawCell: (data) => {
-        if (data.section === 'body' && data.column.index > 0) {
-          const period = teacherPeriods[data.column.index - 1];
-          if (period && period.isBreak) {
-            doc.setFillColor(254, 243, 199);
-            doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(6.5);
-            doc.setTextColor(146, 64, 14);
-            doc.text(data.cell.text, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2, {
-              align: 'center',
-              baseline: 'middle'
-            });
-          } else if (data.cell.text && data.cell.text.length > 0 && data.cell.text[0] !== '—') {
-            const theme = getSubjectTheme(data.cell.text[0]);
-            doc.setFillColor(theme.bg[0], theme.bg[1], theme.bg[2]);
-            doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
-            doc.setFont('helvetica', 'bold');
-            doc.setFontSize(6.8);
-            doc.setTextColor(theme.text[0], theme.text[1], theme.text[2]);
-            doc.text(data.cell.text[0], data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 - 2, {
-              align: 'center',
-              baseline: 'middle'
-            });
-            if (data.cell.text.length > 1) {
-              doc.setFont('helvetica', 'normal');
-              doc.setFontSize(6);
-              doc.setTextColor(51, 65, 85);
-              doc.text(data.cell.text.slice(1).join(' '), data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 2.5, {
+      autoTable(doc, {
+        startY: y,
+        head: tableHead,
+        body: [rowCells],
+        theme: 'grid',
+        headStyles: {
+          fillColor: dayColor,
+          textColor: [255, 255, 255],
+          fontSize: 6.2,
+          fontStyle: 'bold',
+          halign: 'center',
+          valign: 'middle',
+          cellPadding: 1.5
+        },
+        bodyStyles: {
+          fontSize: 6.2,
+          valign: 'middle',
+          textColor: [30, 41, 59],
+          cellPadding: 1.8,
+          minCellHeight: 10.5
+        },
+        columnStyles,
+        margin: { left: margin, right: margin },
+        didDrawCell: (data) => {
+          if (data.section === 'body' && data.column.index > 0) {
+            const period = dayPeriods[data.column.index - 1];
+            if (period && period.isBreak) {
+              doc.setFillColor(254, 243, 199);
+              doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(5.8);
+              doc.setTextColor(146, 64, 14);
+              doc.text(data.cell.text, data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2, {
                 align: 'center',
                 baseline: 'middle'
               });
+            } else if (data.cell.text && data.cell.text.length > 0 && !data.cell.text[0].startsWith('Huru')) {
+              const theme = getSubjectTheme(data.cell.text[0]);
+              doc.setFillColor(theme.bg[0], theme.bg[1], theme.bg[2]);
+              doc.rect(data.cell.x, data.cell.y, data.cell.width, data.cell.height, 'F');
+              doc.setFont('helvetica', 'bold');
+              doc.setFontSize(6.4);
+              doc.setTextColor(theme.text[0], theme.text[1], theme.text[2]);
+              doc.text(data.cell.text[0], data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 - 1.8, {
+                align: 'center',
+                baseline: 'middle'
+              });
+              if (data.cell.text.length > 1) {
+                doc.setFont('helvetica', 'bold');
+                doc.setFontSize(6.0);
+                doc.setTextColor(30, 41, 59);
+                doc.text(data.cell.text.slice(1).join(' '), data.cell.x + data.cell.width / 2, data.cell.y + data.cell.height / 2 + 2.2, {
+                  align: 'center',
+                  baseline: 'middle'
+                });
+              }
             }
           }
         }
-      }
+      });
+
+      y = (doc as any).lastAutoTable.finalY + 2.2;
     });
 
-    y = (doc as any).lastAutoTable.finalY + 6;
+    y += 2;
+
+    if (y + 12 > pageHeight - 5) {
+      doc.addPage('a4', 'landscape');
+      y = margin + 4;
+    }
 
     // Signatures
     const signColWidth = contentWidth / 3;
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
+    doc.setFontSize(6.5);
     doc.setTextColor(30, 41, 59);
 
-    doc.text('Mwalimu Husika (Faculty Member):', margin + 2, y + 3);
+    doc.text('Mwalimu Husika (Faculty Member):', margin + 2, y + 2.5);
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.2);
-    doc.text('Sahihi: _______________________   Tarehe: ___________', margin + 2, y + 7.5);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
-    doc.text('Mwalimu wa Taaluma (Academic Master):', margin + signColWidth + 2, y + 3);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.2);
-    doc.text('Sahihi: _______________________   Tarehe: ___________', margin + signColWidth + 2, y + 7.5);
-
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.8);
-    doc.text('Mkuu wa Shule (Head of School):', margin + signColWidth * 2 + 2, y + 3);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(6.2);
-    doc.text(`Muhuri: [ ${schoolInfo?.principal || 'HEAD OF SCHOOL'} ]`, margin + signColWidth * 2 + 2, y + 7.5);
-
     doc.setFontSize(6);
+    doc.text('Sahihi: _______________________   Tarehe: ___________', margin + 2, y + 6.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.text('Mwalimu wa Taaluma (Academic Master):', margin + signColWidth + 2, y + 2.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.text('Sahihi: _______________________   Tarehe: ___________', margin + signColWidth + 2, y + 6.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.text('Mkuu wa Shule (Head of School):', margin + signColWidth * 2 + 2, y + 2.5);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.text(`Muhuri: [ ${schoolInfo?.principal || 'HEAD OF SCHOOL'} ]`, margin + signColWidth * 2 + 2, y + 6.5);
+
+    doc.setFontSize(5.8);
     doc.setTextColor(148, 163, 184);
     doc.text(
       `HabyEduPro3A • Ratiba Binafsi ya Mwalimu • ${teacher?.name || 'Faculty'} (${teacher?.initial || '--'}) • Tarehe: ${new Date().toLocaleDateString('en-GB')}`,
@@ -1153,7 +1105,7 @@ export async function exportTeacherInvigilationPDF(options: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
   doc.setTextColor(254, 240, 138);
-  doc.text(`RATIBA BINAFSI YA USIMAMIZI WA MITIHANI (TEACHER INVIGILATION TIMETABLE) — MWL. ${teacher.name.toUpperCase()} (${teacher.initial || '--'})`, pageWidth / 2, y + 15, { align: 'center' });
+  doc.text(`RATIBA BINAFSI YA USIMAMIZI WA MITIHANI (TEACHER INVIGILATION TIMETABLE) — MWL. ${(teacher?.name || '').toUpperCase()} (${teacher?.initial || '--'})`, pageWidth / 2, y + 15, { align: 'center' });
 
   if (qrDataUrl) {
     doc.setFillColor(255, 255, 255);
@@ -1204,8 +1156,8 @@ export async function exportTeacherInvigilationPDF(options: {
         `${d.session.day}\n${d.session.date}`,
         d.session.session || 'SESSION I',
         d.session.time || `${d.session.start || ''} - ${d.session.end || ''}`,
-        d.session.subject.toUpperCase(),
-        `${d.session.className} ${d.session.stream || ''}`.trim(),
+        (d.session?.subject || '').toUpperCase(),
+        `${d.session.className || ''} ${d.session.stream || ''}`.trim(),
         `CHUMBA / ROOM ${d.room}`,
         '____________________'
       ]);
@@ -1410,7 +1362,7 @@ export async function exportClassJournalPDF(options: ClassJournalExportOptions):
   doc.text(`${schoolInfo?.address || 'P.O. BOX 145, TANGA, TANZANIA'} • TEL: ${schoolInfo?.phone || '0717616343'}`, pageWidth / 2, y + 14, { align: 'center' });
   
   doc.setFont('helvetica', 'bold');
-  doc.text(`OFFICIAL CLASSROOM JOURNAL & PERIOD LOG: ${className.toUpperCase()} (${stream}) - ${week.toUpperCase()}`, pageWidth / 2, y + 19, { align: 'center' });
+  doc.text(`OFFICIAL CLASSROOM JOURNAL & PERIOD LOG: ${(className || '').toUpperCase()} (${stream || ''}) - ${(week || '').toUpperCase()}`, pageWidth / 2, y + 19, { align: 'center' });
 
   y += 26;
 
@@ -1605,3 +1557,1035 @@ export async function exportClassJournalPDF(options: ClassJournalExportOptions):
   const filename = `${className.replace(/\s+/g, '_')}_${stream.replace(/\s+/g, '_')}_Journal_${week.replace(/\s+/g, '_')}.pdf`;
   doc.save(filename);
 }
+
+export interface ProgressionReportPdfOptions {
+  reports: StreamProgressionReport[];
+  schoolName?: string;
+  schoolInfo?: SchoolInfo;
+  levelFilter?: string;
+  classFilter?: string;
+  streamFilter?: string;
+  statusFilter?: string;
+  mode?: 'download' | 'print';
+}
+
+/**
+ * Exports or Prints the Official Timetable Period Allocation Progression Report (Ripoti ya Maendeleo ya Upangaji wa Vipindi)
+ */
+export async function exportProgressionReportPDF(options: ProgressionReportPdfOptions): Promise<void> {
+  const {
+    reports = [],
+    schoolName = 'HABY EDUPRO ACADEMY',
+    schoolInfo,
+    levelFilter = 'ALL',
+    classFilter = 'All',
+    streamFilter = 'All',
+    statusFilter = 'ALL',
+    mode = 'download'
+  } = options;
+
+  const doc = new jsPDF({
+    orientation: 'portrait',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = 210;
+  const pageHeight = 297;
+  const margin = 10;
+  const contentWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  const resolvedSchoolName = (schoolInfo?.name || schoolName || 'HABY EDUPRO ACADEMY').toUpperCase();
+  const resolvedMotto = schoolInfo?.motto || 'ELIMU NI NURU NA NGUVU';
+  const resolvedAddress = schoolInfo?.address || 'P.O. BOX 145, TANGA';
+  const resolvedPhone = schoolInfo?.phone || '0717616343';
+  const resolvedEmail = schoolInfo?.email || 'info@school.ac.tz';
+  const printedDate = new Date().toLocaleDateString('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric'
+  });
+
+  // Compute global KPI metrics across filtered reports
+  const totalStreams = reports.length;
+  const configuredStreams = reports.filter(r => r.totalRequiredSubjects > 0).length;
+  const fullyCompleteStreams = reports.filter(r => r.isFullyComplete).length;
+  const totalMissingSubjects = reports.reduce((s, r) => s + r.missingSubjects.length, 0);
+  const totalIncompleteSubjects = reports.reduce((s, r) => s + r.incompleteSubjects.length, 0);
+  const totalRequiredPeriods = reports.reduce((s, r) => s + r.totalRequiredPeriods, 0);
+  const totalEnteredPeriods = reports.reduce((s, r) => s + r.totalEnteredRegisteredPeriods, 0);
+  const totalRemainingPeriods = reports.reduce(
+    (s, r) => s + r.subjects.reduce((subSum, item) => subSum + item.remainingPeriods, 0),
+    0
+  );
+  const overallPct =
+    totalRequiredPeriods > 0 ? Math.min(100, Math.round((totalEnteredPeriods / totalRequiredPeriods) * 100)) : 0;
+
+  // Aggregated subject summary
+  const subjectMap = new Map<
+    string,
+    {
+      subject: string;
+      streamsCount: number;
+      totalRequired: number;
+      totalEntered: number;
+      totalRemaining: number;
+      completeStreams: number;
+      missingStreams: number;
+    }
+  >();
+
+  reports.forEach(rep => {
+    rep.subjects.forEach(sub => {
+      const key = sub.subject.trim().toLowerCase();
+      const existing = subjectMap.get(key) || {
+        subject: sub.subject,
+        streamsCount: 0,
+        totalRequired: 0,
+        totalEntered: 0,
+        totalRemaining: 0,
+        completeStreams: 0,
+        missingStreams: 0
+      };
+      existing.streamsCount += 1;
+      existing.totalRequired += sub.requiredPeriods;
+      existing.totalEntered += Math.min(sub.enteredPeriods, sub.requiredPeriods);
+      existing.totalRemaining += sub.remainingPeriods;
+      if (sub.status === 'COMPLETE' || sub.status === 'EXCESS') existing.completeStreams += 1;
+      if (sub.status === 'MISSING') existing.missingStreams += 1;
+      subjectMap.set(key, existing);
+    });
+  });
+
+  const aggregatedSubjects = Array.from(subjectMap.values())
+    .map(item => ({
+      ...item,
+      percentage: item.totalRequired > 0 ? Math.min(100, Math.round((item.totalEntered / item.totalRequired) * 100)) : 0
+    }))
+    .sort((a, b) => a.percentage - b.percentage || a.subject.localeCompare(b.subject));
+
+  // Header Drawing Helper
+  const drawReportHeader = (isContinuation = false) => {
+    doc.setFillColor(30, 58, 138); // Deep Academic Navy
+    doc.roundedRect(margin, y, contentWidth, isContinuation ? 14 : 23, 1.5, 1.5, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(isContinuation ? 10.5 : 13);
+    doc.setTextColor(255, 255, 255);
+    doc.text(resolvedSchoolName, pageWidth / 2, y + (isContinuation ? 5.5 : 6.5), { align: 'center' });
+
+    if (!isContinuation) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(224, 231, 255);
+      doc.text(
+        `"${resolvedMotto}"  •  ${resolvedAddress}  •  SIMU: ${resolvedPhone}  •  EMAIL: ${resolvedEmail}`,
+        pageWidth / 2,
+        y + 11.5,
+        { align: 'center' }
+      );
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(isContinuation ? 7.5 : 8.5);
+    doc.setTextColor(254, 240, 138); // Gold accent
+    doc.text(
+      'RIPOTI YA MAENDELEO YA UPANGAJI WA VIPINDI (TIMETABLE PERIOD ALLOCATION PROGRESSION REPORT)',
+      pageWidth / 2,
+      y + (isContinuation ? 10.5 : 17),
+      { align: 'center' }
+    );
+
+    if (!isContinuation) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7);
+      doc.setTextColor(255, 255, 255);
+      const scopeLabel = `Darasa: ${classFilter === 'All' ? 'Madarasa Yote' : classFilter}  |  Mkondo: ${
+        streamFilter === 'All' ? 'Mikondo Yote' : streamFilter
+      }  |  Ngazi: ${levelFilter}  |  Tarehe: ${printedDate}`;
+      doc.text(scopeLabel, pageWidth / 2, y + 21, { align: 'center' });
+    }
+
+    y += isContinuation ? 17 : 26;
+  };
+
+  drawReportHeader(false);
+
+  // ---------------------------------------------------------------------------
+  // 1. EXECUTIVE KPI SUMMARY CARDS
+  // ---------------------------------------------------------------------------
+  const cardGap = 3;
+  const cardWidth = (contentWidth - cardGap * 3) / 4;
+  const cardHeight = 16;
+
+  const kpiCards: Array<{
+    title: string;
+    value: string;
+    sub: string;
+    bg: [number, number, number];
+    border: [number, number, number];
+    text: [number, number, number];
+  }> = [
+    {
+      title: 'WASTANI WA UPANGAJI',
+      value: `${overallPct}%`,
+      sub: `${totalEnteredPeriods} / ${totalRequiredPeriods} Vipindi`,
+      bg: [239, 246, 255],
+      border: [147, 197, 253],
+      text: [29, 78, 216]
+    },
+    {
+      title: 'MIKONDO ILIYOKAMILIKA',
+      value: `${fullyCompleteStreams} / ${configuredStreams || totalStreams}`,
+      sub: 'Imekamilika 100%',
+      bg: [236, 253, 245],
+      border: [110, 231, 183],
+      text: [4, 120, 87]
+    },
+    {
+      title: 'MASOMO HAYAJAINGIZWA',
+      value: `${totalMissingSubjects}`,
+      sub: 'Yenye Vipindi 0',
+      bg: [255, 241, 242],
+      border: [253, 164, 175],
+      text: [190, 18, 60]
+    },
+    {
+      title: 'VIPINDI BAKI / PUNGUFU',
+      value: `${totalRemainingPeriods}`,
+      sub: `Masomo Pungufu: ${totalIncompleteSubjects}`,
+      bg: [255, 251, 235],
+      border: [252, 211, 77],
+      text: [180, 83, 9]
+    }
+  ];
+
+  kpiCards.forEach((card, idx) => {
+    const cx = margin + idx * (cardWidth + cardGap);
+    doc.setFillColor(...card.bg);
+    doc.setDrawColor(...card.border);
+    doc.setLineWidth(0.35);
+    doc.roundedRect(cx, y, cardWidth, cardHeight, 1.5, 1.5, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(6.5);
+    doc.setTextColor(71, 85, 105);
+    doc.text(card.title, cx + 3, y + 4.5);
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(11);
+    doc.setTextColor(...card.text);
+    doc.text(card.value, cx + 3, y + 10.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(card.sub, cx + 3, y + 14.2);
+  });
+
+  y += cardHeight + 5;
+
+  // ---------------------------------------------------------------------------
+  // 2. SUBJECT-BY-SUBJECT COMPLETION SUMMARY TABLE
+  // ---------------------------------------------------------------------------
+  if (aggregatedSubjects.length > 0) {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(30, 58, 138);
+    doc.text(
+      `1. MUHTASARI WA UPANGAJI WA VIPINDI KWA KILA SOMO (${aggregatedSubjects.length} MASOMO)`,
+      margin,
+      y + 3
+    );
+    y += 5;
+
+    autoTable(doc, {
+      startY: y,
+      head: [
+        [
+          '#',
+          'Somo (Subject)',
+          'Mikondo',
+          'Vinavyotakiwa',
+          'Vilivyoingizwa',
+          'Upungufu / Baki',
+          'Asilimia (%)',
+          'Hali ya Uingizaji (Status)'
+        ]
+      ],
+      body: aggregatedSubjects.map((sub, i) => [
+        String(i + 1),
+        sub.subject,
+        `${sub.completeStreams}/${sub.streamsCount} Sawa`,
+        String(sub.totalRequired),
+        String(sub.totalEntered),
+        sub.totalRemaining === 0 ? '0 (Sawa)' : `-${sub.totalRemaining} Pungufu`,
+        `${sub.percentage}%`,
+        sub.percentage === 100 && sub.totalRemaining === 0
+          ? 'IMEKAMILIKA (100%)'
+          : sub.percentage === 0
+          ? 'HAIJAINGIZWA (0%)'
+          : `PUNGUFU (${sub.percentage}%)`
+      ]),
+      theme: 'grid',
+      headStyles: {
+        fillColor: [30, 58, 138],
+        textColor: [255, 255, 255],
+        fontSize: 7.2,
+        fontStyle: 'bold',
+        halign: 'center',
+        valign: 'middle'
+      },
+      bodyStyles: {
+        fontSize: 7,
+        textColor: [30, 41, 59],
+        valign: 'middle'
+      },
+      columnStyles: {
+        0: { cellWidth: 8, halign: 'center' },
+        1: { cellWidth: 46, fontStyle: 'bold' },
+        2: { cellWidth: 24, halign: 'center' },
+        3: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+        4: { cellWidth: 22, halign: 'center', fontStyle: 'bold' },
+        5: { cellWidth: 24, halign: 'center', fontStyle: 'bold' },
+        6: { cellWidth: 16, halign: 'center', fontStyle: 'bold' },
+        7: { cellWidth: 28, halign: 'center', fontStyle: 'bold' }
+      },
+      didParseCell: data => {
+        if (data.section === 'body') {
+          const item = aggregatedSubjects[data.row.index];
+          if (!item) return;
+          if (data.column.index === 7 || data.column.index === 5 || data.column.index === 6) {
+            if (item.percentage === 100 && item.totalRemaining === 0) {
+              data.cell.styles.textColor = [4, 120, 87];
+              if (data.column.index === 7) data.cell.styles.fillColor = [236, 253, 245];
+            } else if (item.percentage === 0) {
+              data.cell.styles.textColor = [190, 18, 60];
+              if (data.column.index === 7) data.cell.styles.fillColor = [255, 241, 242];
+            } else {
+              data.cell.styles.textColor = [180, 83, 9];
+              if (data.column.index === 7) data.cell.styles.fillColor = [255, 251, 235];
+            }
+          }
+        }
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 7;
+  }
+
+  // ---------------------------------------------------------------------------
+  // 3. DETAILED STREAM-BY-STREAM PROGRESSION TABLES
+  // ---------------------------------------------------------------------------
+  if (y > pageHeight - 45) {
+    doc.addPage();
+    y = margin;
+    drawReportHeader(true);
+  }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.5);
+  doc.setTextColor(30, 58, 138);
+  doc.text(
+    `2. MCHANGANUO WA UPANGAJI WA VIPINDI KWA KILA DARASA NA MKONDO (${reports.length} MIKONDO)`,
+    margin,
+    y + 3
+  );
+  y += 6;
+
+  if (reports.length === 0) {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8);
+    doc.setTextColor(100, 116, 139);
+    doc.text('Hakuna darasa au mkondo uliosajiliwa unaolingana na kichujio kilichochaguliwa.', margin, y + 5);
+    y += 12;
+  } else {
+    reports.forEach((rep, rIdx) => {
+      if (y > pageHeight - 48) {
+        doc.addPage();
+        y = margin;
+        drawReportHeader(true);
+      }
+
+      const streamRemaining = rep.subjects.reduce((s, item) => s + item.remainingPeriods, 0);
+      const bannerBg: [number, number, number] = rep.isFullyComplete
+        ? [6, 95, 70]
+        : rep.missingSubjects.length > 0
+        ? [159, 18, 57]
+        : [30, 58, 138];
+
+      // Stream Section Header Bar
+      doc.setFillColor(...bannerBg);
+      doc.roundedRect(margin, y, contentWidth, 8, 1, 1, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(255, 255, 255);
+      doc.text(`${rIdx + 1}. ${rep.className.toUpperCase()} — ${rep.stream.toUpperCase()}`, margin + 3, y + 5.3);
+
+      const rightSummary =
+        rep.totalRequiredSubjects === 0
+          ? 'Masomo Hayajasajiliwa Bado'
+          : `Maendeleo: ${rep.overallPercentage}%  |  Vipindi: ${rep.totalEnteredRegisteredPeriods}/${rep.totalRequiredPeriods}  |  Masomo Sawa: ${rep.exactMatchSubjectsCount}/${rep.totalRequiredSubjects}  |  Baki: ${streamRemaining}`;
+      doc.setFontSize(7);
+      doc.text(rightSummary, pageWidth - margin - 3, y + 5.3, { align: 'right' });
+
+      y += 9;
+
+      if (rep.totalRequiredSubjects === 0) {
+        doc.setFillColor(255, 251, 235);
+        doc.setDrawColor(252, 211, 77);
+        doc.roundedRect(margin, y, contentWidth, 8, 1, 1, 'FD');
+        doc.setFont('helvetica', 'italic');
+        doc.setFontSize(7.2);
+        doc.setTextColor(146, 64, 14);
+        doc.text(
+          `Mkondo huu (${rep.className} - ${rep.stream}) bado haujasajiliwa masomo na idadi ya vipindi vinavyotakiwa kwa wiki.`,
+          margin + 3,
+          y + 5.2
+        );
+        y += 12;
+      } else {
+        autoTable(doc, {
+          startY: y,
+          head: [
+            [
+              '#',
+              'Somo (Required Subject)',
+              'Mwalimu Kwenye Ratiba (Assigned Teacher)',
+              'Vinavyotakiwa',
+              'Vilivyoingizwa',
+              'Upungufu / Baki',
+              'Asilimia',
+              'Hali (Status)'
+            ]
+          ],
+          body: rep.subjects.map((sub, sIdx) => [
+            String(sIdx + 1),
+            sub.subject,
+            sub.assignedTeachers.length > 0 ? sub.assignedTeachers.join(', ') : 'Hajapangwa kwenye Ratiba',
+            String(sub.requiredPeriods),
+            String(sub.enteredPeriods),
+            sub.status === 'COMPLETE'
+              ? '0 (Sawa)'
+              : sub.status === 'EXCESS'
+              ? `+${sub.excessPeriods} Ziada`
+              : `-${sub.remainingPeriods} Baki`,
+            `${sub.percentage}%`,
+            sub.status === 'COMPLETE'
+              ? 'IMEKAMILIKA (100%)'
+              : sub.status === 'MISSING'
+              ? `HAIJAINGIZWA (0/${sub.requiredPeriods})`
+              : sub.status === 'INCOMPLETE'
+              ? `PUNGUFU (${sub.enteredPeriods}/${sub.requiredPeriods})`
+              : `ZIADA (+${sub.excessPeriods})`
+          ]),
+          theme: 'grid',
+          headStyles: {
+            fillColor: [241, 245, 249],
+            textColor: [15, 23, 42],
+            fontSize: 6.8,
+            fontStyle: 'bold',
+            halign: 'center',
+            valign: 'middle',
+            lineColor: [203, 213, 225],
+            lineWidth: 0.2
+          },
+          bodyStyles: {
+            fontSize: 6.8,
+            textColor: [30, 41, 59],
+            valign: 'middle'
+          },
+          columnStyles: {
+            0: { cellWidth: 7, halign: 'center' },
+            1: { cellWidth: 38, fontStyle: 'bold' },
+            2: { cellWidth: 46 },
+            3: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+            4: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+            5: { cellWidth: 21, halign: 'center', fontStyle: 'bold' },
+            6: { cellWidth: 14, halign: 'center', fontStyle: 'bold' },
+            7: { cellWidth: 24, halign: 'center', fontStyle: 'bold' }
+          },
+          didParseCell: data => {
+            if (data.section === 'body') {
+              const subItem = rep.subjects[data.row.index];
+              if (!subItem) return;
+              if (data.column.index === 2 && subItem.assignedTeachers.length === 0) {
+                data.cell.styles.textColor = [190, 18, 60];
+                data.cell.styles.fontStyle = 'italic';
+              }
+              if (data.column.index === 5 || data.column.index === 6 || data.column.index === 7) {
+                if (subItem.status === 'COMPLETE') {
+                  data.cell.styles.textColor = [4, 120, 87];
+                  if (data.column.index === 7) data.cell.styles.fillColor = [236, 253, 245];
+                } else if (subItem.status === 'MISSING') {
+                  data.cell.styles.textColor = [190, 18, 60];
+                  if (data.column.index === 7) data.cell.styles.fillColor = [255, 241, 242];
+                } else if (subItem.status === 'INCOMPLETE') {
+                  data.cell.styles.textColor = [180, 83, 9];
+                  if (data.column.index === 7) data.cell.styles.fillColor = [255, 251, 235];
+                } else {
+                  data.cell.styles.textColor = [67, 56, 202];
+                  if (data.column.index === 7) data.cell.styles.fillColor = [238, 242, 255];
+                }
+              }
+            }
+          },
+          margin: { left: margin, right: margin }
+        });
+
+        y = (doc as any).lastAutoTable.finalY + 2;
+
+        // If stream has unregistered subjects in the timetable, note them below the table
+        if (rep.unregisteredSubjects.length > 0) {
+          if (y > pageHeight - 20) {
+            doc.addPage();
+            y = margin;
+            drawReportHeader(true);
+          }
+          const unregText = `Masomo yaliyo kwenye Ratiba lakini hayajasajiliwa kwenye mahitaji ya ${rep.className} (${rep.stream}): ${rep.unregisteredSubjects
+            .map(u => `${u.subject} (${u.enteredPeriods} vipindi)`)
+            .join(', ')}`;
+          doc.setFont('helvetica', 'italic');
+          doc.setFontSize(6.5);
+          doc.setTextColor(67, 56, 202);
+          doc.text(unregText, margin + 2, y + 3.5);
+          y += 5;
+        }
+
+        y += 4;
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // 4. OFFICIAL SIGNATURE & VERIFICATION BLOCK
+  // ---------------------------------------------------------------------------
+  if (y > pageHeight - 36) {
+    doc.addPage();
+    y = margin;
+    drawReportHeader(true);
+  }
+
+  y += 6;
+  doc.setDrawColor(148, 163, 184);
+  doc.setLineWidth(0.3);
+
+  const sigColWidth = (contentWidth - 16) / 3;
+  const sigY = y + 12;
+
+  // Academic Master
+  doc.line(margin, sigY, margin + sigColWidth, sigY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('TAALUMA (ACADEMIC MASTER / MISTRESS)', margin + sigColWidth / 2, sigY + 4.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Sahihi & Tarehe (Signature & Date)', margin + sigColWidth / 2, sigY + 8, { align: 'center' });
+
+  // Official Stamp Box
+  const stampX = margin + sigColWidth + 8;
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(stampX, y + 1, sigColWidth, 16, 1.5, 1.5, 'S');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7);
+  doc.setTextColor(148, 163, 184);
+  doc.text('MHURI RASMI WA SHULE', stampX + sigColWidth / 2, y + 8, { align: 'center' });
+  doc.setFontSize(6);
+  doc.text('(OFFICIAL SCHOOL STAMP)', stampX + sigColWidth / 2, y + 12, { align: 'center' });
+
+  // Head of School
+  const headX = margin + (sigColWidth + 8) * 2;
+  doc.setDrawColor(148, 163, 184);
+  doc.line(headX, sigY, headX + sigColWidth, sigY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('MKUU WA SHULE (HEAD OF SCHOOL)', headX + sigColWidth / 2, sigY + 4.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Sahihi & Idhini (Signature & Approval)', headX + sigColWidth / 2, sigY + 8, { align: 'center' });
+
+  // Add Page Numbers & Footer across all pages
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `${resolvedSchoolName} • Ripoti ya Maendeleo ya Upangaji wa Vipindi (Progression Report) • Ukurasa ${p} kati ya ${totalPages}`,
+      pageWidth / 2,
+      pageHeight - 5,
+      { align: 'center' }
+    );
+  }
+
+  const safeClass = classFilter === 'All' ? 'All_Classes' : classFilter.replace(/\s+/g, '_');
+  const safeStream = streamFilter === 'All' ? 'All_Streams' : streamFilter.replace(/\s+/g, '_');
+  const fileName = `${resolvedSchoolName.replace(/\s+/g, '_')}_Progression_Report_${safeClass}_${safeStream}.pdf`;
+
+  if (mode === 'print') {
+    doc.autoPrint();
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+
+    // Use a hidden iframe to trigger the browser's native PDF print dialog cleanly inside the preview iframe
+    let printIframe = document.getElementById('haby-progression-pdf-print-frame') as HTMLIFrameElement | null;
+    if (printIframe) {
+      printIframe.remove();
+    }
+    printIframe = document.createElement('iframe');
+    printIframe.id = 'haby-progression-pdf-print-frame';
+    printIframe.style.position = 'fixed';
+    printIframe.style.right = '0';
+    printIframe.style.bottom = '0';
+    printIframe.style.width = '1px';
+    printIframe.style.height = '1px';
+    printIframe.style.border = '0';
+    printIframe.style.opacity = '0.01';
+    printIframe.src = blobUrl;
+    document.body.appendChild(printIframe);
+
+    printIframe.onload = () => {
+      try {
+        printIframe?.contentWindow?.focus();
+        printIframe?.contentWindow?.print();
+      } catch (e) {
+        window.print();
+      }
+    };
+  } else {
+    doc.save(fileName);
+  }
+}
+
+export interface ExportTeacherProgressionReportPdfOptions {
+  reports: TeacherProgressionReport[];
+  schoolName?: string;
+  schoolInfo?: SchoolInfo;
+  statusFilter?: string;
+  subjectFilter?: string;
+  mode?: 'download' | 'print';
+}
+
+/**
+ * Generates an official, publication-ready PDF for Teacher Progression Reports
+ * (Ripoti ya Maendeleo ya Upangaji wa Vipindi vya Walimu).
+ */
+export function exportTeacherProgressionReportPDF(options: ExportTeacherProgressionReportPdfOptions) {
+  const {
+    reports = [],
+    schoolName = 'HABY EDUPRO',
+    schoolInfo,
+    statusFilter = 'ALL',
+    subjectFilter = 'All',
+    mode = 'download'
+  } = options;
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 10;
+  const contentWidth = pageWidth - margin * 2;
+  const resolvedSchoolName = schoolInfo?.name || schoolName || 'HABY EDUPRO';
+
+  // Metrics
+  const totalTeachers = reports.length;
+  const totalRequiredPeriods = reports.reduce((s, r) => s + r.totalRequiredPeriods, 0);
+  const totalEnteredPeriods = reports.reduce((s, r) => s + r.totalEnteredPeriods, 0);
+  const totalRemainingPeriods = reports.reduce((s, r) => s + r.totalRemainingPeriods, 0);
+  const fullyScheduledTeachers = reports.filter(r => r.isFullyComplete).length;
+  const underloadedTeachers = reports.filter(r => r.workloadStatus === 'UNDERLOAD').length;
+  const overloadedTeachers = reports.filter(r => r.workloadStatus === 'OVERLOAD').length;
+  const overallAvgPercentage = totalRequiredPeriods > 0
+    ? Math.round((totalEnteredPeriods / totalRequiredPeriods) * 100)
+    : 0;
+
+  const drawHeader = (isContinuation: boolean = false) => {
+    // Top primary accent stripe
+    doc.setFillColor(30, 58, 138); // Deep Navy
+    doc.rect(margin, margin, contentWidth, 2.5, 'F');
+
+    let currentY = margin + 5;
+
+    // School Crest / Logo
+    if (schoolInfo?.logo) {
+      try {
+        doc.addImage(schoolInfo.logo, 'PNG', margin, currentY, 14, 14);
+      } catch (e) {
+        // Fallback badge
+        doc.setFillColor(241, 245, 249);
+        doc.setDrawColor(203, 213, 225);
+        doc.roundedRect(margin, currentY, 14, 14, 1.5, 1.5, 'FD');
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8);
+        doc.setTextColor(30, 58, 138);
+        doc.text(resolvedSchoolName.slice(0, 2).toUpperCase(), margin + 7, currentY + 9, { align: 'center' });
+      }
+    } else {
+      doc.setFillColor(241, 245, 249);
+      doc.setDrawColor(203, 213, 225);
+      doc.roundedRect(margin, currentY, 14, 14, 1.5, 1.5, 'FD');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(30, 58, 138);
+      doc.text(resolvedSchoolName.slice(0, 2).toUpperCase(), margin + 7, currentY + 9, { align: 'center' });
+    }
+
+    const textStartX = margin + 17;
+
+    // School Title
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(15, 23, 42);
+    doc.text(resolvedSchoolName.toUpperCase(), textStartX, currentY + 4.5);
+
+    // Subtitle & School Metadata
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(71, 85, 105);
+    const addressStr = schoolInfo?.address || 'IDARA YA TAALUMA NA UPANGAJI WA RATIBA';
+    const mottoStr = schoolInfo?.motto ? `"${schoolInfo.motto}"` : '';
+    doc.text([mottoStr, addressStr].filter(Boolean).join(' • '), textStartX, currentY + 8.5);
+
+    // Report Title Banner
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(30, 58, 138);
+    const titleText = isContinuation
+      ? `RIPOTI YA PROGRESSION YA UPANGAJI WA VIPINDI VYA WAALIMU (TEACHER PROGRESSION REPORT) — INAENDELEA`
+      : `RIPOTI YA PROGRESSION YA UPANGAJI WA VIPINDI VYA WAALIMU (TEACHER PERIOD PROGRESSION & WORKLOAD REPORT)`;
+    doc.text(titleText, textStartX, currentY + 12.8);
+
+    // Right-hand Document Roster Metadata
+    const rightX = pageWidth - margin;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(30, 58, 138);
+    doc.text('OFISI YA TAALUMA / ACADEMIC OFFICE', rightX, currentY + 4, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Tarehe: ${new Date().toLocaleDateString('sw-TZ', { day: '2-digit', month: 'short', year: 'numeric' })}`, rightX, currentY + 7.5, { align: 'right' });
+    doc.text(`Walimu Waliochambuliwa: ${totalTeachers} Walimu`, rightX, currentY + 11, { align: 'right' });
+
+    // Divider Line
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.4);
+    doc.line(margin, currentY + 16, pageWidth - margin, currentY + 16);
+
+    return currentY + 18;
+  };
+
+  let y = drawHeader(false);
+
+  // ---------------------------------------------------------------------------
+  // KPI METRICS SUMMARY STRIP
+  // ---------------------------------------------------------------------------
+  const cardWidth = (contentWidth - 12) / 5;
+  const cardHeight = 11;
+
+  const summaryCards = [
+    { label: 'JUMLA YA WALIMU', value: `${totalTeachers}`, sub: 'Kwenye orodha', color: [30, 58, 138] },
+    { label: 'VIPINDI VINAVYOTAKIWA', value: `${totalRequiredPeriods}`, sub: 'Kwa wiki nzima', color: [79, 70, 229] },
+    { label: 'VILIVYOINGIZWA', value: `${totalEnteredPeriods}`, sub: `${overallAvgPercentage}% ya vipindi`, color: [6, 95, 70] },
+    { label: 'VIPINDI VILIVYOBAKI', value: `${totalRemainingPeriods}`, sub: 'Bado kupangwa', color: [180, 83, 9] },
+    { label: 'WALIMU WAMEKAMILIKA', value: `${fullyScheduledTeachers} / ${totalTeachers}`, sub: `${overloadedTeachers} Overload · ${underloadedTeachers} Underload`, color: [15, 23, 42] }
+  ];
+
+  summaryCards.forEach((c, i) => {
+    const cx = margin + i * (cardWidth + 3);
+    doc.setFillColor(248, 250, 252);
+    doc.setDrawColor(226, 232, 240);
+    doc.roundedRect(cx, y, cardWidth, cardHeight, 1.2, 1.2, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(5.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(c.label, cx + 2.5, y + 3.2);
+
+    doc.setFontSize(8.5);
+    doc.setTextColor(c.color[0], c.color[1], c.color[2]);
+    doc.text(c.value, cx + 2.5, y + 7.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(5.5);
+    doc.setTextColor(148, 163, 184);
+    doc.text(c.sub, cx + 2.5, y + 10);
+  });
+
+  y += cardHeight + 4;
+
+  // ---------------------------------------------------------------------------
+  // MAIN TEACHER PROGRESSION TABLE
+  // ---------------------------------------------------------------------------
+  autoTable(doc, {
+    startY: y,
+    head: [
+      [
+        '#',
+        'Jina la Mwalimu (Teacher)',
+        'Masomo Anayofundisha',
+        'Madarasa / Mikondo',
+        'Vinavyotakiwa',
+        'Vilivyopangwa',
+        'Baki',
+        'Asilimia (%)',
+        'Hali ya Progression',
+        'Mzigo wa Kazi'
+      ]
+    ],
+    body: reports.map((r, idx) => {
+      const classesStr = r.assignedClasses.map(c => `${c.className} (${c.stream})`).join(', ') || 'Hajapangiwa darasa';
+      const subjectsStr = r.subjects.join(', ') || 'Hajasajiliwa somo';
+      const statusText = r.isFullyComplete
+        ? 'IMEKAMILIKA (100%)'
+        : r.totalEnteredPeriods === 0
+        ? 'HAIJAPANGWA (0%)'
+        : `PUNGUFU (${r.overallPercentage}%)`;
+
+      const workloadText = r.workloadStatus === 'OVERLOAD'
+        ? `ZIADA (${r.totalEnteredPeriods}p)`
+        : r.workloadStatus === 'UNDERLOAD'
+        ? `CHINI (${r.totalEnteredPeriods}p)`
+        : `SAWA (${r.totalEnteredPeriods}p)`;
+
+      return [
+        String(idx + 1),
+        `${r.teacherName} (${r.teacherInitial})`,
+        subjectsStr,
+        classesStr,
+        String(r.totalRequiredPeriods),
+        String(r.totalEnteredPeriods),
+        r.totalRemainingPeriods === 0 ? '0 (Sawa)' : `-${r.totalRemainingPeriods} Baki`,
+        `${r.overallPercentage}%`,
+        statusText,
+        workloadText
+      ];
+    }),
+    theme: 'grid',
+    headStyles: {
+      fillColor: [30, 58, 138],
+      textColor: [255, 255, 255],
+      fontSize: 6.8,
+      fontStyle: 'bold',
+      halign: 'center',
+      valign: 'middle'
+    },
+    bodyStyles: {
+      fontSize: 6.5,
+      textColor: [30, 41, 59],
+      valign: 'middle'
+    },
+    columnStyles: {
+      0: { cellWidth: 7, halign: 'center' },
+      1: { cellWidth: 42, fontStyle: 'bold' },
+      2: { cellWidth: 38 },
+      3: { cellWidth: 50 },
+      4: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+      5: { cellWidth: 20, halign: 'center', fontStyle: 'bold' },
+      6: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+      7: { cellWidth: 18, halign: 'center', fontStyle: 'bold' },
+      8: { cellWidth: 34, halign: 'center', fontStyle: 'bold' },
+      9: { cellWidth: 26, halign: 'center', fontStyle: 'bold' }
+    },
+    didParseCell: data => {
+      if (data.section === 'body') {
+        const rep = reports[data.row.index];
+        if (!rep) return;
+
+        // Completion status column (col 8)
+        if (data.column.index === 8) {
+          if (rep.isFullyComplete) {
+            data.cell.styles.textColor = [4, 120, 87];
+            data.cell.styles.fillColor = [236, 253, 245];
+          } else if (rep.totalEnteredPeriods === 0) {
+            data.cell.styles.textColor = [190, 18, 60];
+            data.cell.styles.fillColor = [255, 241, 242];
+          } else {
+            data.cell.styles.textColor = [180, 83, 9];
+            data.cell.styles.fillColor = [255, 251, 235];
+          }
+        }
+
+        // Workload status column (col 9)
+        if (data.column.index === 9) {
+          if (rep.workloadStatus === 'OVERLOAD') {
+            data.cell.styles.textColor = [126, 34, 206];
+            data.cell.styles.fillColor = [250, 245, 255];
+          } else if (rep.workloadStatus === 'UNDERLOAD') {
+            data.cell.styles.textColor = [180, 83, 9];
+            data.cell.styles.fillColor = [255, 251, 235];
+          } else {
+            data.cell.styles.textColor = [4, 120, 87];
+            data.cell.styles.fillColor = [236, 253, 245];
+          }
+        }
+      }
+    },
+    margin: { left: margin, right: margin }
+  });
+
+  y = (doc as any).lastAutoTable.finalY + 8;
+
+  // ---------------------------------------------------------------------------
+  // DETAILED CLASS BREAKDOWN FOR INDIVIDUAL TEACHERS (If single teacher filtered or room permits)
+  // ---------------------------------------------------------------------------
+  if (reports.length === 1) {
+    const single = reports[0];
+    if (y > pageHeight - 50) {
+      doc.addPage();
+      y = margin;
+      drawHeader(true);
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 58, 138);
+    doc.text(`MCHANGANUO WA MADARASA NA VIPINDI: ${single.teacherName.toUpperCase()}`, margin, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [
+        ['#', 'Darasa & Mkondo', 'Somo', 'Vipindi Vinavyotakiwa', 'Vilivyoingizwa', 'Baki', 'Asilimia', 'Hali']
+      ],
+      body: single.classProgressionItems.map((item, i) => [
+        String(i + 1),
+        `${item.className} - ${item.stream}`,
+        item.subject,
+        String(item.requiredPeriods),
+        String(item.enteredPeriods),
+        item.status === 'COMPLETE' ? '0 (Sawa)' : `-${item.remainingPeriods} Baki`,
+        `${item.percentage}%`,
+        item.status === 'COMPLETE' ? 'IMEKAMILIKA' : item.status === 'MISSING' ? 'HAIJAINGIZWA' : 'PUNGUFU'
+      ]),
+      theme: 'grid',
+      headStyles: {
+        fillColor: [241, 245, 249],
+        textColor: [15, 23, 42],
+        fontSize: 6.8,
+        fontStyle: 'bold',
+        halign: 'center'
+      },
+      bodyStyles: {
+        fontSize: 6.5,
+        textColor: [30, 41, 59],
+        valign: 'middle'
+      },
+      margin: { left: margin, right: margin }
+    });
+
+    y = (doc as any).lastAutoTable.finalY + 8;
+  }
+
+  // ---------------------------------------------------------------------------
+  // SIGNATURES & OFFICIAL SCHOOL STAMP
+  // ---------------------------------------------------------------------------
+  if (y > pageHeight - 35) {
+    doc.addPage();
+    y = margin;
+    drawHeader(true);
+  }
+
+  const sigY = y + 8;
+  const sigColWidth = (contentWidth - 16) / 3;
+
+  // Academic Master
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin, sigY, margin + sigColWidth, sigY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('MKUU WA TAALUMA (ACADEMIC MASTER)', margin + sigColWidth / 2, sigY + 4.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Sahihi & Tarehe (Signature & Date)', margin + sigColWidth / 2, sigY + 8, { align: 'center' });
+
+  // School Stamp
+  const stampX = margin + sigColWidth + 8;
+  doc.setDrawColor(203, 213, 225);
+  doc.setLineDashPattern([1.5, 1.5], 0);
+  doc.roundedRect(stampX, sigY - 6, sigColWidth, 16, 2, 2, 'D');
+  doc.setLineDashPattern([], 0);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6.8);
+  doc.setTextColor(148, 163, 184);
+  doc.text('MHURI WA SHULE (OFFICIAL STAMP)', stampX + sigColWidth / 2, sigY + 3.5, { align: 'center' });
+
+  // Head of School
+  const headX = margin + (sigColWidth + 8) * 2;
+  doc.setDrawColor(148, 163, 184);
+  doc.line(headX, sigY, headX + sigColWidth, sigY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text('MKUU WA SHULE (HEAD OF SCHOOL)', headX + sigColWidth / 2, sigY + 4.5, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.5);
+  doc.setTextColor(100, 116, 139);
+  doc.text('Sahihi & Idhini (Signature & Approval)', headX + sigColWidth / 2, sigY + 8, { align: 'center' });
+
+  // Footer on all pages
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `${resolvedSchoolName} • Ripoti ya Progression ya Upangaji wa Vipindi vya Walimu • Ukurasa ${p} kati ya ${totalPages}`,
+      pageWidth / 2,
+      pageHeight - 5,
+      { align: 'center' }
+    );
+  }
+
+  const fileName = `${resolvedSchoolName.replace(/\s+/g, '_')}_Teacher_Progression_Report.pdf`;
+
+  if (mode === 'print') {
+    doc.autoPrint();
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+
+    let printIframe = document.getElementById('haby-teacher-progression-pdf-print-frame') as HTMLIFrameElement | null;
+    if (printIframe) printIframe.remove();
+    printIframe = document.createElement('iframe');
+    printIframe.id = 'haby-teacher-progression-pdf-print-frame';
+    printIframe.style.position = 'fixed';
+    printIframe.style.right = '0';
+    printIframe.style.bottom = '0';
+    printIframe.style.width = '1px';
+    printIframe.style.height = '1px';
+    printIframe.style.border = '0';
+    printIframe.style.opacity = '0.01';
+    printIframe.src = blobUrl;
+    document.body.appendChild(printIframe);
+
+    printIframe.onload = () => {
+      try {
+        printIframe?.contentWindow?.focus();
+        printIframe?.contentWindow?.print();
+      } catch (e) {
+        window.print();
+      }
+    };
+  } else {
+    doc.save(fileName);
+  }
+}
+
+

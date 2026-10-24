@@ -421,7 +421,7 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
             if (studentExamRecs.length > 0) {
               recordsToUse = studentExamRecs.map(r => ({
                 id: r.id,
-                examName: `${r.examType.toUpperCase()} EXAMINATION ${r.academicYear}`,
+                examName: `${(r.examType || 'EXAM').toUpperCase()} EXAMINATION ${r.academicYear || '2026'}`,
                 examType: r.examType,
                 academicYear: r.academicYear || '2026',
                 term: r.term || 'Term 1',

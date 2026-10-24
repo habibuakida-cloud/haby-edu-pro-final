@@ -50,8 +50,11 @@ import {
   SECONDARY_SUBJECTS,
   INITIAL_STREAM_SETTINGS 
 } from '../constants/defaults';
+import { SubjectRegistry } from '../constants/SubjectRegistry';
+
+
 import { downloadFile, escapeCSV, printFormattedSection } from '../utils/export';
-import { formatStudentRegNo, getNextStudentRegNo } from '../utils/studentRegUtils';
+import { formatStudentRegNo, getNextStudentRegNo, generateStudentRegistrationId } from '../utils/studentRegUtils';
 import { GenderSummary } from './common/GenderSummary';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
 import { db } from '../lib/firebaseClient';
@@ -120,6 +123,8 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   const [level, setLevel] = useState<EducationLevel>('CSEE');
   const [stream, setStream] = useState('STREAM A');
   const [combination, setCombination] = useState('PCM');
+  const [academicYear, setAcademicYear] = useState<string>(String(new Date().getFullYear()));
+  const [customRegNo, setCustomRegNo] = useState<string>('');
   const [dob, setDob] = useState('2010-01-01');
   const [parentPhone, setParentPhone] = useState('');
   const [parentName, setParentName] = useState('');
@@ -171,7 +176,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
   }, [students]);
 
   // List filters & sorting (with gender-grouped alphabetical arrangement per user request)
-  const [activeTab, setActiveTab] = useState<'form' | 'register_list' | 'classes_streams' | 'subject_registration' | 'parents_list' | 'class_lists'>('subject_registration');
+  const [activeTab, setActiveTab] = useState<'form' | 'register_list' | 'classes_streams' | 'subject_registration' | 'parents_list' | 'class_lists'>('register_list');
   
   // DB Parents list for Parent Directory
   const [dbParents, setDbParents] = useState<any[]>([]);
@@ -330,26 +335,33 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           );
         }
 
-        // Sorting
+        // Sorting (Automatic gender sorting: Secondary -> Girls first, Primary -> Boys first, alphabetical by name)
         stStudents.sort((a, b) => {
+          const aIsGirl = (a.gender || '').toLowerCase().startsWith('f') || a.sex === 'F';
+          const bIsGirl = (b.gender || '').toLowerCase().startsWith('f') || b.sex === 'F';
+          const isPrimaryClass = PRIMARY_CLASSES.includes(c.className) || NURSERY_CLASSES.includes(c.className) || c.level === 'PRIMARY' || c.level === 'PRE_PRIMARY';
+
           if (classListSortBy === 'name_asc') {
             return a.name.localeCompare(b.name);
           } else if (classListSortBy === 'regNo_asc') {
             return (a.regNo || '').localeCompare(b.regNo || '');
           } else if (classListSortBy === 'girls_first_asc') {
-            const aIsGirl = (a.gender || '').toLowerCase().startsWith('f') || a.sex === 'F';
-            const bIsGirl = (b.gender || '').toLowerCase().startsWith('f') || b.sex === 'F';
             if (aIsGirl && !bIsGirl) return -1;
             if (!aIsGirl && bIsGirl) return 1;
             return a.name.localeCompare(b.name);
           } else if (classListSortBy === 'boys_first_asc') {
-            const aIsGirl = (a.gender || '').toLowerCase().startsWith('f') || a.sex === 'F';
-            const bIsGirl = (b.gender || '').toLowerCase().startsWith('f') || b.sex === 'F';
             if (!aIsGirl && bIsGirl) return -1;
             if (aIsGirl && !bIsGirl) return 1;
             return a.name.localeCompare(b.name);
           }
-          return 0;
+          if (isPrimaryClass) {
+            if (!aIsGirl && bIsGirl) return -1;
+            if (aIsGirl && !bIsGirl) return 1;
+          } else {
+            if (aIsGirl && !bIsGirl) return -1;
+            if (!aIsGirl && bIsGirl) return 1;
+          }
+          return a.name.localeCompare(b.name);
         });
 
         const boys = stStudents.filter(s => !(s.gender || '').toLowerCase().startsWith('f') && s.sex !== 'F').length;
@@ -422,7 +434,135 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
   // Edit and View Modals
   const [editingStudent, setEditingStudent] = useState<Student | null>(null);
+  const [editSubjectSearch, setEditSubjectSearch] = useState<string>('');
+  const [editCustomSubject, setEditCustomSubject] = useState<string>('');
   const [viewingRecordStudent, setViewingRecordStudent] = useState<Student | null>(null);
+
+  const formatStudentSubjectLabel = (codeOrName: string): string => {
+    if (!codeOrName) return '';
+    const trimmed = String(codeOrName).trim();
+    const byCode = SUBJECT_LIST.find(s => s.code === trimmed);
+    if (byCode) return `${byCode.name} (${byCode.code})`;
+    return trimmed;
+  };
+
+  const getDefaultSubjectsForStudentClass = (cName: string, lvl?: EducationLevel, combo?: string): string[] => {
+    if (NURSERY_CLASSES.includes(cName) || lvl === 'PRE_PRIMARY') {
+      return [...NURSERY_SUBJECTS_LIST];
+    }
+    if (cName === 'Standard 1' || cName === 'Standard 2') {
+      return [...LOWER_PRIMARY_SUBJECTS_LIST];
+    }
+    if (PRIMARY_CLASSES.includes(cName) || lvl === 'PRIMARY') {
+      return [...UPPER_PRIMARY_SUBJECTS_LIST];
+    }
+    if (['Form 5', 'Form 6'].includes(cName) || lvl === 'ACSEE') {
+      const comboMap: Record<string, string[]> = {
+        'PCM': ['Physics', 'Chemistry', 'Advanced Mathematics'],
+        'PCB': ['Physics', 'Chemistry', 'Biology'],
+        'CBG': ['Chemistry', 'Biology', 'Geography'],
+        'HGE': ['History', 'Geography', 'Economics'],
+        'HKL': ['History', 'Kiswahili', 'English Language'],
+        'EGM': ['Economics', 'Geography', 'Advanced Mathematics'],
+        'ECA': ['Economics', 'Chemistry', 'Agriculture'],
+        'CBA': ['Chemistry', 'Biology', 'Agriculture'],
+        'PGM': ['Physics', 'Geography', 'Advanced Mathematics'],
+        'PGK': ['Physics', 'Geography', 'Kiswahili'],
+        'HGL': ['History', 'Geography', 'English Language'],
+        'HGK': ['History', 'Geography', 'Kiswahili'],
+        'KLF': ['Kiswahili', 'English Language', 'Fine Art']
+      };
+      const compulsory = SubjectRegistry.getCompulsoryAlevel();
+      const specific = comboMap[(combo || 'PCM').toUpperCase()] || ['Physics', 'Chemistry', 'Advanced Mathematics'];
+      return Array.from(new Set([...compulsory, ...specific]));
+    }
+    return SubjectRegistry.getCoreOlevel().slice(0, 9);
+  };
+
+  // Bulk Registration / Index Number Generator Modal State
+  const [isRegNoGeneratorOpen, setIsRegNoGeneratorOpen] = useState<boolean>(false);
+  const [genRegClass, setGenRegClass] = useState<string>('ALL');
+  const [genRegStream, setGenRegStream] = useState<string>('ALL');
+  const [genRegOrder, setGenRegOrder] = useState<'girls_first' | 'boys_first' | 'alpha' | 'existing'>('girls_first');
+  const [genRegPrefix, setGenRegPrefix] = useState<string>(() => {
+    const raw = schoolInfo?.schoolNumber || '0123';
+    return raw.toUpperCase().startsWith('S') || raw.toUpperCase().startsWith('P') ? raw : `S.${raw}`;
+  });
+  const [genRegStart, setGenRegStart] = useState<string>('0001');
+  const [genRegIncludeYear, setGenRegIncludeYear] = useState<boolean>(true);
+  const [genRegYear, setGenRegYear] = useState<string>(String(new Date().getFullYear()));
+
+  const handleExecuteBulkRegNoGeneration = () => {
+    const targetList = students.filter(s => {
+      if (genRegClass !== 'ALL' && s.className !== genRegClass) return false;
+      if (genRegStream !== 'ALL') {
+        const st = (s.stream || s.combination || '').trim().replace(/^STREAM\s+/i, '').toUpperCase();
+        if (st !== genRegStream.toUpperCase()) return false;
+      }
+      return true;
+    });
+
+    if (targetList.length === 0) {
+      setStudentCreatedNotice('Hakuna wanafunzi waliopatikana kwenye darasa/mkondo uliochagua.');
+      setTimeout(() => setStudentCreatedNotice(null), 4000);
+      setIsRegNoGeneratorOpen(false);
+      return;
+    }
+
+    const sortedTarget = [...targetList].sort((a, b) => {
+      const aName = (a.name || a.fullName || '').trim();
+      const bName = (b.name || b.fullName || '').trim();
+      const aIsGirl = (a.gender || '').toLowerCase().startsWith('f') || a.sex === 'F';
+      const bIsGirl = (b.gender || '').toLowerCase().startsWith('f') || b.sex === 'F';
+      const isPrimaryClass = PRIMARY_CLASSES.includes(genRegClass) || NURSERY_CLASSES.includes(genRegClass) || genRegClass.startsWith('Standard');
+
+      if (genRegOrder === 'girls_first' || (!isPrimaryClass && genRegOrder === 'alpha')) {
+        if (aIsGirl && !bIsGirl) return -1;
+        if (!aIsGirl && bIsGirl) return 1;
+        return aName.localeCompare(bName);
+      }
+      if (genRegOrder === 'boys_first' || (isPrimaryClass && genRegOrder === 'alpha')) {
+        if (!aIsGirl && bIsGirl) return -1;
+        if (aIsGirl && !bIsGirl) return 1;
+        return aName.localeCompare(bName);
+      }
+      return (a.regNo || '').localeCompare(b.regNo || '', undefined, { numeric: true });
+    });
+
+    const startIdx = Math.max(1, parseInt(genRegStart, 10) || 1);
+    const padLen = Math.max(genRegStart.trim().length, 4);
+    const cleanPref = (genRegPrefix || 'S.0123').trim().replace(/\/+$/, '');
+    const assignedMap = new Map<string, string>();
+
+    sortedTarget.forEach((st, i) => {
+      const padded = String(startIdx + i).padStart(padLen, '0');
+      const finalReg = genRegIncludeYear && genRegYear.trim()
+        ? `${cleanPref}/${padded}/${genRegYear.trim()}`
+        : `${cleanPref}/${padded}`;
+      assignedMap.set(String(st.id), finalReg);
+    });
+
+    const updatedAll = students.map(s => {
+      const newReg = assignedMap.get(String(s.id));
+      return newReg ? { ...s, regNo: newReg } : s;
+    });
+
+    if (onUpdateStudents) {
+      onUpdateStudents(updatedAll);
+    } else {
+      updatedAll.filter(s => assignedMap.has(String(s.id))).forEach(s => onUpdateStudent(s));
+    }
+
+    const firstNo = assignedMap.get(String(sortedTarget[0].id)) || '';
+    const lastNo = assignedMap.get(String(sortedTarget[sortedTarget.length - 1].id)) || '';
+    setIsRegNoGeneratorOpen(false);
+    setActiveTab('register_list');
+    setSortBy('regNo_asc');
+    setStudentCreatedNotice(
+      `✓ Namba za Usajili (${firstNo} → ${lastNo}) zimezalishwa na kuhifadhiwa kwenye Database kwa wanafunzi ${sortedTarget.length}!`
+    );
+    setTimeout(() => setStudentCreatedNotice(null), 6000);
+  };
 
   const handleQuickIncreaseStream = (targetClass: string) => {
     if (!onUpdateStreamSettings) return;
@@ -587,7 +727,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       setTimeout(() => setShowAutoFillNotice(false), 3000);
     } else if (['Form 1', 'Form 2', 'Form 3', 'Form 4'].includes(newClass)) {
       setLevel('CSEE');
-      setSelectedSubjects(['English Language', 'Kiswahili', 'Basic Mathematics', 'Biology', 'Chemistry', 'Physics', 'Geography', 'History', 'Civics']);
+      setSelectedSubjects(SubjectRegistry.getCoreOlevel());
       setShowAutoFillNotice(true);
       setTimeout(() => setShowAutoFillNotice(false), 3000);
     } else if (['Form 5', 'Form 6'].includes(newClass)) {
@@ -607,7 +747,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         setSelectedSubjects(UPPER_PRIMARY_SUBJECTS_LIST);
       }
     } else if (newLevel === 'CSEE') {
-      setSelectedSubjects(['English Language', 'Kiswahili', 'Basic Mathematics', 'Biology', 'Chemistry', 'Physics', 'Geography', 'History', 'Civics']);
+      setSelectedSubjects(SubjectRegistry.getCoreOlevel());
     } else if (newLevel === 'ACSEE') {
       autoFillCombinationSubjects(combination);
     }
@@ -630,7 +770,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       'KLF': ['Kiswahili', 'English Language', 'Fine Art']
     };
 
-    const compulsory = ['Academic Communications', 'Historia Ya Tanzania Na Maadili'];
+    const compulsory = SubjectRegistry.getCompulsoryAlevel();
     const specific = comboMap[combo] || ['Physics', 'Chemistry', 'Mathematics'];
     setSelectedSubjects([...compulsory, ...specific]);
     setShowAutoFillNotice(true);
@@ -693,8 +833,14 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
 
     const isPrimarySection = level === 'PRIMARY' || level === 'PRE_PRIMARY' || 
       PRIMARY_CLASSES.includes(className) || NURSERY_CLASSES.includes(className);
-    const regNo = getNextStudentRegNo(students, schoolInfo?.schoolNumber, undefined, isPrimarySection);
     const activeStream = level === 'ACSEE' ? (combination || stream) : (stream || 'STREAM A');
+    const regNo = customRegNo.trim() || generateStudentRegistrationId({
+      existingStudents: students,
+      schoolNumber: schoolInfo?.schoolNumber,
+      academicYear,
+      stream: activeStream,
+      isPrimary: isPrimarySection
+    });
     const newStudent: Student = {
       id: Date.now(),
       regNo,
@@ -737,6 +883,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     }
 
     setName('');
+    setCustomRegNo('');
     setParentPhone('');
     setParentName('');
     setParentPin(DEFAULT_PARENT_PIN);
@@ -768,7 +915,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       '0754123456',
       '2010-05-14',
       'English Language; Kiswahili; Mathematics; Physics; Chemistry; Biology',
-      formatStudentRegNo(schoolInfo?.schoolNumber, 1)
+      generateStudentRegistrationId({
+        schoolNumber: schoolInfo?.schoolNumber,
+        academicYear,
+        stream: 'STREAM A',
+        sequenceNumber: 1
+      })
     ];
     downloadFile('student_registration_with_phone_template.csv', [headers.map(escapeCSV).join(','), sample.map(escapeCSV).join(',')].join('\n'));
   };
@@ -836,7 +988,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               PRIMARY_CLASSES.includes(sClass) || NURSERY_CLASSES.includes(sClass);
             newStudentsBatch.push({
               id: Date.now() + index,
-              regNo: explicitRegNo || formatStudentRegNo(schoolInfo?.schoolNumber, students.length + newStudentsBatch.length + 1, undefined, isBatchPrimary),
+              regNo: explicitRegNo || generateStudentRegistrationId({
+                existingStudents: [...students, ...newStudentsBatch],
+                schoolNumber: schoolInfo?.schoolNumber,
+                academicYear,
+                stream: sStream,
+                isPrimary: isBatchPrimary
+              }),
               name: sName,
               gender: sGender,
               className: sClass,
@@ -943,6 +1101,10 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     }
     return true;
   }).sort((a, b) => {
+    const isGirlA = (a.gender || '').toLowerCase().startsWith('f') || a.sex === 'F';
+    const isGirlB = (b.gender || '').toLowerCase().startsWith('f') || b.sex === 'F';
+    const isPrimaryA = PRIMARY_CLASSES.includes(a.className) || NURSERY_CLASSES.includes(a.className) || a.level === 'PRIMARY' || a.level === 'PRE_PRIMARY';
+
     if (sortBy === 'regNo_asc') {
       return (a.regNo || '').localeCompare(b.regNo || '', undefined, { numeric: true });
     }
@@ -950,18 +1112,25 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       return (b.regNo || '').localeCompare(a.regNo || '', undefined, { numeric: true });
     }
     if (sortBy === 'girls_first_asc') {
-      const isGirlA = (a.gender || '').toLowerCase().startsWith('f');
-      const isGirlB = (b.gender || '').toLowerCase().startsWith('f');
       if (isGirlA && !isGirlB) return -1;
       if (!isGirlA && isGirlB) return 1;
       return a.name.localeCompare(b.name);
     }
     if (sortBy === 'boys_first_asc') {
-      const isBoyA = !(a.gender || '').toLowerCase().startsWith('f');
-      const isBoyB = !(b.gender || '').toLowerCase().startsWith('f');
-      if (isBoyA && !isBoyB) return -1;
-      if (!isBoyA && isBoyB) return 1;
+      if (!isGirlA && isGirlB) return -1;
+      if (isGirlA && !isGirlB) return 1;
       return a.name.localeCompare(b.name);
+    }
+    if (sortBy === 'name_asc') {
+      return a.name.localeCompare(b.name);
+    }
+    // Default smart sorting based on level: Primary -> Boys first, Secondary -> Girls first, then name alphabetical
+    if (isPrimaryA) {
+      if (!isGirlA && isGirlB) return -1;
+      if (isGirlA && !isGirlB) return 1;
+    } else {
+      if (isGirlA && !isGirlB) return -1;
+      if (!isGirlA && isGirlB) return 1;
     }
     return a.name.localeCompare(b.name);
   });
@@ -1241,7 +1410,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {/* Auto-Generate Student Registration Numbers Button */}
+          <button
+            type="button"
+            onClick={() => {
+              if (classFilter !== 'ALL') setGenRegClass(classFilter);
+              setIsRegNoGeneratorOpen(true);
+            }}
+            className="px-3.5 py-2 bg-gradient-to-r from-indigo-700 via-blue-700 to-indigo-800 hover:from-indigo-800 hover:to-blue-900 text-white font-black rounded-xl text-xs flex items-center gap-1.5 shadow-md transition-all cursor-pointer active:scale-95 shrink-0"
+            title="Zalisha na panga upya namba za usajili za wanafunzi (Girls First A-Z / Alphabetical)"
+          >
+            <ArrowUpDown className="w-4 h-4 text-amber-300" />
+            <span>Generate Reg Numbers</span>
+          </button>
+
           {/* Bulk Promotion Wizard Button */}
           <button
             type="button"
@@ -1296,39 +1479,115 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       {/* Subject Registration Tab */}
       {activeTab === 'subject_registration' && (
         <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-5">
-          <h2 className="text-xl font-bold text-[#1f4d8b]">Class-wise Subject Registration</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <select
-              value={classFilter === 'ALL' ? '' : classFilter}
-              onChange={e => setClassFilter(e.target.value || 'ALL')}
-              className="p-2 border border-slate-300 rounded-lg text-sm"
-            >
-              <option value="">Select Class</option>
-              {allAvailableClassesList.map(c => <option key={c} value={c}>{c}</option>)}
-            </select>
-          </div>
-          {classFilter !== 'ALL' && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead>
-                  <tr className="border-b font-bold text-slate-500">
-                    <th className="p-2">Reg No</th>
-                    <th className="p-2">Student Name</th>
-                    <th className="p-2">Subjects (Codes)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedFilteredStudents.filter(s => s.className === classFilter).map(s => (
-                    <tr key={s.id} className="border-b hover:bg-slate-50">
-                      <td className="p-2">{s.regNo}</td>
-                      <td className="p-2">{s.name}</td>
-                      <td className="p-2 font-mono text-blue-700">{(s.subjects || []).join(', ')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-3">
+            <div>
+              <h2 className="text-xl font-bold text-[#1f4d8b]">Class-wise Subject Registration &amp; Editing</h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Angalia masomo ya kila mwanafunzi, futa somo (✕), ongeza somo (+), au bonyeza <strong>Edit</strong> kuhariri taarifa zote za mwanafunzi.
+              </p>
             </div>
-          )}
+            <div className="flex items-center gap-2">
+              <select
+                value={classFilter}
+                onChange={e => setClassFilter(e.target.value || 'ALL')}
+                className="px-3 py-2 border border-slate-300 rounded-lg text-xs font-bold bg-white text-slate-800"
+              >
+                <option value="ALL">All Classes ({students.length})</option>
+                {allAvailableClassesList.map(c => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-xs text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 font-bold text-slate-600 uppercase text-[11px]">
+                  <th className="p-2.5 border-r border-slate-200 w-28">Reg No</th>
+                  <th className="p-2.5 border-r border-slate-200 w-48">Student Name</th>
+                  <th className="p-2.5 border-r border-slate-200 w-32">Class &amp; Stream</th>
+                  <th className="p-2.5 border-r border-slate-200">Masomo Aliyosajiliwa (Futa ✕ au Ongeza +)</th>
+                  <th className="p-2.5 text-center w-28">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sortedFilteredStudents
+                  .filter(s => classFilter === 'ALL' || s.className === classFilter)
+                  .map(s => {
+                    const studentSubs = Array.isArray(s.subjects) ? s.subjects : [];
+                    return (
+                      <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="p-2.5 border-r border-slate-200 font-mono font-bold text-blue-700">{s.regNo}</td>
+                        <td className="p-2.5 border-r border-slate-200 font-bold text-slate-800">{s.name}</td>
+                        <td className="p-2.5 border-r border-slate-200 text-slate-600 font-medium">
+                          {s.className} ({s.stream || s.combination || 'A'})
+                        </td>
+                        <td className="p-2.5 border-r border-slate-200">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {studentSubs.map((sub, sIdx) => (
+                              <span
+                                key={`${sub}_${sIdx}`}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-blue-50 text-blue-900 border border-blue-200"
+                              >
+                                <span>{formatStudentSubjectLabel(sub)}</span>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextSubs = studentSubs.filter((_, i) => i !== sIdx);
+                                    const nextMarks = { ...(s.marks || {}) };
+                                    delete nextMarks[sub];
+                                    onUpdateStudent({ ...s, subjects: nextSubs, marks: nextMarks });
+                                  }}
+                                  className="text-blue-600 hover:text-rose-600 hover:bg-rose-100 rounded-full p-0.5 cursor-pointer"
+                                  title={`Futa somo la ${formatStudentSubjectLabel(sub)}`}
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                            <select
+                              value=""
+                              onChange={e => {
+                                const newSub = e.target.value;
+                                if (newSub && !studentSubs.includes(newSub)) {
+                                  onUpdateStudent({ ...s, subjects: [...studentSubs, newSub] });
+                                }
+                              }}
+                              className="px-2 py-0.5 text-[11px] font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-md cursor-pointer"
+                            >
+                              <option value="">+ Ongeza Somo...</option>
+                              {SubjectRegistry.getAllNames().map(subName => (
+                                <option key={subName} value={subName} disabled={studentSubs.includes(subName)}>
+                                  {subName}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        </td>
+                        <td className="p-2.5 text-center">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditSubjectSearch('');
+                              setEditCustomSubject('');
+                              setEditingStudent({
+                                ...s,
+                                subjects: Array.isArray(s.subjects) ? [...s.subjects] : []
+                              });
+                            }}
+                            className="px-2.5 py-1 text-[11px] font-bold text-amber-800 bg-amber-50 hover:bg-amber-100 border border-amber-300 rounded-lg cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <Edit3 className="w-3 h-3" />
+                            <span>Edit</span>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
@@ -1343,14 +1602,15 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               </p>
             </div>
             <div className="text-xs font-bold text-blue-800 bg-blue-50 px-3.5 py-2 rounded-lg border border-blue-200 flex items-center gap-1.5 shadow-xs">
-              <span className="text-slate-500 uppercase text-[10px] tracking-wider">Next Reg Token:</span>
+              <span className="text-slate-500 uppercase text-[10px] tracking-wider">Next Reg ID ({academicYear} • {level === 'ACSEE' ? (combination || stream) : stream}):</span>
               <span className="font-mono text-xs font-black text-blue-700 bg-white px-2 py-0.5 rounded border border-blue-200">
-                {getNextStudentRegNo(
-                  students, 
-                  schoolInfo?.schoolNumber, 
-                  undefined, 
-                  level === 'PRIMARY' || level === 'PRE_PRIMARY' || PRIMARY_CLASSES.includes(className) || NURSERY_CLASSES.includes(className)
-                )}
+                {customRegNo.trim() || generateStudentRegistrationId({
+                  existingStudents: students,
+                  schoolNumber: schoolInfo?.schoolNumber,
+                  academicYear,
+                  stream: level === 'ACSEE' ? (combination || stream) : stream,
+                  isPrimary: level === 'PRIMARY' || level === 'PRE_PRIMARY' || PRIMARY_CLASSES.includes(className) || NURSERY_CLASSES.includes(className)
+                })}
               </span>
             </div>
           </div>
@@ -1541,6 +1801,52 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     </select>
                   </div>
                 )}
+
+                <div>
+                  <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Academic Year *</label>
+                  <input
+                    type="number"
+                    min="2000"
+                    max="2099"
+                    value={academicYear}
+                    onChange={e => setAcademicYear(e.target.value || String(new Date().getFullYear()))}
+                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg bg-white font-mono font-bold text-slate-900"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-bold text-slate-600 uppercase">Registration ID (Auto by Year &amp; Stream)</label>
+                    {customRegNo.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setCustomRegNo('')}
+                        className="text-[10px] font-bold text-blue-600 hover:underline cursor-pointer"
+                      >
+                        Reset Auto
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    type="text"
+                    value={
+                      customRegNo ||
+                      generateStudentRegistrationId({
+                        existingStudents: students,
+                        schoolNumber: schoolInfo?.schoolNumber,
+                        academicYear,
+                        stream: level === 'ACSEE' ? (combination || stream) : stream,
+                        isPrimary:
+                          level === 'PRIMARY' ||
+                          level === 'PRE_PRIMARY' ||
+                          PRIMARY_CLASSES.includes(className) ||
+                          NURSERY_CLASSES.includes(className)
+                      })
+                    }
+                    onChange={e => setCustomRegNo(e.target.value)}
+                    className="w-full px-3 py-2 text-sm border border-blue-300 rounded-lg bg-blue-50/50 font-mono font-black text-blue-800 focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
 
                 <div>
                   <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Date of Birth</label>
@@ -2646,7 +2952,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2 mt-0.5">
                                   <span>CLASS NOMINAL ROLL &amp; REGISTER:</span>
                                   <span className="px-2.5 py-0.5 bg-blue-100 text-blue-900 rounded font-black text-xs">
-                                    {cEntry.className.toUpperCase()} - {sEntry.streamName.toUpperCase()}
+                                    {(cEntry.className || '').toUpperCase()} - {(sEntry.streamName || '').toUpperCase()}
                                   </span>
                                 </h3>
                                 <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
@@ -3138,40 +3444,57 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         </div>
       )}
 
-      {/* Edit Student Modal */}
+      {/* Edit Student Modal (Full Pre-Populated Student Information + Subjects Delete/Add) */}
       {editingStudent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-xs p-4">
-          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-6 space-y-4">
-            <div className="flex items-center justify-between border-b pb-2">
-              <h3 className="text-base font-bold text-slate-800">
-                Edit Student Information ({editingStudent.regNo})
-              </h3>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full p-5 sm:p-6 space-y-5 max-h-[92vh] overflow-y-auto border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-[#1f4d8b] flex items-center gap-2">
+                  <Edit3 className="w-5 h-5 text-amber-600" />
+                  <span>Hariri Taarifa za Mwanafunzi / Edit Student ({editingStudent.regNo || 'No Reg'})</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Taarifa zote za awali zimejazwa hapa chini. Unaweza kubadilisha, kufuta (✕), au kuongeza (+) taarifa na masomo kisha ubofye <strong>Hifadhi Mabadiliko</strong>.
+                </p>
+              </div>
               <button
+                type="button"
                 onClick={() => setEditingStudent(null)}
-                className="text-slate-400 hover:text-slate-600"
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            <div className="flex gap-4 items-start">
+            <div className="flex flex-col md:flex-row gap-5 items-start">
               {/* Passport in edit modal */}
-              <div className="flex flex-col items-center gap-1.5">
-                <div className="w-20 h-24 bg-slate-100 border border-slate-300 rounded overflow-hidden flex items-center justify-center">
+              <div className="flex flex-col items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl w-full md:w-36 shrink-0">
+                <div className="relative w-24 h-28 bg-white border border-slate-300 rounded-lg overflow-hidden flex items-center justify-center shadow-2xs">
                   {editingStudent.passportPhoto ? (
-                    <img
-                      src={editingStudent.passportPhoto}
-                      alt={editingStudent.name}
-                      className="w-full h-full object-cover"
-                    />
+                    <>
+                      <img
+                        src={editingStudent.passportPhoto}
+                        alt={editingStudent.name}
+                        className="w-full h-full object-cover"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setEditingStudent({ ...editingStudent, passportPhoto: undefined })}
+                        className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full hover:bg-rose-700 shadow-xs cursor-pointer"
+                        title="Futa Picha (Remove Photo)"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </>
                   ) : (
-                    <User className="w-8 h-8 text-slate-400" />
+                    <User className="w-10 h-10 text-slate-300" />
                   )}
                 </div>
-                <div className="flex flex-col items-center gap-1 mt-1 text-[9px] font-semibold text-slate-500">
-                  <label className="text-blue-600 hover:underline cursor-pointer flex items-center gap-0.5">
-                    <Upload className="w-2.5 h-2.5" />
-                    Upload Photo
+                <div className="flex flex-col items-center gap-1.5 w-full text-[11px] font-bold">
+                  <label className="w-full py-1 px-2 text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md cursor-pointer flex items-center justify-center gap-1">
+                    <Upload className="w-3 h-3" />
+                    <span>Upload Photo</span>
                     <input
                       type="file"
                       accept="image/*"
@@ -3185,27 +3508,90 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       setCameraCaptureTarget('edit');
                       setIsCameraCaptureOpen(true);
                     }}
-                    className="text-slate-600 hover:text-slate-900 cursor-pointer flex items-center gap-0.5"
+                    className="w-full py-1 px-2 text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md cursor-pointer flex items-center justify-center gap-1"
                   >
-                    <Camera className="w-2.5 h-2.5 text-blue-600" />
-                    Take Photo
+                    <Camera className="w-3 h-3 text-blue-600" />
+                    <span>Take Photo</span>
                   </button>
+                  {editingStudent.passportPhoto && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingStudent({ ...editingStudent, passportPhoto: undefined })}
+                      className="w-full py-1 px-2 text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md cursor-pointer flex items-center justify-center gap-1"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                      <span>Futa Picha</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
-              <div className="flex-1 space-y-3">
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1">Full Name</label>
-                  <input
-                    type="text"
-                    value={editingStudent.name}
-                    onChange={e => setEditingStudent({ ...editingStudent, name: e.target.value })}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-2">
+              {/* Biographical, Class/Stream & Parent Fields */}
+              <div className="flex-1 space-y-3 w-full">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1">Class</label>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Jina Kamili la Mwanafunzi (Full Name) *</label>
+                    <input
+                      type="text"
+                      value={editingStudent.name || ''}
+                      onChange={e => setEditingStudent({ ...editingStudent, name: e.target.value })}
+                      className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-blue-500"
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-xs font-bold text-slate-700">Namba ya Usajili (Reg / Index No)</label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const isPrim =
+                            editingStudent.level === 'PRIMARY' ||
+                            editingStudent.level === 'PRE_PRIMARY' ||
+                            PRIMARY_CLASSES.includes(editingStudent.className) ||
+                            NURSERY_CLASSES.includes(editingStudent.className);
+                          const nextReg = getNextStudentRegNo(
+                            students.filter(s => s.id !== editingStudent.id),
+                            schoolInfo?.schoolNumber,
+                            undefined,
+                            isPrim
+                          );
+                          setEditingStudent({ ...editingStudent, regNo: nextReg });
+                        }}
+                        className="text-[10px] font-bold text-blue-600 hover:text-blue-800 underline cursor-pointer"
+                      >
+                        Auto-Generate
+                      </button>
+                    </div>
+                    <input
+                      type="text"
+                      value={editingStudent.regNo || ''}
+                      onChange={e => setEditingStudent({ ...editingStudent, regNo: e.target.value })}
+                      placeholder="e.g. S.0123/0001/2026"
+                      className="w-full px-3 py-2 text-xs font-mono font-bold border border-slate-300 rounded-lg bg-white text-blue-800"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Ngazi (Level)</label>
+                    <select
+                      value={editingStudent.level || inferEducationLevel(editingStudent.className)}
+                      onChange={e => {
+                        const newLvl = e.target.value as EducationLevel;
+                        setEditingStudent({ ...editingStudent, level: newLvl });
+                      }}
+                      className="w-full px-2.5 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
+                    >
+                      <option value="PRE_PRIMARY">Pre-Primary</option>
+                      <option value="PRIMARY">Primary (Std 1-7)</option>
+                      <option value="CSEE">O-Level (CSEE)</option>
+                      <option value="ACSEE">A-Level (ACSEE)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Darasa (Class)</label>
                     <select
                       value={editingStudent.className}
                       onChange={e => {
@@ -3217,7 +3603,7 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                         else if (['Form 5', 'Form 6'].includes(newClass)) newLevel = 'ACSEE';
                         setEditingStudent({ ...editingStudent, className: newClass, level: newLevel });
                       }}
-                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white"
                     >
                       <optgroup label="Pre-Primary / Nursery">
                         {NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
@@ -3230,105 +3616,361 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                       </optgroup>
                     </select>
                   </div>
+
                   <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1">Stream</label>
-                    <select
-                      value={editingStudent.stream ? editingStudent.stream.replace(/^STREAM\s+/i, '') : 'A'}
-                      onChange={e => setEditingStudent({ ...editingStudent, stream: `STREAM ${e.target.value}` })}
-                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
-                    >
-                      {allRegisteredStreams.map((st: string) => (
-                        <option key={st} value={st}>Stream {st}</option>
-                      ))}
-                    </select>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">
+                      {editingStudent.level === 'ACSEE' ? 'Stream / Tahasusi' : 'Mkondo (Stream)'}
+                    </label>
+                    {(() => {
+                      const classStreams = getStreamsForClass(editingStudent.className, streamSettings, students);
+                      const rawCurrentStream = editingStudent.stream || editingStudent.combination || 'STREAM A';
+                      const streamOptions = Array.from(
+                        new Set([
+                          rawCurrentStream,
+                          ...classStreams,
+                          ...allRegisteredStreams.map(st => st.startsWith('STREAM') ? st : `STREAM ${st}`)
+                        ].filter(Boolean))
+                      );
+                      return (
+                        <select
+                          value={rawCurrentStream}
+                          onChange={e => {
+                            const val = e.target.value;
+                            setEditingStudent({
+                              ...editingStudent,
+                              stream: val,
+                              combination: editingStudent.level === 'ACSEE' ? val.replace(/^STREAM\s+/i, '') : editingStudent.combination
+                            });
+                          }}
+                          className="w-full px-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white"
+                        >
+                          {streamOptions.map(st => (
+                            <option key={st} value={st}>{st}</option>
+                          ))}
+                        </select>
+                      );
+                    })()}
                   </div>
+
                   <div>
-                    <label className="text-xs font-bold text-slate-600 block mb-1">Gender</label>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Jinsia (Gender)</label>
                     <select
-                      value={editingStudent.gender}
+                      value={editingStudent.gender || 'Male'}
                       onChange={e => setEditingStudent({ ...editingStudent, gender: e.target.value as any })}
-                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                      className="w-full px-2.5 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white"
                     >
-                      <option value="Male">Male</option>
-                      <option value="Female">Female</option>
+                      <option value="Male">Male (Mvulana)</option>
+                      <option value="Female">Female (Msichana)</option>
                     </select>
                   </div>
                 </div>
 
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1">Parent / Guardian Full Name</label>
-                  <input
-                    type="text"
-                    value={editingStudent.parentName || (editingStudent as any).parent_name || ''}
-                    onChange={e => setEditingStudent({ ...editingStudent, parentName: e.target.value } as any)}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
-                  />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Jina la Mzazi / Mlezi (Parent Full Name)</label>
+                    <input
+                      type="text"
+                      value={editingStudent.parentName || (editingStudent as any).parent_name || ''}
+                      onChange={e => setEditingStudent({ ...editingStudent, parentName: e.target.value } as any)}
+                      placeholder="Mfano: Juma Mohamed"
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                    />
+                  </div>
+                  <div>
+                    <PhoneInputPlugin
+                      value={editingStudent.parentPhone || editingStudent.phone || ''}
+                      onChange={val => setEditingStudent({ ...editingStudent, parentPhone: val, phone: val })}
+                      label="Namba ya Simu ya Mzazi (Parent Phone)"
+                      studentName={editingStudent.name}
+                    />
+                  </div>
                 </div>
 
-                <div>
-                  <PhoneInputPlugin
-                    value={editingStudent.parentPhone || editingStudent.phone || ''}
-                    onChange={val => setEditingStudent({ ...editingStudent, parentPhone: val, phone: val })}
-                    label="Parent / Guardian Phone Number"
-                    studentName={editingStudent.name}
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1 flex items-center justify-between">
-                    <span>Namba ya Siri ya Mzazi (Portal PIN)</span>
-                    <span className="text-[10px] text-blue-600">PIN ya awali: 123456</span>
-                  </label>
-                  <input
-                    type="text"
-                    value={editingStudent.parentPin || getParentPinForPhone(editingStudent.parentPhone || editingStudent.phone || '', students)}
-                    onChange={e => {
-                      const newPin = e.target.value;
-                      setEditingStudent({ ...editingStudent, parentPin: newPin });
-                      const ph = editingStudent.parentPhone || editingStudent.phone;
-                      if (ph) saveParentPin(ph, newPin);
-                    }}
-                    placeholder="123456"
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono font-bold"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1">Date of Birth</label>
-                  <input
-                    type="date"
-                    value={editingStudent.dob || '2010-01-01'}
-                    onChange={e => setEditingStudent({ ...editingStudent, dob: e.target.value })}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-slate-600 block mb-1">Hali ya Ada (Fee Status)</label>
-                  <select
-                    value={editingStudent.feeStatus || 'UNPAID'}
-                    onChange={e => setEditingStudent({ ...editingStudent, feeStatus: e.target.value as any })}
-                    className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-bold"
-                  >
-                    <option value="UNPAID">Hajalipa (UNPAID)</option>
-                    <option value="PAID">Ameshalipa (PAID)</option>
-                  </select>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1 flex items-center justify-between">
+                      <span>PIN ya Mzazi (Portal)</span>
+                      <span className="text-[10px] text-blue-600">Default: 123456</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={editingStudent.parentPin || getParentPinForPhone(editingStudent.parentPhone || editingStudent.phone || '', students)}
+                      onChange={e => {
+                        const newPin = e.target.value;
+                        setEditingStudent({ ...editingStudent, parentPin: newPin });
+                        const ph = editingStudent.parentPhone || editingStudent.phone;
+                        if (ph) saveParentPin(ph, newPin);
+                      }}
+                      placeholder="123456"
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-mono font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Tarehe ya Kuzaliwa (DOB)</label>
+                    <input
+                      type="date"
+                      value={editingStudent.dob || '2010-01-01'}
+                      onChange={e => setEditingStudent({ ...editingStudent, dob: e.target.value })}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">Hali ya Ada (Fee Status)</label>
+                    <select
+                      value={editingStudent.feeStatus || 'UNPAID'}
+                      onChange={e => setEditingStudent({ ...editingStudent, feeStatus: e.target.value as any })}
+                      className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white font-bold"
+                    >
+                      <option value="UNPAID">Hajalipa (UNPAID)</option>
+                      <option value="PAID">Ameshalipa (PAID)</option>
+                    </select>
+                  </div>
                 </div>
               </div>
             </div>
 
-            <div className="flex justify-end gap-2 pt-2 border-t border-slate-200">
+            {/* ENROLLED SUBJECTS SECTION IN EDIT MODAL: VIEW INITIAL SUBJECTS, DELETE (X), OR ADD (+) */}
+            <div className="p-4 bg-gradient-to-br from-blue-50/70 via-indigo-50/40 to-slate-50 border border-blue-200 rounded-xl space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200/80 pb-2">
+                <div className="flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-blue-700" />
+                  <h4 className="text-xs font-black text-blue-950 uppercase tracking-wide">
+                    Masomo Aliyosajiliwa Mwanafunzi Huyu ({(editingStudent.subjects || []).length} Subjects)
+                  </h4>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const defaults = getDefaultSubjectsForStudentClass(
+                        editingStudent.className,
+                        editingStudent.level,
+                        editingStudent.combination
+                      );
+                      const merged = Array.from(new Set([...(editingStudent.subjects || []), ...defaults]));
+                      setEditingStudent({ ...editingStudent, subjects: merged });
+                    }}
+                    className="px-2.5 py-1 text-[10px] font-bold text-blue-800 bg-blue-100 hover:bg-blue-200 border border-blue-300 rounded-lg cursor-pointer"
+                  >
+                    + Jaza Masomo ya {editingStudent.className}
+                  </button>
+                  {(editingStudent.subjects || []).length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditingStudent({ ...editingStudent, subjects: [] })}
+                      className="px-2.5 py-1 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer"
+                    >
+                      Futa Masomo Yote
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Existing Subjects Chips with Delete (X) */}
+              <div className="flex flex-wrap gap-1.5 p-3 bg-white rounded-xl border border-blue-200 min-h-[48px] items-center">
+                {(editingStudent.subjects || []).length === 0 ? (
+                  <span className="text-xs text-slate-400 italic">
+                    Hakuna somo lililochaguliwa. Chagua au ongeza masomo hapa chini (+).
+                  </span>
+                ) : (
+                  (editingStudent.subjects || []).map((sub, idx) => (
+                    <span
+                      key={`${sub}_${idx}`}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-blue-100 text-blue-950 border border-blue-300 shadow-2xs"
+                    >
+                      <span>{formatStudentSubjectLabel(sub)}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextSubs = (editingStudent.subjects || []).filter((_, i) => i !== idx);
+                          setEditingStudent({ ...editingStudent, subjects: nextSubs });
+                        }}
+                        className="text-blue-700 hover:text-rose-700 hover:bg-rose-100 rounded-full p-0.5 transition cursor-pointer"
+                        title={`Futa ${formatStudentSubjectLabel(sub)}`}
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </span>
+                  ))
+                )}
+              </div>
+
+              {/* Add Subjects via Dropdown, Search Pills, or Custom Input */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Chagua Somo la Kuongeza (+ Ongeza Somo):
+                  </label>
+                  <select
+                    value=""
+                    onChange={e => {
+                      const val = e.target.value;
+                      if (!val) return;
+                      const currentSubs = editingStudent.subjects || [];
+                      if (!currentSubs.includes(val)) {
+                        setEditingStudent({ ...editingStudent, subjects: [...currentSubs, val] });
+                      }
+                    }}
+                    className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">+ Chagua Somo Kwenye Orodha...</option>
+                    {SubjectRegistry.getAllNames().map(subName => {
+                      const alreadyIn = (editingStudent.subjects || []).some(
+                        s => s.toLowerCase() === subName.toLowerCase() || formatStudentSubjectLabel(s).toLowerCase().includes(subName.toLowerCase())
+                      );
+                      return (
+                        <option key={subName} value={subName} disabled={alreadyIn}>
+                          {subName} {alreadyIn ? ' (Tayari lipo ✓)' : ''}
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                    Au Andika Somo Jingine Kwa Mkono:
+                  </label>
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      value={editCustomSubject}
+                      onChange={e => setEditCustomSubject(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          const trimmed = editCustomSubject.trim();
+                          if (trimmed && !(editingStudent.subjects || []).includes(trimmed)) {
+                            setEditingStudent({
+                              ...editingStudent,
+                              subjects: [...(editingStudent.subjects || []), trimmed]
+                            });
+                            setEditCustomSubject('');
+                          }
+                        }
+                      }}
+                      placeholder="Mf. Elimu ya Dini ya Kiislamu, Fine Art..."
+                      className="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const trimmed = editCustomSubject.trim();
+                        if (trimmed && !(editingStudent.subjects || []).includes(trimmed)) {
+                          setEditingStudent({
+                            ...editingStudent,
+                            subjects: [...(editingStudent.subjects || []), trimmed]
+                          });
+                          setEditCustomSubject('');
+                        }
+                      }}
+                      className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer shrink-0 flex items-center gap-1"
+                    >
+                      <Plus className="w-3.5 h-3.5" />
+                      <span>Ongeza</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Quick 1-Click Subject Toggles with Search */}
+              <div className="space-y-1.5 pt-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-bold text-slate-600">
+                    Bonyeza somo lolote kuliongeza (+) au kuliondoa (✓):
+                  </span>
+                  <input
+                    type="text"
+                    value={editSubjectSearch}
+                    onChange={e => setEditSubjectSearch(e.target.value)}
+                    placeholder="Tafuta somo haraka..."
+                    className="px-2.5 py-1 text-[11px] border border-slate-300 rounded-lg bg-white w-48"
+                  />
+                </div>
+                <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto p-2 bg-white border border-slate-200 rounded-lg">
+                  {SubjectRegistry.getAllNames()
+                    .filter(s => !editSubjectSearch.trim() || s.toLowerCase().includes(editSubjectSearch.toLowerCase().trim()))
+                    .map(subName => {
+                      const currentSubs = editingStudent.subjects || [];
+                      const matchedEntry = currentSubs.find(
+                        s =>
+                          s.toLowerCase() === subName.toLowerCase() ||
+                          SUBJECT_LIST.find(item => item.code === s)?.name.toLowerCase() === subName.toLowerCase()
+                      );
+                      const isSelected = Boolean(matchedEntry);
+                      return (
+                        <button
+                          key={subName}
+                          type="button"
+                          onClick={() => {
+                            if (matchedEntry) {
+                              setEditingStudent({
+                                ...editingStudent,
+                                subjects: currentSubs.filter(s => s !== matchedEntry)
+                              });
+                            } else {
+                              setEditingStudent({
+                                ...editingStudent,
+                                subjects: [...currentSubs, subName]
+                              });
+                            }
+                          }}
+                          className={`px-2 py-1 rounded text-[11px] font-bold border transition cursor-pointer flex items-center gap-1 ${
+                            isSelected
+                              ? 'bg-blue-600 text-white border-blue-700'
+                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-blue-50'
+                          }`}
+                        >
+                          {isSelected ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3 text-slate-400" />}
+                          <span>{subName}</span>
+                        </button>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
               <button
+                type="button"
                 onClick={() => setEditingStudent(null)}
-                className="px-3 py-1.5 text-xs text-slate-600 bg-slate-100 rounded-lg cursor-pointer"
+                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
               >
-                Cancel
+                Ghairi (Cancel)
               </button>
               <button
+                type="button"
                 onClick={() => {
-                  onUpdateStudent(editingStudent);
+                  if (!editingStudent.name || !editingStudent.name.trim()) {
+                    alert('Tafadhali jaza jina kamili la mwanafunzi.');
+                    return;
+                  }
+                  const updatedStudent: Student = {
+                    ...editingStudent,
+                    name: editingStudent.name.trim(),
+                    subjects: Array.isArray(editingStudent.subjects) ? editingStudent.subjects : []
+                  };
+                  onUpdateStudent(updatedStudent);
+                  if (onUpdateStreamSettings && updatedStudent.className && updatedStudent.stream) {
+                    const { updatedSettings, wasChanged } = syncClassAndStreamToSettings(
+                      updatedStudent.className,
+                      updatedStudent.stream,
+                      streamSettings
+                    );
+                    if (wasChanged) {
+                      onUpdateStreamSettings(updatedSettings);
+                    }
+                  }
+                  setStudentCreatedNotice(
+                    `✓ Taarifa za mwanafunzi ${updatedStudent.name} (${updatedStudent.regNo}) zimehaririwa na kuhifadhiwa kikamilifu!`
+                  );
+                  setTimeout(() => setStudentCreatedNotice(null), 5000);
                   setEditingStudent(null);
                 }}
-                className="px-4 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg cursor-pointer"
+                className="px-5 py-2 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md cursor-pointer flex items-center gap-1.5"
               >
-                Save Changes
+                <Check className="w-4 h-4" />
+                <span>Hifadhi Mabadiliko (Save Changes)</span>
               </button>
             </div>
           </div>
@@ -3373,35 +4015,60 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               </button>
             </div>
 
-            {/* Quick Core Buttons */}
-            <div className="space-y-1.5">
-              <div className="text-[11px] font-bold text-slate-500 uppercase">Quick Add Core Curriculum:</div>
-              <div className="flex flex-wrap gap-1.5">
-                {[
-                  'Basic Mathematics', 'English Language', 'Kiswahili', 'Biology', 
-                  'Chemistry', 'Physics', 'Geography', 'History', 'Civics', 
-                  'ICT / TEHAMA', 'Commerce', 'Book Keeping'
-                ].map(sub => {
-                  const isChecked = bulkEnrollSubjects.includes(sub);
-                  return (
+            {/* Quick Search & Selection */}
+            <div className="space-y-3">
+              <div>
+                <label className="text-[11px] font-bold text-slate-500 uppercase block mb-1.5">Search or Pick Subjects:</label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search all subjects (e.g. Physics, Historia...)"
+                    value={subjectSearch}
+                    onChange={(e) => setSubjectSearch(e.target.value)}
+                    className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">Subject List (NECTA Compliant):</div>
+                <div className="max-h-48 overflow-y-auto p-2 bg-slate-50 border border-slate-200 rounded-xl flex flex-wrap gap-1.5">
+                  {(subjectSearch.trim() 
+                    ? SubjectRegistry.getAll().filter(s => s.name.toLowerCase().includes(subjectSearch.toLowerCase()))
+                    : SubjectRegistry.getPopular().map(name => SubjectRegistry.getByName(name)).filter(Boolean)
+                  ).map(sub => {
+                    const isChecked = bulkEnrollSubjects.includes(sub!.name);
+
+                    return (
+                      <button
+                        key={sub!.code}
+                        type="button"
+                        onClick={() => {
+                          setBulkEnrollSubjects(prev => 
+                            prev.includes(sub!.name) ? prev.filter(s => s !== sub!.name) : [...prev, sub!.name]
+                          );
+                        }}
+                        className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition cursor-pointer border ${
+                          isChecked 
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-2xs' 
+                            : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {isChecked ? `✓ ${sub!.name}` : `+ ${sub!.name}`}
+                      </button>
+                    );
+                  })}
+                  {!subjectSearch.trim() && (
                     <button
-                      key={sub}
                       type="button"
-                      onClick={() => {
-                        setBulkEnrollSubjects(prev => 
-                          prev.includes(sub) ? prev.filter(s => s !== sub) : [...prev, sub]
-                        );
-                      }}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-bold transition cursor-pointer border ${
-                        isChecked 
-                          ? 'bg-blue-600 text-white border-blue-600 shadow-2xs' 
-                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
-                      }`}
+                      onClick={() => setSubjectSearch(' ')}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold text-blue-600 border border-blue-200 bg-blue-50 hover:bg-blue-100"
                     >
-                      {isChecked ? `✓ ${sub}` : `+ ${sub}`}
+                      Show All Subjects...
                     </button>
-                  );
-                })}
+                  )}
+                </div>
               </div>
             </div>
 
@@ -3781,6 +4448,142 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             <div className="flex justify-end gap-3 mt-6">
               <button onClick={() => setShowBulkRemoveSubjectModal(false)} className="px-4 py-2 text-sm font-bold text-slate-600">Cancel</button>
               <button onClick={handleConfirmBulkRemoveSubjects} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-bold">Delete Subjects</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Registration / NECTA Index Number Generator Modal */}
+      {isRegNoGeneratorOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 space-y-4 border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base font-black text-[#1f4d8b] flex items-center gap-2">
+                  <ArrowUpDown className="w-4 h-4 text-blue-600" />
+                  <span>Jenereta ya Namba za Usajili (Auto-Generate Reg Nos)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Zalisha na hifadhi namba za usajili/mtihani kwa mpangilio wa NECTA (Wasichana Kwanza A–Z au Alfabeti).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsRegNoGeneratorOpen(false)}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 uppercase block mb-1">Chagua Darasa (Class)</label>
+                  <select
+                    value={genRegClass}
+                    onChange={e => setGenRegClass(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-bold text-slate-800"
+                  >
+                    <option value="ALL">Wanafunzi Wote ({students.length})</option>
+                    {allAvailableClassesList.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 uppercase block mb-1">Mkondo (Stream)</label>
+                  <select
+                    value={genRegStream}
+                    onChange={e => setGenRegStream(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-bold text-slate-800"
+                  >
+                    <option value="ALL">Mikondo Yote</option>
+                    {allRegisteredStreams.map(st => (
+                      <option key={st} value={st}>Stream {st}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 uppercase block mb-1">Mpangilio wa Utoaji Namba (Sequencing Order)</label>
+                <select
+                  value={genRegOrder}
+                  onChange={e => setGenRegOrder(e.target.value as any)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-bold text-slate-800"
+                >
+                  <option value="girls_first">Wasichana Kwanza A–Z, kisha Wavulana A–Z (NECTA Standard)</option>
+                  <option value="boys_first">Wavulana Kwanza A–Z, kisha Wasichana A–Z</option>
+                  <option value="alpha">Alfabeti A–Z (Changanya Jinsia)</option>
+                  <option value="existing">Mpangilio wa Sasa</option>
+                </select>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="font-bold text-slate-700 uppercase block mb-1">Prefix ya Kituo / Shule</label>
+                  <input
+                    type="text"
+                    value={genRegPrefix}
+                    onChange={e => setGenRegPrefix(e.target.value)}
+                    placeholder="S.0123 au S1551"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-mono font-bold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 uppercase block mb-1">Anzia Namba (Start)</label>
+                  <input
+                    type="text"
+                    value={genRegStart}
+                    onChange={e => setGenRegStart(e.target.value)}
+                    placeholder="0001"
+                    className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-white font-mono font-bold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-200">
+                <label className="flex items-center gap-2 font-bold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={genRegIncludeYear}
+                    onChange={e => setGenRegIncludeYear(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600"
+                  />
+                  <span>Weka Mwaka Mwishoni (Mf: /{genRegYear})</span>
+                </label>
+                {genRegIncludeYear && (
+                  <input
+                    type="text"
+                    value={genRegYear}
+                    onChange={e => setGenRegYear(e.target.value)}
+                    className="w-20 px-2 py-1 border border-slate-300 rounded-lg font-mono font-bold text-center bg-white"
+                  />
+                )}
+              </div>
+
+              <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900 font-medium">
+                Mfano wa Namba: <strong className="font-mono font-black">{genRegPrefix.trim().replace(/\/+$/, '')}/{genRegStart.padStart(4, '0')}{genRegIncludeYear && genRegYear.trim() ? `/${genRegYear.trim()}` : ''}</strong>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => setIsRegNoGeneratorOpen(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+              >
+                Ghairi
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteBulkRegNoGeneration}
+                className="px-5 py-2 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-4 h-4" />
+                <span>Zalisha &amp; Hifadhi Database</span>
+              </button>
             </div>
           </div>
         </div>

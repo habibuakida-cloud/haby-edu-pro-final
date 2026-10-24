@@ -29,6 +29,8 @@ import { Student, SchoolInfo, EducationLevel } from '../../types';
 import { formatPhoneNumber, isValidTanzanianPhone, getTanzanianCarrier } from '../../utils/phoneUtils';
 import { formatStudentRegNo, getNextStudentRegNo } from '../../utils/studentRegUtils';
 import { PRIMARY_CLASSES, NURSERY_CLASSES, SECONDARY_CLASSES } from '../../constants/defaults';
+import { SubjectRegistry } from '../../constants/SubjectRegistry';
+
 import { escapeCSV, downloadFile } from '../../utils/export';
 
 export interface StudentBulkImportModalProps {
@@ -565,9 +567,9 @@ export const StudentBulkImportModal: React.FC<StudentBulkImportModalProps> = ({
       // 8. Subjects parsing
       const finalSubjects = rawSubs
         ? rawSubs.split(/[;,]/).map(s => s.trim()).filter(Boolean)
-        : finalLevel === 'PRIMARY'
-          ? ['Kiswahili', 'English Language', 'Mathematics (Hisabati)', 'Science and Technology', 'Social Studies']
-          : ['English Language', 'Kiswahili', 'Basic Mathematics', 'Physics', 'Chemistry', 'Biology'];
+        : (finalLevel === 'PRIMARY' || finalLevel === 'PRE_PRIMARY')
+          ? SubjectRegistry.getByLevel('PRIMARY').map(s => s.name)
+          : SubjectRegistry.getCoreOlevel();
 
       // Date of Birth normalization
       let finalDob = rawDob || '2010-01-01';
@@ -683,7 +685,8 @@ export const StudentBulkImportModal: React.FC<StudentBulkImportModalProps> = ({
         phone: r.parentPhone,
         parentName: r.parentName,
         dob: r.dob || '2010-01-01',
-        subjects: r.subjects || ['English Language', 'Kiswahili', 'Mathematics'],
+        subjects: r.subjects || SubjectRegistry.getPopular().slice(0, 7),
+
         marks: {},
         total: 0,
         average: '0.0',

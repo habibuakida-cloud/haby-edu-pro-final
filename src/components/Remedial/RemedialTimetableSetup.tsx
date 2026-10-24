@@ -48,7 +48,7 @@ import {
   SECONDARY_SUBJECTS,
   SUBJECT_LIST
 } from '../../constants/defaults';
-import { Teacher, SchoolInfo, Student } from '../../types';
+import { Teacher, SchoolInfo, Student, PeriodSetting } from '../../types';
 import { exportRemedialTimetablePDF } from '../../utils/remedialPdfExport';
 import { isSameClass } from '../../utils/reportCardUtils';
 import { RemedialDashboardSummary } from './RemedialDashboardSummary';
@@ -59,6 +59,7 @@ interface RemedialTimetableSetupProps {
   schoolInfo?: SchoolInfo;
   students?: Student[];
   onAddActivityLog?: (log: any) => void;
+  periodSettings?: PeriodSetting[];
 }
 
 const REMEDIAL_NURSERY_CLASSES = ['Baby Class', 'Middle', 'Pre-Unit'];
@@ -157,8 +158,24 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
   teachers = [],
   schoolInfo,
   students = [],
+  periodSettings = [],
   onAddActivityLog
 }) => {
+  const isOverlappingWithBreak = (day: string, start: string, end: string) => {
+    const timeToMinutes = (timeStr: string) => {
+      const [h, m] = timeStr.split(':').map(Number);
+      return h * 60 + m;
+    };
+    const startM = timeToMinutes(start);
+    const endM = timeToMinutes(end);
+
+    return periodSettings.some(p => {
+      if (p.day !== day || !p.isBreak) return false;
+      const pStartM = timeToMinutes(p.start);
+      const pEndM = timeToMinutes(p.end);
+      return startM < pEndM && endM > pStartM;
+    });
+  };
   const [entries, setEntries] = useState<RemedialTimetableEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -222,20 +239,32 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
     }
   }, [formData.date]);
 
-  // Dynamic subjects based on chosen class in Form
+  // Dynamic subjects based on chosen teacher's registered subjects in Form
   const dynamicSubjects = useMemo(() => {
+    if (formData.teacher_name) {
+      const selectedTeacher = teachers.find(
+        t => t.name.trim().toLowerCase() === formData.teacher_name.trim().toLowerCase()
+      );
+      if (selectedTeacher) {
+        return (selectedTeacher.subjects || [])
+          .map(s => (s || '').replace(/\s*\([^)]*\)\s*$/g, '').trim())
+          .filter(Boolean);
+      }
+    }
     return SUBJECT_LIST.map(s => s.name);
-  }, [formData.class_name]);
+  }, [formData.class_name, formData.teacher_name, teachers]);
 
   // Dynamic subjects for generator
   const generatorSubjects = useMemo(() => {
     return SUBJECT_LIST.map(s => s.name);
   }, [generatorConfig.target_class, generatorConfig.scope]);
 
-  // Keep selected subject valid when class level changes
+  // Keep selected subject valid when teacher or class level changes
   useEffect(() => {
     if (dynamicSubjects.length > 0 && !dynamicSubjects.includes(formData.subject)) {
       setFormData(prev => ({ ...prev, subject: dynamicSubjects[0] }));
+    } else if (dynamicSubjects.length === 0 && formData.subject) {
+      setFormData(prev => ({ ...prev, subject: '' }));
     }
   }, [dynamicSubjects]);
 
@@ -328,6 +357,11 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
     }
     if (!formData.start_time || !formData.end_time) {
       setAlertNotice({ type: 'warning', message: 'Tafadhali weka muda wa kuanza na kuisha (Start and end times are required).' });
+      return;
+    }
+
+    if (isOverlappingWithBreak(formData.day_of_week, formData.start_time, formData.end_time)) {
+      setAlertNotice({ type: 'error', message: 'Huwezi kupanga kipindi wakati wa mapumziko (Break time conflict).' });
       return;
     }
 
@@ -609,7 +643,9 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
 
             // Conflict check
             const conflict = checkRemedialConflict([...entries, ...generatedEntries], newEntry);
-            if (!conflict.hasConflict) {
+            const isBreak = isOverlappingWithBreak(newEntry.day_of_week, newEntry.start_time, newEntry.end_time);
+
+            if (!conflict.hasConflict && !isBreak) {
               generatedEntries.push(newEntry);
             }
           }
@@ -1673,21 +1709,6 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* Somo */}
-                <div>
-                  <label className="block text-xs font-black text-slate-700 uppercase mb-1">
-                    Somo (Subject) <span className="text-rose-500">*</span>
-                  </label>
-                  <select
-                    value={formData.subject}
-                    onChange={e => setFormData({ ...formData, subject: e.target.value })}
-                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
-                    required
-                  >
-                    {dynamicSubjects.map(s => <option key={s} value={s}>{s}</option>)}
-                  </select>
-                </div>
-
                 {/* Mwalimu */}
                 <div>
                   <label className="block text-xs font-black text-slate-700 uppercase mb-1">
@@ -1695,12 +1716,47 @@ export const RemedialTimetableSetup: React.FC<RemedialTimetableSetupProps> = ({
                   </label>
                   <select
                     value={formData.teacher_name}
-                    onChange={e => setFormData({ ...formData, teacher_name: e.target.value })}
+                    onChange={e => {
+                      const tName = e.target.value;
+                      const tObj = teachers.find(t => t.name === tName);
+                      const tSubs = (tObj?.subjects || [])
+                        .map(s => (s || '').replace(/\s*\([^)]*\)\s*$/g, '').trim())
+                        .filter(Boolean);
+                      setFormData({
+                        ...formData,
+                        teacher_name: tName,
+                        subject: tSubs.includes(formData.subject) ? formData.subject : (tSubs[0] || '')
+                      });
+                    }}
                     className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
                     required
                   >
                     <option value="">-- Chagua Mwalimu --</option>
-                    {teachers.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.name}>
+                        {t.name} ({(t.subjects || []).join(', ') || 'Hana Somo'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Somo */}
+                <div>
+                  <label className="block text-xs font-black text-slate-700 uppercase mb-1">
+                    Somo Alilosajiliwa (Subject) <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={formData.subject}
+                    onChange={e => setFormData({ ...formData, subject: e.target.value })}
+                    disabled={dynamicSubjects.length === 0}
+                    className="w-full p-2.5 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 disabled:opacity-60"
+                    required
+                  >
+                    {dynamicSubjects.length === 0 ? (
+                      <option value="">-- Mwalimu hajasajiliwa somo --</option>
+                    ) : (
+                      dynamicSubjects.map(s => <option key={s} value={s}>{s}</option>)
+                    )}
                   </select>
                 </div>
               </div>

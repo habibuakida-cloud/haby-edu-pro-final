@@ -29,6 +29,7 @@ import { SUBJECT_NAMES_LIST, DEFAULT_SCHOOL_LOGO, PRESET_SCHOOL_LOGOS, DEFAULT_A
 import { saveSchoolData } from '../lib/dataService';
 import { fetchSchoolsFromFirestore, saveSchoolToFirestore, saveStudentToFirestore, saveTeacherToFirestore } from '../lib/firestoreService';
 import { CommunicationSettings } from './CommunicationSettings';
+import { AutomatedBackupManager } from './common/AutomatedBackupManager';
 
 
 const generateUUID = () => {
@@ -64,6 +65,8 @@ interface SettingsViewProps {
   onUpdateCommunicationTemplates?: (templates: any[]) => void;
   calendarEvents?: any[];
   onUpdateCalendarEvents?: (events: any[]) => void;
+  schoolData?: any;
+  onRestoreData?: (restoredData: any, sourceLabel: string) => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -91,7 +94,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   communicationTemplates = [],
   onUpdateCommunicationTemplates,
   calendarEvents = [],
-  onUpdateCalendarEvents
+  onUpdateCalendarEvents,
+  schoolData,
+  onRestoreData
 }) => {
   const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'calendar' | 'events' | 'templates' | 'users' | 'audit' | 'network' | 'github' | 'backup' | 'dbhealth' | 'themepresets'>('periods');
   const { config, updateConfig } = useAppTheme();
@@ -511,40 +516,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [nectaStartNumber, setNectaStartNumber] = useState(schoolInfo.nectaStartNumber || '0001');
   const [nectaEndNumber, setNectaEndNumber] = useState(schoolInfo.nectaEndNumber || '0200');
 
-  const [printOrientation, setPrintOrientation] = useState<'portrait' | 'landscape'>(() => {
-    try {
-      const saved = localStorage.getItem('haby_timetable_print_settings');
-      if (saved) return JSON.parse(saved).orientation || 'landscape';
-    } catch (e) {}
-    return 'landscape';
-  });
-
-  const [printMargin, setPrintMargin] = useState<string>(() => {
-    try {
-      const saved = localStorage.getItem('haby_timetable_print_settings');
-      if (saved) return JSON.parse(saved).margin || '6mm';
-    } catch (e) {}
-    return '6mm';
-  });
-
-  const [printOptimizedCss, setPrintOptimizedCss] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('haby_timetable_print_settings');
-      if (saved) return JSON.parse(saved).optimizedCss ?? true;
-    } catch (e) {}
-    return true;
-  });
-
-  const handleSavePrintSettings = () => {
-    try {
-      localStorage.setItem('haby_timetable_print_settings', JSON.stringify({
-        orientation: printOrientation,
-        margin: printMargin,
-        optimizedCss: printOptimizedCss
-      }));
-      alert('Print layout settings saved successfully!');
-    } catch (e) {}
-  };
 
   // Sync state when schoolInfo changes
   useEffect(() => {
@@ -1194,6 +1165,32 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </span>
         </button>
 
+        <button
+          type="button"
+          onClick={() => setActiveTab('backup')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
+            activeTab === 'backup'
+              ? 'bg-emerald-700 text-white shadow-xs'
+              : 'bg-white text-emerald-800 hover:bg-emerald-50 border border-emerald-200'
+          }`}
+        >
+          <Database className="w-4 h-4 text-emerald-600" />
+          Daily Backup &amp; Snapshots
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('dbhealth')}
+          className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
+            activeTab === 'dbhealth'
+              ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
+              : 'bg-white text-amber-900 hover:bg-amber-50 border border-amber-200'
+          }`}
+        >
+          <Activity className="w-4 h-4 text-amber-600" />
+          Database Health &amp; Diagnostics
+        </button>
+
         {currentUser?.isSuperAdmin && currentUser?.email?.toLowerCase() === 'habibuakida@gmail.com' && (
           <>
             <button
@@ -1225,32 +1222,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             >
               <Github className="w-4 h-4 text-slate-900" />
               GitHub Cloud Sync
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('backup')}
-              className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
-                activeTab === 'backup'
-                  ? 'bg-blue-900 text-white shadow-xs'
-                  : 'bg-white text-blue-900 hover:bg-blue-50 border border-blue-200'
-              }`}
-            >
-              <Download className="w-4 h-4" />
-              Project Source Backup
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('dbhealth')}
-              className={`px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-2 transition-colors cursor-pointer ${
-                activeTab === 'dbhealth'
-                  ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
-                  : 'bg-white text-amber-900 hover:bg-amber-50 border border-amber-200'
-              }`}
-            >
-              <Activity className="w-4 h-4 text-amber-600" />
-              Database Health & Diagnostics
             </button>
           </>
         )}
@@ -1892,70 +1863,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
             </div>
           </form>
-        </div>
-
-        {/* Print & Layout Configuration Card */}
-        <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4 mt-6">
-          <div className="border-b border-slate-200 pb-3">
-            <h3 className="text-base font-bold text-[#1f4d8b] flex items-center gap-2 uppercase tracking-wide">
-              <Printer className="w-5 h-5 text-blue-600" />
-              Timetable Print Layout & CSS Optimization Settings
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
-              Customize print page orientation, page margins, and print-optimized CSS classes for clean A4 printing without cutting off periods.
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Print Page Orientation</label>
-              <select
-                value={printOrientation}
-                onChange={(e) => setPrintOrientation(e.target.value as any)}
-                className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg cursor-pointer"
-              >
-                <option value="landscape">Landscape (Recommended for Timetables)</option>
-                <option value="portrait">Portrait</option>
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Custom Page Margin</label>
-              <select
-                value={printMargin}
-                onChange={(e) => setPrintMargin(e.target.value)}
-                className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg cursor-pointer"
-              >
-                <option value="4mm">4mm (Ultra Compact)</option>
-                <option value="6mm">6mm (Standard)</option>
-                <option value="10mm">10mm (Balanced)</option>
-                <option value="15mm">15mm (Spacious)</option>
-              </select>
-            </div>
-
-            <div className="flex items-center pt-5">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={printOptimizedCss}
-                  onChange={(e) => setPrintOptimizedCss(e.target.checked)}
-                  className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
-                />
-                <span className="text-xs font-bold text-slate-700">Enable Print-Optimized CSS & Crisp Borders</span>
-              </label>
-            </div>
-          </div>
-
-          <div className="flex justify-end pt-2">
-            <button
-              type="button"
-              onClick={handleSavePrintSettings}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span>Save Print Preferences</span>
-            </button>
-          </div>
         </div>
       </div>
     )}
@@ -3376,65 +3283,88 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
       )}
-      {/* TAB: PROJECT SOURCE BACKUP */}
+      {/* TAB: AUTOMATED DAILY BACKUP, SUPABASE SNAPSHOTS & PROJECT SOURCE BACKUP */}
       {activeTab === 'backup' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
-            <div>
-              <h2 className="text-xl font-bold text-[#1f4d8b] flex items-center gap-2">
-                <Download className="w-6 h-6 text-blue-600" />
-                <span>Project Source Code Backup (ZIP)</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-1">
-                Download a complete, compressed archive of your current project source code, database blueprints, and assets for local development or manual backup.
-              </p>
-            </div>
-          </div>
+        <div className="space-y-6">
+          <AutomatedBackupManager
+            schoolId={currentUser?.schoolId || localStorage.getItem('currentSchoolId') || '02dff10d-78fb-4af6-ab5a-db1d275d7e06'}
+            schoolData={
+              schoolData || {
+                schoolInfo,
+                students,
+                teachers,
+                periodSettings,
+                streamSettings,
+                timetableAssignments: assignments,
+                activityLogs,
+                academicTermDates,
+                communicationTemplates,
+                calendarEvents,
+              }
+            }
+            onRestoreData={onRestoreData}
+            onExportJson={onExportJson}
+            onImportJson={onImportJson}
+          />
 
-          <div className="max-w-2xl bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center space-y-6 mx-auto">
-            <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
-              <FileCode className="w-10 h-10" />
-            </div>
-            
-            <div className="space-y-2">
-              <h3 className="text-lg font-black text-slate-900 uppercase">Package Entire Project</h3>
-              <p className="text-sm text-slate-600 leading-relaxed">
-                This will bundle all application files (excluding temporary data and dependencies) into a single <code>.zip</code> file. 
-                Use this to keep a physical copy of your progress or to import this project into another development environment.
-              </p>
-            </div>
-
-            <div className="pt-4">
-              <button
-                type="button"
-                disabled={backupLoading}
-                onClick={handleDownloadBackup}
-                className={`px-10 py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-3 mx-auto shadow-xl transition-all active:scale-95 ${
-                  backupLoading
-                    ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    : 'bg-blue-600 hover:bg-blue-700 text-white'
-                }`}
-              >
-                {backupLoading ? (
-                  <>
-                    <RefreshCw className="w-5 h-5 animate-spin" />
-                    <span>Preparing Archive...</span>
-                  </>
-                ) : (
-                  <>
-                    <Download className="w-5 h-5" />
-                    <span>Generate & Download ZIP</span>
-                  </>
-                )}
-              </button>
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+              <div>
+                <h2 className="text-xl font-bold text-[#1f4d8b] flex items-center gap-2">
+                  <Download className="w-6 h-6 text-blue-600" />
+                  <span>Project Source Code Backup (ZIP)</span>
+                </h2>
+                <p className="text-xs text-slate-500 mt-1">
+                  Download a complete, compressed archive of your current project source code, database blueprints, and assets for local development or manual backup.
+                </p>
+              </div>
             </div>
 
-            <div className="pt-4 text-[11px] text-slate-400 font-bold uppercase tracking-widest flex items-center justify-center gap-4">
-              <span>Includes Source</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-              <span>Includes Blueprints</span>
-              <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-              <span>Vite/React Structure</span>
+            <div className="max-w-2xl bg-slate-50 border border-slate-200 rounded-2xl p-8 text-center space-y-6 mx-auto">
+              <div className="w-20 h-20 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto shadow-sm">
+                <FileCode className="w-10 h-10" />
+              </div>
+              
+              <div className="space-y-2">
+                <h3 className="text-lg font-black text-slate-900 uppercase">Package Entire Project</h3>
+                <p className="text-sm text-slate-600 leading-relaxed">
+                  This will bundle all application files (excluding temporary data and dependencies) into a single <code>.zip</code> file. 
+                  Use this to keep a physical copy of your progress or to import this project into another development environment.
+                </p>
+              </div>
+
+              <div className="pt-4">
+                <button
+                  type="button"
+                  disabled={backupLoading}
+                  onClick={handleDownloadBackup}
+                  className={`px-10 py-4 rounded-2xl font-black text-sm flex items-center justify-center gap-3 mx-auto shadow-xl transition-all active:scale-95 ${
+                    backupLoading
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-blue-600 hover:bg-blue-700 text-white'
+                  }`}
+                >
+                  {backupLoading ? (
+                    <>
+                      <RefreshCw className="w-5 h-5 animate-spin" />
+                      <span>Preparing Archive...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Download className="w-5 h-5" />
+                      <span>Generate &amp; Download ZIP</span>
+                    </>
+                  )}
+                </button>
+              </div>
+
+              <div className="pt-4 text-[11px] text-slate-400 font-bold uppercase tracking-widest flex items-center justify-center gap-4">
+                <span>Includes Source</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                <span>Includes Blueprints</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
+                <span>Vite/React Structure</span>
+              </div>
             </div>
           </div>
         </div>

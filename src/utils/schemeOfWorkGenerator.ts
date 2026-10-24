@@ -1,1319 +1,1159 @@
 import { SchemeOfWork, SchemeOfWorkItem, TeachingLogBookEntry } from '../types/schemeOfWork';
 import { CurriculumType } from '../types/lessonPlan';
 
+export interface SubjectSchemeWeek {
+  week: number;
+  dates: string;
+  cbc: {
+    mainCompetence: string;
+    specificCompetence: string;
+    learningActivities: string;
+    teachingActivities: string;
+    materials: string;
+    assessment: string;
+    references: string;
+  };
+  old: {
+    mainTopic: string;
+    subTopic: string;
+    specificObjectives: string;
+    teachingActivities: string;
+    materials: string;
+    assessment: string;
+    references: string;
+  };
+}
+
 export interface SubjectSchemeTemplate {
   subject: string;
   department: string;
   defaultPeriodsPerWeek: number;
-  weeks: {
-    week: number;
-    dates: string;
-    cbc: {
-      mainCompetence: string;
-      specificCompetence: string;
-      learningActivities: string;
-      teachingActivities: string;
-      materials: string;
-      assessment: string;
-      references: string;
-    };
-    old: {
-      mainTopic: string;
-      subTopic: string;
-      specificObjectives: string;
-      teachingActivities: string;
-      materials: string;
-      assessment: string;
-      references: string;
-    };
-  }[];
+  weeks: SubjectSchemeWeek[];
 }
 
-export const TANZANIA_SCHEMES_KNOWLEDGE_BASE: Record<string, SubjectSchemeTemplate> = {
-  'Physics': {
-    subject: 'Physics',
-    department: 'Science & Mathematics',
-    defaultPeriodsPerWeek: 4,
-    weeks: [
+// Helper to normalize class level into canonical form
+export function resolveClassKey(className: string): 'form_1' | 'form_2' | 'form_3' | 'form_4' | 'primary' {
+  const c = String(className || '').toLowerCase();
+  if (c.includes('form 1') || c.includes('kidato 1') || c.includes('form i') || c.includes('form one')) return 'form_1';
+  if (c.includes('form 2') || c.includes('kidato 2') || c.includes('form ii') || c.includes('form two')) return 'form_2';
+  if (c.includes('form 3') || c.includes('kidato 3') || c.includes('form iii') || c.includes('form three')) return 'form_3';
+  if (c.includes('form 4') || c.includes('kidato 4') || c.includes('form iv') || c.includes('form four')) return 'form_4';
+  if (c.includes('std') || c.includes('standard') || c.includes('darasa') || c.includes('primary')) return 'primary';
+  return 'form_3';
+}
+
+export function resolveTermKey(term: string): 'term_1' | 'term_2' {
+  const t = String(term || '').toLowerCase();
+  if (t.includes('2') || t.includes('two') || t.includes('pili')) return 'term_2';
+  return 'term_1';
+}
+
+// Format realistic date range for 12 weeks of school terms in Tanzania
+export function getTanzanianTermDates(weekNum: number, termKey: 'term_1' | 'term_2', language: 'Kiswahili' | 'English'): string {
+  const isSwahili = language === 'Kiswahili';
+  if (termKey === 'term_1') {
+    // Term 1: Jan to April (12 Weeks)
+    const dates = [
+      { start: '12 Jan', end: '16 Jan', sw: '12 Jan - 16 Jan' },
+      { start: '19 Jan', end: '23 Jan', sw: '19 Jan - 23 Jan' },
+      { start: '26 Jan', end: '30 Jan', sw: '26 Jan - 30 Jan' },
+      { start: '02 Feb', end: '06 Feb', sw: '02 Feb - 06 Feb' },
+      { start: '09 Feb', end: '13 Feb', sw: '09 Feb - 13 Feb' },
+      { start: '16 Feb', end: '20 Feb', sw: '16 Feb - 20 Feb' },
+      { start: '23 Feb', end: '27 Feb', sw: '23 Feb - 27 Feb' },
+      { start: '02 Mar', end: '06 Mar', sw: '02 Mar - 06 Mar (Midterm)' },
+      { start: '09 Mar', end: '13 Mar', sw: '09 Mar - 13 Mar' },
+      { start: '16 Mar', end: '20 Mar', sw: '16 Mar - 20 Mar' },
+      { start: '23 Mar', end: '27 Mar', sw: '23 Mar - 27 Mar' },
+      { start: '30 Mar', end: '03 Apr', sw: '30 Mar - 03 Apr (Terminal)' },
+    ];
+    const d = dates[weekNum - 1] || { start: `Week ${weekNum}`, end: '', sw: `Wiki ya ${weekNum}` };
+    return isSwahili ? `Wiki ya ${weekNum} (${d.sw})` : `Week ${weekNum} (${d.start} - ${d.end})`;
+  } else {
+    // Term 2: July to October (12 Weeks)
+    const dates = [
+      { start: '06 Jul', end: '10 Jul', sw: '06 Jul - 10 Jul' },
+      { start: '13 Jul', end: '17 Jul', sw: '13 Jul - 17 Jul' },
+      { start: '20 Jul', end: '24 Jul', sw: '20 Jul - 24 Jul' },
+      { start: '27 Jul', end: '31 Jul', sw: '27 Jul - 31 Jul' },
+      { start: '03 Aug', end: '07 Aug', sw: '03 Aug - 07 Aug' },
+      { start: '10 Aug', end: '14 Aug', sw: '10 Aug - 14 Aug' },
+      { start: '17 Aug', end: '21 Aug', sw: '17 Aug - 21 Aug' },
+      { start: '24 Aug', end: '28 Aug', sw: '24 Aug - 28 Aug (Midterm)' },
+      { start: '31 Aug', end: '04 Sep', sw: '31 Aug - 04 Sep' },
+      { start: '07 Sep', end: '11 Sep', sw: '07 Sep - 11 Sep' },
+      { start: '14 Sep', end: '18 Sep', sw: '14 Sep - 18 Sep' },
+      { start: '21 Sep', end: '25 Sep', sw: '21 Sep - 25 Sep (Annual)' },
+    ];
+    const d = dates[weekNum - 1] || { start: `Week ${weekNum}`, end: '', sw: `Wiki ya ${weekNum}` };
+    return isSwahili ? `Wiki ya ${weekNum} (${d.sw})` : `Week ${weekNum} (${d.start} - ${d.end})`;
+  }
+}
+
+// -------------------------------------------------------------------------------------------------
+// COMPREHENSIVE TANZANIAN TIE CURRICULUM SYLLABUS TOPIC PROGRESSIONS
+// -------------------------------------------------------------------------------------------------
+
+interface SyllabusTopicEntry {
+  mainTopic: string;
+  subTopic: string;
+  cbcMainCompetence: string;
+  cbcSpecificCompetence: string;
+  learningActivities: string;
+  teachingActivities: string;
+  materials: string;
+  assessment: string;
+  references: string;
+}
+
+// Raw mapping of authentic TIE syllabi for Tanzanian Primary and Secondary classes
+const TIE_SYLLABUS_REGISTRY: Record<string, Record<string, SyllabusTopicEntry[]>> = {
+  'mathematics': {
+    'form_1_term_1': [
       {
-        week: 1,
-        dates: 'Week 1 (12 Jan - 16 Jan)',
-        cbc: {
-          mainCompetence: 'Applying concepts of force and motion to solve mechanical and transport safety challenges',
-          specificCompetence: 'Analyzing Newton\'s First Law of Motion and inertial reference frames',
-          learningActivities: 'Learners conduct hands-on trolley experiments to demonstrate inertia and record findings on work cards',
-          teachingActivities: 'Facilitate think-pair-share, guide safe apparatus handling, and prompt discussion on seatbelt mechanics',
-          materials: 'Dynamics trolleys, inclined ramps, stopwatches, standard masses, safety demonstration video',
-          assessment: 'Practical rubric on measuring motion, oral presentation on vehicular safety features',
-          references: 'TIE Physics for Secondary Schools Form 3 (CBC 2023), MoEST Curriculum Guidelines'
-        },
-        old: {
-          mainTopic: 'Force and Motion',
-          subTopic: 'Newton\'s First Law of Motion',
-          specificObjectives: 'By the end of the week, the student should be able to define inertia and state Newton\'s First Law correctly',
-          teachingActivities: 'Review definition of force on chalkboard, write law statement, demonstrate coin-card experiment',
-          materials: 'Chalkboard, chalk, glass tumbler, card, coin, spring balance',
-          assessment: 'Oral question-and-answer, chalkboard summary quiz, marked exercise questions',
-          references: 'TIE Physics Form 3 (Traditional Syllabus), Principles of Physics by Nelkon & Parker'
-        }
+        mainTopic: 'Numbers',
+        subTopic: 'Natural Numbers, Place Values and Operations',
+        cbcMainCompetence: 'Applying concepts of numbers and operations to solve real-life quantitative problems',
+        cbcSpecificCompetence: 'Analyzing place values, performing operations on natural numbers, and solving word problems',
+        learningActivities: 'Learners write numbers up to billions in words and numerals, calculate using abacus and place value charts',
+        teachingActivities: 'Guide place value drill using number cards, demonstrate regrouping in addition and subtraction on board',
+        materials: 'Abacus, number cards, place value chart, chalk, counters',
+        assessment: 'Chalkboard drill, class exercise of 10 computational problems, peer verification',
+        references: 'TIE Basic Mathematics for Secondary Schools Form 1 (CBC 2023), MoEST Guidelines'
       },
       {
-        week: 2,
-        dates: 'Week 2 (19 Jan - 23 Jan)',
-        cbc: {
-          mainCompetence: 'Applying concepts of force and motion to solve mechanical and transport safety challenges',
-          specificCompetence: 'Analyzing Newton\'s Second Law, linear momentum, and impulsive forces',
-          learningActivities: 'Measure change in momentum using light gates or ticker timers; graph force versus acceleration',
-          teachingActivities: 'Guide mathematical model derivation F = ma and oversee graph analysis groups',
-          materials: 'Ticker timers, carbon paper discs, ticker tapes, 12V AC power supply, slotted weights',
-          assessment: 'Graph interpretation rubric, calculation checklist, peer evaluation of group graphs',
-          references: 'TIE Physics for Secondary Schools Form 3 (CBC 2023), TIE Science Practical Guide'
-        },
-        old: {
-          mainTopic: 'Force and Motion',
-          subTopic: 'Newton\'s Second Law and Momentum',
-          specificObjectives: 'By the end of the week, the student should be able to state Newton\'s Second Law and calculate force using F = ma',
-          teachingActivities: 'Derive formula F = (mv - mu)/t on chalkboard, solve 3 sample numerical problems with learners',
-          materials: 'Chalkboard, textbook diagrams, charts showing momentum in collisions',
-          assessment: 'Homework exercise of 5 calculation problems from TIE textbook page 45',
-          references: 'TIE Physics Form 3, Nelkon & Parker Physics for Secondary Schools'
-        }
+        mainTopic: 'Numbers',
+        subTopic: 'Divisibility Rules, Prime Numbers and Factors',
+        cbcMainCompetence: 'Applying concepts of numbers and operations to solve real-life quantitative problems',
+        cbcSpecificCompetence: 'Testing divisibility of numbers by 2, 3, 4, 5, 6, 9, 10, 11 and finding prime factors',
+        learningActivities: 'Work in pairs to test divisibility rules on 4-digit numbers and draw factor trees',
+        teachingActivities: 'Facilitate inquiry on patterns in digits, guide factor tree construction and index notation',
+        materials: 'Multiplication tables, flash cards of integers, chart of prime numbers up to 100',
+        assessment: 'Divisibility speed quiz, marked exercises on prime factorisation in index form',
+        references: 'TIE Basic Mathematics Form 1, MoEST Guidelines'
       },
       {
-        week: 3,
-        dates: 'Week 3 (26 Jan - 30 Jan)',
-        cbc: {
-          mainCompetence: 'Applying concepts of force and motion to solve mechanical and transport safety challenges',
-          specificCompetence: 'Investigating Newton\'s Third Law and conservation of linear momentum',
-          learningActivities: 'Construct model water/balloon rockets to observe action-reaction pairs; formulate conservation laws',
-          teachingActivities: 'Challenge students to design impact mitigation prototypes; evaluate rocket launch demonstrations',
-          materials: 'Balloons, plastic bottles, bicycle valves, foot pumps, spring balances pair',
-          assessment: 'Prototype performance test, group lab report documenting action-reaction vectors',
-          references: 'TIE Physics Form 3 CBC 2023, UNESCO STEM Secondary Physics Handbook'
-        },
-        old: {
-          mainTopic: 'Force and Motion',
-          subTopic: 'Newton\'s Third Law and Rocket Propulsion',
-          specificObjectives: 'By the end of the week, the student should be able to state Newton\'s Third Law and explain rocket action',
-          teachingActivities: 'Illustrate opposing force pairs with two spring balances pulled together; write notes on chalkboard',
-          materials: 'Two spring balances, chalkboard chart of rocket combustion chamber',
-          assessment: 'Class test on Newton\'s 3 laws; individual student note checking',
-          references: 'TIE Physics Form 3 Traditional Syllabus'
-        }
+        mainTopic: 'Numbers',
+        subTopic: 'Greatest Common Factor (GCF) and Lowest Common Multiple (LCM)',
+        cbcMainCompetence: 'Applying concepts of numbers and operations to solve real-life quantitative problems',
+        cbcSpecificCompetence: 'Computing GCF and LCM of sets of numbers and applying to practical scheduling and division problems',
+        learningActivities: 'Solve real-life word problems involving synchronized traffic lights, bell schedules and packaging',
+        teachingActivities: 'Demonstrate prime factorisation method and ladder method for GCF and LCM on board',
+        materials: 'Chalkboard, worked example cards, real-life word problem scenario worksheets',
+        assessment: 'Word problem rubric, homework of 5 practical LCM and GCF application questions',
+        references: 'TIE Basic Mathematics Form 1'
       },
       {
-        week: 4,
-        dates: 'Week 4 (02 Feb - 06 Feb)',
-        cbc: {
-          mainCompetence: 'Applying concepts of force and motion to solve mechanical and transport safety challenges',
-          specificCompetence: 'Analyzing friction, coefficient of dynamic/static friction, and lubrication',
-          learningActivities: 'Measure pulling forces on diverse surfaces using digital/analog spring balances',
-          teachingActivities: 'Guide experimental error analysis and facilitate discussions on brake pad wear in Tanzanian roads',
-          materials: 'Wooden blocks with hooks, weights, horizontal testing boards, lubricating oil',
-          assessment: 'Lab report assessing accuracy in computing coefficient of friction μ = F/R',
-          references: 'TIE Physics Form 3 CBC 2023'
-        },
-        old: {
-          mainTopic: 'Friction',
-          subTopic: 'Types and Laws of Friction',
-          specificObjectives: 'By the end of the week, the student should be able to distinguish static and dynamic friction',
-          teachingActivities: 'Define friction on board, list laws of solid friction, give advantages and disadvantages',
-          materials: 'Chalkboard, wooden block, hanging masses, pulley system',
-          assessment: 'Short essay on methods of reducing friction in machines; exercise questions',
-          references: 'TIE Physics Form 3, Longman Physics'
-        }
+        mainTopic: 'Fractions',
+        subTopic: 'Types of Fractions, Equivalence and Basic Operations',
+        cbcMainCompetence: 'Using rational numbers and proportional reasoning in resource distribution and trade',
+        cbcSpecificCompetence: 'Performing addition, subtraction, multiplication and division of proper, improper and mixed fractions',
+        learningActivities: 'Fold paper strips and cut circular cardboards into fractional sectors to model fraction operations',
+        teachingActivities: 'Guide finding common denominators using LCM, demonstrate reciprocals in fraction division',
+        materials: 'Paper strips, fraction discs, scissors, colored markers, chart of equivalent fractions',
+        assessment: 'Fraction modeling rubric, computational speed test on mixed fractions',
+        references: 'TIE Basic Mathematics Form 1 CBC 2023'
       },
       {
-        week: 5,
-        dates: 'Week 5 (09 Feb - 13 Feb)',
-        cbc: {
-          mainCompetence: 'Designing and diagnosing sustainable electrical circuits and domestic power systems',
-          specificCompetence: 'Investigating Ohm\'s Law, electrical potential difference, and conductor resistance',
-          learningActivities: 'Assemble circuit boards with variable rheostats, record V and I values, and plot Ohm\'s Law linear graphs',
-          teachingActivities: 'Demonstrate digital multimeter setup, monitor electrical safety, and guide slope gradient calculation',
-          materials: 'Dry cells, ammeters, voltmeters, rheostats, constantan & nichrome wires',
-          assessment: 'Practical rubric on V-I data collection and gradient computation for resistance',
-          references: 'TIE Secondary Physics Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Current Electricity',
-          subTopic: 'Ohm\'s Law and Electrical Resistance',
-          specificObjectives: 'By the end of the week, the student should be able to state Ohm\'s Law and verify it experimentally',
-          teachingActivities: 'Draw circuit diagram on chalkboard, explain V = IR formula, guide verification experiment',
-          materials: 'Chalkboard, dry cells, torch bulbs, switches, analog voltmeter',
-          assessment: 'Marked circuit diagrams in student practical notebooks; numerical quiz',
-          references: 'TIE Physics Form 3 Traditional Syllabus'
-        }
+        mainTopic: 'Decimals and Percentages',
+        subTopic: 'Terminating and Recurring Decimals, Percentage Conversions',
+        cbcMainCompetence: 'Using rational numbers and proportional reasoning in resource distribution and trade',
+        cbcSpecificCompetence: 'Converting between fractions, decimals and percentages and calculating percentage profit, discount and tax',
+        learningActivities: 'Calculate VAT (18%) and trade discounts on simulated Tanzanian supermarket shopping receipts',
+        teachingActivities: 'Provide genuine TRA EFD receipts, guide percentage increase and decrease formula derivations',
+        materials: 'Sample EFD receipts, supermarket price lists, calculators, conversion charts',
+        assessment: 'Financial transaction worksheet, homework on calculating commercial percentage markups',
+        references: 'TIE Basic Mathematics Form 1, TRA Tax Education Series'
       },
       {
-        week: 6,
-        dates: 'Week 6 (16 Feb - 20 Feb)',
-        cbc: {
-          mainCompetence: 'Designing and diagnosing sustainable electrical circuits and domestic power systems',
-          specificCompetence: 'Comparing series and parallel circuit configurations for domestic efficiency',
-          learningActivities: 'Construct 3-room home lighting circuits with independent branch switches; measure branch currents',
-          teachingActivities: 'Facilitate design sprint on energy-efficient home solar installation; review peer circuit layouts',
-          materials: 'Miniature breadboards, LED bulbs, toggle switches, solar PV cell demo',
-          assessment: 'Design portfolio rubric, peer assessment on circuit feasibility and safety fuses',
-          references: 'TIE Secondary Physics Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Current Electricity',
-          subTopic: 'Series and Parallel Resistors',
-          specificObjectives: 'By the end of the week, the student should be able to calculate equivalent resistance',
-          teachingActivities: 'Derive equivalent resistance formulas R = R1+R2 and 1/R = 1/R1+1/R2 on chalkboard',
-          materials: 'Chalkboard, resistor charts, color code diagrams',
-          assessment: 'Class test on series and parallel circuit calculations',
-          references: 'TIE Physics Form 3'
-        }
+        mainTopic: 'Units of Measurement',
+        subTopic: 'SI Units of Length, Mass, Time and Capacity',
+        cbcMainCompetence: 'Applying measurement tools and dimensional conversions in construction and trade',
+        cbcSpecificCompetence: 'Converting SI units and solving composite unit problems involving metric and imperial measures',
+        learningActivities: 'Measure classroom dimensions using tape measures, weigh objects on beam balance, convert mm to m',
+        teachingActivities: 'Supervise practical measuring stations, guide conversion factor tables (km, m, cm, mm; kg, g, tonnes)',
+        materials: 'Meter rules, measuring tapes, beam balances, stopwatches, 1-litre measuring cylinders',
+        assessment: 'Practical measurement accuracy rubric, conversion exercises in student notebooks',
+        references: 'TIE Basic Mathematics Form 1'
       },
       {
-        week: 7,
-        dates: 'Week 7 (23 Feb - 27 Feb)',
-        cbc: {
-          mainCompetence: 'Designing and diagnosing sustainable electrical circuits and domestic power systems',
-          specificCompetence: 'Calculating electrical power consumption, domestic wiring safety, and tariff costs',
-          learningActivities: 'Audit school or home appliance wattages; compute kWh electricity bills under TANESCO tariff bands',
-          teachingActivities: 'Provide genuine electricity bills (LUKU token slips); lead discussion on electrical fire hazards',
-          materials: 'Sample LUKU receipts, 3-pin plugs, fuse wires, earth wire samples',
-          assessment: 'Authentic task: Energy conservation plan with cost savings calculation in TZS',
-          references: 'TIE Physics CBC 2023, TANESCO Consumer Guidelines'
-        },
-        old: {
-          mainTopic: 'Current Electricity',
-          subTopic: 'Electrical Power and Domestic Installation',
-          specificObjectives: 'By the end of the week, the student should be able to calculate electrical energy in kWh',
-          teachingActivities: 'Explain P = IV = I²R = V²/R; draw domestic consumer unit and 3-pin plug on chalkboard',
-          materials: 'Chalkboard, sample 3-pin plug with live, neutral, earth wires',
-          assessment: 'Labeling test on 3-pin plug; written homework on calculating monthly LUKU units',
-          references: 'TIE Physics Form 3'
-        }
+        mainTopic: 'Approximations',
+        subTopic: 'Rounding Off, Significant Figures and Decimal Places',
+        cbcMainCompetence: 'Applying estimation and scientific rounding to engineering and financial data',
+        cbcSpecificCompetence: 'Rounding numbers to specified significant figures and estimating numerical results',
+        learningActivities: 'Round national census population figures and national budget figures to 3 significant figures',
+        teachingActivities: 'Explain rules of significant figures with leading/trailing zeros, demonstrate error in estimation',
+        materials: 'National census data sheets, budget tables, chalkboard worksheets',
+        assessment: '10-question speed quiz on significant figures and decimal places',
+        references: 'TIE Basic Mathematics Form 1'
       },
       {
-        week: 8,
-        dates: 'Week 8 (02 Mar - 06 Mar)',
-        cbc: {
-          mainCompetence: 'MIDTERM ASSESSMENT & PRACTICAL PORTFOLIO EVALUATION',
-          specificCompetence: 'Synthesizing mechanics and current electricity competences through practical tasks',
-          learningActivities: 'Undertake multi-station practical exam (mechanics trolley + circuit assembly)',
-          teachingActivities: 'Administer standardized rubric-based assessment; provide constructive feedback on learner portfolios',
-          materials: 'NECTA-standardized experimental apparatus, rubrics, feedback forms',
-          assessment: 'Midterm Examination (Theory 60% + Practical Performance 40%)',
-          references: 'NECTA Assessment Guidelines 2023/2024'
-        },
-        old: {
-          mainTopic: 'MIDTERM EVALUATION & REVIEW',
-          subTopic: 'Terminal Revision of Force, Motion and Electricity',
-          specificObjectives: 'Evaluate student retention and problem-solving skills across Topics 1 and 2',
-          teachingActivities: 'Administer midterm written test; mark papers and conduct chalkboard revision',
-          materials: 'Printed exam papers, answer booklets, marking schemes',
-          assessment: 'Formal Midterm Examination marked out of 100%',
-          references: 'School Past Examination Papers'
-        }
+        mainTopic: 'MIDTERM EVALUATION & REVISION',
+        subTopic: 'Comprehensive Midterm Review of Numbers, Fractions and Measurement',
+        cbcMainCompetence: 'MIDTERM COMPETENCE ASSESSMENT IN BASIC MATHEMATICS',
+        cbcSpecificCompetence: 'Synthesizing Weeks 1-7 mathematical competences and problem-solving speed',
+        learningActivities: 'Sit standardized midterm examination covering Weeks 1 to 7 syllabus topics',
+        teachingActivities: 'Administer standardized NECTA-format midterm test, mark scripts and conduct revision',
+        materials: 'Printed examination question papers, answer booklets, marking schemes',
+        assessment: 'Standardized Midterm Examination marked out of 100%',
+        references: 'NECTA Basic Mathematics Assessment Guidelines'
       },
       {
-        week: 9,
-        dates: 'Week 9 (09 Mar - 13 Mar)',
-        cbc: {
-          mainCompetence: 'Harnessing thermal energy principles to enhance environmental sustainability',
-          specificCompetence: 'Investigating thermal expansion in solids, liquids, and gases and bimetallic applications',
-          learningActivities: 'Conduct ball-and-ring experiment; build prototype bimetallic fire alarm and thermostat switch',
-          teachingActivities: 'Oversee Bunsen burner safety; guide inquiry into railway line expansion gaps and bridges',
-          materials: 'Ball and ring apparatus, bimetallic strips, Bunsen burners, tongs',
-          assessment: 'Demonstration rubric, written explanation of bimetallic strip bending mechanisms',
-          references: 'TIE Secondary Physics Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Thermal Physics',
-          subTopic: 'Thermal Expansion of Solids',
-          specificObjectives: 'By the end of the week, the student should be able to explain expansion using kinetic theory',
-          teachingActivities: 'Draw ball and ring on chalkboard; define linear expansivity α = ΔL / (L₀ · ΔT)',
-          materials: 'Chalkboard, ball and ring demonstration set',
-          assessment: 'Marked homework on linear and cubical expansivity formulas',
-          references: 'TIE Physics Form 3'
-        }
+        mainTopic: 'Geometry',
+        subTopic: 'Points, Lines, Rays, Angles and Angle Properties',
+        cbcMainCompetence: 'Applying spatial concepts and geometric reasoning in architectural and land surveying tasks',
+        cbcSpecificCompetence: 'Constructing and measuring acute, obtuse, right, reflex, supplementary and complementary angles',
+        learningActivities: 'Use mathematical sets (compass, protractor, ruler) to construct angles 60°, 90°, 45°, 30° without protractor',
+        teachingActivities: 'Demonstrate compass angle bisection on chalkboard using large chalkboard drawing instruments',
+        materials: 'Chalkboard compass and protractor set, student geometric mathematical sets, white paper',
+        assessment: 'Geometric construction accuracy rubric (sharp pencil lines, exact angle arcs)',
+        references: 'TIE Basic Mathematics Form 1 CBC 2023'
       },
       {
-        week: 10,
-        dates: 'Week 10 (16 Mar - 20 Mar)',
-        cbc: {
-          mainCompetence: 'Harnessing thermal energy principles to enhance environmental sustainability',
-          specificCompetence: 'Applying heat transfer mechanisms (conduction, convection, radiation) in passive cooling',
-          learningActivities: 'Design insulated vacuum flasks or evaporative pot-in-pot cooler prototypes (zeer pots)',
-          teachingActivities: 'Facilitate design showcase; connect heat transfer to energy-efficient architectural roof designs',
-          materials: 'Clay pots, sand, thermometer, radiant heat sensor, colored flasks',
-          assessment: 'Engineering prototype evaluation rubric; temperature drop documentation',
-          references: 'TIE Secondary Physics Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Thermal Physics',
-          subTopic: 'Modes of Heat Transfer',
-          specificObjectives: 'By the end of the week, the student should be able to explain conduction, convection, and radiation',
-          teachingActivities: 'List 3 modes on board; draw vacuum flask (Thermos) diagram; explain vacuum and silvered glass',
-          materials: 'Chalkboard, cut-away diagram of vacuum flask, Leslie cube',
-          assessment: 'Diagram labeling test of Thermos flask; 5 short-answer questions',
-          references: 'TIE Physics Form 3'
-        }
+        mainTopic: 'Geometry',
+        subTopic: 'Triangles, Quadrilaterals and Polygons Angle Sum',
+        cbcMainCompetence: 'Applying spatial concepts and geometric reasoning in architectural and land surveying tasks',
+        cbcSpecificCompetence: 'Investigating interior and exterior angle sums of triangles and regular polygons: (n - 2) * 180°',
+        learningActivities: 'Tear paper triangle vertices to prove interior angles form 180° on straight line; tabulate polygon sums',
+        teachingActivities: 'Guide mathematical induction formula for polygon interior and exterior angles (360°)',
+        materials: 'Cut-out paper shapes, scissors, protractors, polygon classification charts',
+        assessment: 'Polygon angle calculation exercises, proof evaluation rubric',
+        references: 'TIE Basic Mathematics Form 1'
       },
       {
-        week: 11,
-        dates: 'Week 11 (23 Mar - 27 Mar)',
-        cbc: {
-          mainCompetence: 'COMPETENCE CONSOLIDATION & PROJECT PRESENTATIONS',
-          specificCompetence: 'Integrating physics principles into community STEM projects',
-          learningActivities: 'Teams exhibit completed STEM projects, demonstrate working prototypes to peers',
-          teachingActivities: 'Coordinate peer review gallery walk, moderate assessment rubrics, record achievements',
-          materials: 'Project display boards, student prototypes, evaluation score sheets',
-          assessment: 'Summative STEM project exhibition rubric',
-          references: 'TIE Competence-Based Assessment Framework 2023'
-        },
-        old: {
-          mainTopic: 'GENERAL REVISION & PAST PAPER DRILLS',
-          subTopic: 'NECTA Format Examination Preparation',
-          specificObjectives: 'Review all core syllabus areas; practice time management for Section A, B, and C',
-          teachingActivities: 'Solve past NECTA national exam questions on chalkboard; clarify common student pitfalls',
-          materials: 'Chalkboard, NECTA past papers booklets 2018-2023',
-          assessment: 'Timed mock drill: 10 multiple-choice and 4 structured calculation questions',
-          references: 'NECTA Physics Review Series'
-        }
+        mainTopic: 'Algebra',
+        subTopic: 'Algebraic Expressions, Substitution and Like Terms',
+        cbcMainCompetence: 'Formulating algebraic models to represent real-life quantities and relationships',
+        cbcSpecificCompetence: 'Simplifying algebraic expressions, factorising common factors, and evaluating expressions',
+        learningActivities: 'Use algebra tiles to represent x, x², and constants; translate word statements into algebraic terms',
+        teachingActivities: 'Demonstrate grouping like terms and distributive law: a(b + c) = ab + ac on board',
+        materials: 'Algebra tiles, flash cards with algebraic expressions, chalkboard',
+        assessment: 'Classwork on simplifying algebraic expressions, homework assignment',
+        references: 'TIE Basic Mathematics Form 1'
       },
       {
-        week: 12,
-        dates: 'Week 12 (30 Mar - 03 Apr)',
-        cbc: {
-          mainCompetence: 'TERMINAL COMPETENCE EVALUATION & CLOSING REFLECTION',
-          specificCompetence: 'Summative terminal examination covering Term 1 competences',
-          learningActivities: 'Sit terminal examination; conduct self-assessment checklist and set learning goals',
-          teachingActivities: 'Supervise terminal examination; evaluate and enter student scores into academic ledger',
-          materials: 'Official examination papers, answer booklets, academic record sheets',
-          assessment: 'Terminal Examination (NECTA Format) + Portfolio Assessment Mark Entry',
-          references: 'Ministry of Education & NECTA Terminal Standards'
-        },
-        old: {
-          mainTopic: 'TERMINAL EXAMINATION & CLOSURE',
-          subTopic: 'End of Term Assessment and Mark Compilation',
-          specificObjectives: 'Summative evaluation of student mastery of Term 1 syllabus',
-          teachingActivities: 'Invigilate terminal exam, mark scripts according to marking scheme',
-          materials: 'Examination papers, answer sheets, report cards',
-          assessment: 'Formal Terminal Examination marked out of 100%',
-          references: 'School Academic Examination Regulations'
-        }
+        mainTopic: 'TERMINAL EVALUATION & CLOSURE',
+        subTopic: 'Summative Terminal Examination and Term 1 Academic Audit',
+        cbcMainCompetence: 'TERMINAL COMPETENCE EVALUATION IN BASIC MATHEMATICS',
+        cbcSpecificCompetence: 'Evaluating mastery of Form 1 Term 1 syllabus and setting goals for Term 2',
+        learningActivities: 'Sit terminal examination, review script marks, reflect on academic strengths and weaknesses',
+        teachingActivities: 'Invigilate terminal examination, mark papers, enter grades in academic ledger and report cards',
+        materials: 'Official examination papers, answer sheets, academic ledger',
+        assessment: 'Terminal Examination (NECTA Standard CSEE Format, 100 Marks)',
+        references: 'Ministry of Education & NECTA Terminal Standards'
+      }
+    ],
+    'form_1_term_2': [
+      {
+        mainTopic: 'Algebra',
+        subTopic: 'Linear Equations in One Variable and Word Problems',
+        cbcMainCompetence: 'Formulating algebraic models to solve practical challenges in resource distribution',
+        cbcSpecificCompetence: 'Solving single-variable linear equations and translating real-world problems into equations',
+        learningActivities: 'Formulate balance scales to represent equations: ax + b = c; solve age and perimeter word problems',
+        teachingActivities: 'Demonstrate balance principle (operations on both sides) on chalkboard with 4 worked examples',
+        materials: 'Balance scale model, flash cards, chalkboard, worksheets',
+        assessment: 'Step-by-step equation solving rubric, classwork exercise of 6 word problems',
+        references: 'TIE Basic Mathematics Form 1 Book (CBC 2023)'
+      },
+      {
+        mainTopic: 'Coordinate Geometry',
+        subTopic: 'The Cartesian Coordinate System, Points and Quadrants',
+        cbcMainCompetence: 'Applying coordinate mapping and navigation techniques in geographic and digital layouts',
+        cbcSpecificCompetence: 'Plotting ordered pairs (x, y) on Cartesian plane and identifying 4 quadrants and axes',
+        learningActivities: 'Plot landmark locations on grid paper representing school map; play coordinate treasure hunt game',
+        teachingActivities: 'Demonstrate x-axis (abscissa) and y-axis (ordinate) plotting on grid chalkboard',
+        materials: 'Graph paper, colored pencils, grid chalkboard, school layout map',
+        assessment: 'Grid plotting accuracy rubric, graph book checking',
+        references: 'TIE Basic Mathematics Form 1'
+      },
+      {
+        mainTopic: 'Coordinate Geometry',
+        subTopic: 'Linear Graphs of Equations y = mx + c',
+        cbcMainCompetence: 'Applying coordinate mapping and navigation techniques in geographic and digital layouts',
+        cbcSpecificCompetence: 'Constructing table of values for linear functions and plotting straight-line graphs',
+        learningActivities: 'Generate tables of values for y = 2x + 1 and y = -x + 3, plot points and join with straight lines',
+        teachingActivities: 'Explain slope/gradient concept and y-intercept; guide scale selection on graph axes',
+        materials: 'Graph exercise books, 30cm transparent rulers, sharp pencils',
+        assessment: 'Graph rubric (clear title, appropriate scale, plotted points with crosses, straight lines)',
+        references: 'TIE Basic Mathematics Form 1'
+      },
+      {
+        mainTopic: 'Perimeters and Areas',
+        subTopic: 'Perimeter of Triangles, Rectangles, Parallelograms and Circles',
+        cbcMainCompetence: 'Applying geometric measurement in agriculture, fencing, and construction projects',
+        cbcSpecificCompetence: 'Calculating perimeters of plane shapes and circumference of circle C = 2πr or πd',
+        learningActivities: 'Measure circular tin circumferences with string and diameter with ruler to estimate value of π ≈ 3.14',
+        teachingActivities: 'Guide derivation of perimeter formulas, explain relationship between diameter and circumference',
+        materials: 'Circular tins, strings, rulers, cardboard shapes, calculators',
+        assessment: 'Perimeter calculation exercises, experimental π discovery report',
+        references: 'TIE Basic Mathematics Form 1 CBC 2023'
+      },
+      {
+        mainTopic: 'Perimeters and Areas',
+        subTopic: 'Area of Rectangles, Triangles, Trapeziums and Circles',
+        cbcMainCompetence: 'Applying geometric measurement in agriculture, fencing, and construction projects',
+        cbcSpecificCompetence: 'Computing surface areas of composite plane figures: Area = ½(a+b)h, Area = πr²',
+        learningActivities: 'Calculate cost of tiling a classroom floor and roofing corrugated sheets in TZS',
+        teachingActivities: 'Derive area of trapezium by cutting into triangles; demonstrate composite area decomposition',
+        materials: 'Grid paper, cut-out cardboard trapeziums, classroom architectural blueprints',
+        assessment: 'Authentic task rubric: Cost estimation of floor tiling and agricultural plot sizing',
+        references: 'TIE Basic Mathematics Form 1'
+      },
+      {
+        mainTopic: 'Volume and Surface Area',
+        subTopic: 'Cuboids, Cubes and Triangular Prisms',
+        cbcMainCompetence: 'Applying geometric measurement in agriculture, fencing, and construction projects',
+        cbcSpecificCompetence: 'Calculating volume V = l * w * h and total surface area of right rectangular prisms',
+        learningActivities: 'Build 3D rectangular prism nets from cardstock, calculate volume in cm³ and capacity in litres',
+        teachingActivities: 'Demonstrate connection between 1000 cm³ and 1 litre of water using measuring jugs',
+        materials: 'Cardboard net templates, scissors, tape, water measuring containers',
+        assessment: '3D net construction rubric, volume computation worksheet',
+        references: 'TIE Basic Mathematics Form 1'
+      },
+      {
+        mainTopic: 'Ratio, Profit and Loss',
+        subTopic: 'Simplifying Ratios, Dividing in Ratios and Commercial Profit/Loss',
+        cbcMainCompetence: 'Applying financial mathematics to small business entrepreneurship in Tanzania',
+        cbcSpecificCompetence: 'Calculating cost price, selling price, percentage profit and loss in agribusiness',
+        learningActivities: 'Simulate crop harvest sales at Kariakoo market; calculate gross profit and transport expenditure',
+        teachingActivities: 'Introduce commercial terminology (Cost Price, Selling Price, Overhead, Net Profit) on board',
+        materials: 'Sample business ledger sheets, Kariakoo agricultural price indices',
+        assessment: 'Commercial arithmetic class test, student business plan calculations',
+        references: 'TIE Basic Mathematics Form 1'
+      },
+      {
+        mainTopic: 'MIDTERM EVALUATION & REVISION',
+        subTopic: 'Term 2 Midterm Examination and Remedial Intervention',
+        cbcMainCompetence: 'MIDTERM COMPETENCE ASSESSMENT IN BASIC MATHEMATICS',
+        cbcSpecificCompetence: 'Evaluating student mastery of linear equations, coordinates, area and ratios',
+        learningActivities: 'Complete midterm examination paper, review results and formulate improvement plan',
+        teachingActivities: 'Administer midterm test, analyze item difficulty, conduct targeted remedial teaching',
+        materials: 'Midterm test papers, answer keys, performance analysis sheets',
+        assessment: 'Midterm Examination marked out of 100%',
+        references: 'NECTA Basic Mathematics Assessment Guidelines'
+      },
+      {
+        mainTopic: 'Statistics',
+        subTopic: 'Collection, Organization and Tabulation of Data',
+        cbcMainCompetence: 'Interpreting demographic and scientific data for informed community decision making',
+        cbcSpecificCompetence: 'Collecting raw data, constructing tally charts and frequency distribution tables',
+        learningActivities: 'Collect class attendance and shoe size data; construct tally charts and frequency tables',
+        teachingActivities: 'Demonstrate tally marking (groups of 5), explain frequency f and total sample size Σf',
+        materials: 'Survey data sheets, ruler, graph books, chalkboard',
+        assessment: 'Data tabulation rubric, homework on summarizing local rainfall data',
+        references: 'TIE Basic Mathematics Form 1 CBC 2023'
+      },
+      {
+        mainTopic: 'Statistics',
+        subTopic: 'Pictograms, Bar Charts, Line Graphs and Pie Charts',
+        cbcMainCompetence: 'Interpreting demographic and scientific data for informed community decision making',
+        cbcSpecificCompetence: 'Constructing and interpreting bar charts, line graphs and computing pie chart angles: (f / N) * 360°',
+        learningActivities: 'Draw bar charts of student favourite subjects; calculate sector angles and draw pie charts',
+        teachingActivities: 'Demonstrate protractor sector measurement on circular diagrams on chalkboard',
+        materials: 'Protractors, compasses, colored pencils, graph paper',
+        assessment: 'Statistical chart drawing rubric (correct angles, titles, legends, axis scales)',
+        references: 'TIE Basic Mathematics Form 1'
+      },
+      {
+        mainTopic: 'ANNUAL REVISION & PAST PAPER DRILLS',
+        subTopic: 'Comprehensive Form 1 NECTA Format Examination Review',
+        cbcMainCompetence: 'CONSOLIDATION OF FORM 1 MATHEMATICAL COMPETENCES',
+        cbcSpecificCompetence: 'Synthesizing all Form 1 syllabus topics for annual examination readiness',
+        learningActivities: 'Solve timed past national Form 1 and Form 2 review questions in small groups',
+        teachingActivities: 'Review common pitfalls in algebraic manipulation, geometrical proofs and word problems',
+        materials: 'NECTA compilation question booklets, chalkboard, calculators',
+        assessment: 'Timed mock drill: Section A (10 short questions) and Section B (4 structured questions)',
+        references: 'NECTA Past Papers and Review Series'
+      },
+      {
+        mainTopic: 'ANNUAL EXAMINATION & CLOSURE',
+        subTopic: 'Summative Annual Examination and Promotion Mark Compilation',
+        cbcMainCompetence: 'ANNUAL COMPETENCE EVALUATION IN BASIC MATHEMATICS',
+        cbcSpecificCompetence: 'Summative assessment for promotion to Form 2',
+        learningActivities: 'Sit annual examination paper; verify script marks; receive vacation assignment',
+        teachingActivities: 'Invigilate annual examination; mark scripts according to standardized scheme; compile Form 1 ledger',
+        materials: 'Official examination papers, answer booklets, academic ledger and report cards',
+        assessment: 'Annual Examination (NECTA Standard Format, 100 Marks)',
+        references: 'Ministry of Education & NECTA Promotion Regulations'
+      }
+    ],
+    'form_2_term_1': [
+      {
+        mainTopic: 'Exponents and Radicals',
+        subTopic: 'Laws of Exponents and Negative/Fractional Indices',
+        cbcMainCompetence: 'Applying powers and roots in scientific notation and compound growth calculations',
+        cbcSpecificCompetence: 'Applying laws of indices: aᵐ * aⁿ = aᵐ⁺ⁿ, (aᵐ)ⁿ = aᵐⁿ, a⁰ = 1, a⁻ⁿ = 1/aⁿ to simplify expressions',
+        learningActivities: 'Simplify complex algebraic exponential terms; express atomic sizes in scientific notation',
+        teachingActivities: 'Derive laws of exponents on chalkboard with clear inductive number patterns',
+        materials: 'Chalkboard, exponent flash cards, scientific calculators',
+        assessment: 'Chalkboard drill, 10-item simplification quiz, homework assignment',
+        references: 'TIE Basic Mathematics for Secondary Schools Form 2 (CBC 2023)'
+      },
+      {
+        mainTopic: 'Exponents and Radicals',
+        subTopic: 'Radicals, Surds and Rationalizing the Denominator',
+        cbcMainCompetence: 'Applying powers and roots in scientific notation and compound growth calculations',
+        cbcSpecificCompetence: 'Simplifying square roots and rationalizing binomial denominators: a / (√b + c)',
+        learningActivities: 'Work in pairs to simplify surds: √50 = 5√2 and multiply conjugate pairs to remove radicals from denominator',
+        teachingActivities: 'Demonstrate difference of two squares technique for conjugate surds on chalkboard',
+        materials: 'Worksheets with surd problems, chalkboard, square roots table',
+        assessment: 'Surd simplification rubric, marked homework exercises',
+        references: 'TIE Basic Mathematics Form 2'
+      },
+      {
+        mainTopic: 'Algebra',
+        subTopic: 'Simultaneous Linear Equations in Two Variables (Elimination & Substitution)',
+        cbcMainCompetence: 'Constructing simultaneous equations to resolve commercial supply, demand, and pricing issues',
+        cbcSpecificCompetence: 'Solving simultaneous equations using elimination and substitution methods and applying to business',
+        learningActivities: 'Set up simultaneous equations for purchasing books and pens at stationary shop; solve for unit costs',
+        teachingActivities: 'Demonstrate step-by-step elimination method and substitution method with 3 detailed examples',
+        materials: 'Chalkboard, problem cards, market price scenario worksheets',
+        assessment: 'Simultaneous equation solving speed test, word problem evaluation rubric',
+        references: 'TIE Basic Mathematics Form 2'
+      },
+      {
+        mainTopic: 'Algebra',
+        subTopic: 'Graphical Solution of Simultaneous Linear Equations',
+        cbcMainCompetence: 'Constructing simultaneous equations to resolve commercial supply, demand, and pricing issues',
+        cbcSpecificCompetence: 'Plotting two linear graphs on the same Cartesian plane to find intersection point (x, y)',
+        learningActivities: 'Plot lines on graph paper, locate intersection coordinates, verify by algebraic substitution',
+        teachingActivities: 'Guide accurate scale selection and straight-edge drafting; explain parallel lines (no solution)',
+        materials: 'Graph paper, sharp pencils, long transparent rulers, grid chalkboard',
+        assessment: 'Graph rubric assessing line labeling, intersection point accuracy to 1 decimal place',
+        references: 'TIE Basic Mathematics Form 2 CBC 2023'
+      },
+      {
+        mainTopic: 'Quadratic Equations',
+        subTopic: 'Factorisation of Quadratic Expressions: ax² + bx + c',
+        cbcMainCompetence: 'Applying quadratic modeling in trajectory physics, projectile motion, and revenue maximization',
+        cbcSpecificCompetence: 'Factorising quadratic trinomials by splitting middle term and difference of two squares',
+        learningActivities: 'Identify product and sum numbers for trinomial factorisation; construct factor brackets',
+        teachingActivities: 'Demonstrate product-sum table method on chalkboard for a = 1 and a > 1',
+        materials: 'Chalkboard, factorisation card game, worked example charts',
+        assessment: 'Factorisation drill of 10 quadratic expressions, notebook checking',
+        references: 'TIE Basic Mathematics Form 2'
+      },
+      {
+        mainTopic: 'Quadratic Equations',
+        subTopic: 'Solving Quadratic Equations by Factorisation and Completing the Square',
+        cbcMainCompetence: 'Applying quadratic modeling in trajectory physics, projectile motion, and revenue maximization',
+        cbcSpecificCompetence: 'Solving equations of form ax² + bx + c = 0 and interpreting real-world roots',
+        learningActivities: 'Solve projectile height equations to determine when a ball strikes the ground (height = 0)',
+        teachingActivities: 'Explain zero product property (if AB = 0 then A=0 or B=0); introduce completing square steps',
+        materials: 'Chalkboard, quadratic worksheets, projectile trajectory diagrams',
+        assessment: 'Quadratic equation solution rubric, classwork exercises',
+        references: 'TIE Basic Mathematics Form 2'
+      },
+      {
+        mainTopic: 'Logarithms',
+        subTopic: 'Laws of Logarithms to Base 10 and Standard Form',
+        cbcMainCompetence: 'Utilizing logarithmic scales and four-figure tables in scientific and financial calculations',
+        cbcSpecificCompetence: 'Applying log(AB) = logA + logB, log(A/B) = logA - logB, log(Aⁿ) = n*logA to simplify computations',
+        learningActivities: 'Convert exponential statements to logarithmic form and vice-versa; prove basic log rules',
+        teachingActivities: 'Derive laws of logarithms from laws of indices on chalkboard; explain characteristic and mantissa',
+        materials: 'Chalkboard, four-figure mathematical tables, log charts',
+        assessment: 'Logarithm simplification exercises, chalkboard speed drill',
+        references: 'TIE Basic Mathematics Form 2'
+      },
+      {
+        mainTopic: 'MIDTERM EVALUATION & REVISION',
+        subTopic: 'Form 2 Term 1 Midterm Examination (NECTA Format)',
+        cbcMainCompetence: 'MIDTERM COMPETENCE ASSESSMENT IN FORM 2 MATHEMATICS',
+        cbcSpecificCompetence: 'Evaluating mastery of exponents, simultaneous equations, quadratics and logarithms',
+        learningActivities: 'Sit standardized midterm examination paper under strict examination conditions',
+        teachingActivities: 'Administer standardized midterm test, mark scripts according to marking scheme, compile marks',
+        materials: 'Printed exam papers, answer booklets, marking schemes',
+        assessment: 'Standardized Midterm Examination marked out of 100%',
+        references: 'NECTA Form 2 National Assessment (FTNA) Guidelines'
+      },
+      {
+        mainTopic: 'Logarithms',
+        subTopic: 'Computation Using Four-Figure Mathematical Tables',
+        cbcMainCompetence: 'Utilizing logarithmic scales and four-figure tables in scientific and financial calculations',
+        cbcSpecificCompetence: 'Performing multiplication, division, powers and roots of complex numbers using log tables',
+        learningActivities: 'Calculate compound arithmetic expressions using 4-figure tables with mean differences',
+        teachingActivities: 'Guide step-by-step table lookup for mantissa and antilogarithm determination on board',
+        materials: 'Four-figure mathematical tables (TIE/NECTA approved), calculation worksheets',
+        assessment: 'Table computation accuracy rubric, homework of 5 multi-step log calculations',
+        references: 'TIE Basic Mathematics Form 2 CBC 2023'
+      },
+      {
+        mainTopic: 'Congruence and Similarity',
+        subTopic: 'Conditions for Congruence of Triangles (SSS, SAS, ASA, RHS)',
+        cbcMainCompetence: 'Applying geometric scale factors and congruence in civil engineering and structural design',
+        cbcSpecificCompetence: 'Proving triangle congruence and applying congruent corresponding parts to solve unknown lengths',
+        learningActivities: 'Construct triangles from given criteria to discover why SSA is not a congruence condition',
+        teachingActivities: 'Demonstrate formal geometric two-column proof (Statement and Reason) on chalkboard',
+        materials: 'Geometric instruments, cut-out cardboard triangles, chalkboard proof diagrams',
+        assessment: 'Geometric proof rubric, marked textbook exercises',
+        references: 'TIE Basic Mathematics Form 2'
+      },
+      {
+        mainTopic: 'Congruence and Similarity',
+        subTopic: 'Similar Figures, Scale Factor, Area and Volume Ratios',
+        cbcMainCompetence: 'Applying geometric scale factors and congruence in civil engineering and structural design',
+        cbcSpecificCompetence: 'Calculating linear scale factor k, area scale factor k², and volume scale factor k³ in architectural models',
+        learningActivities: 'Build scaled architectural models of school structures; compute model volume vs actual volume',
+        teachingActivities: 'Derive area ratio k² and volume ratio k³ using cube models on chalkboard',
+        materials: 'Architectural scale drawings, building models, 3D unit cubes, calculators',
+        assessment: 'Scale factor calculation rubric, student model presentation',
+        references: 'TIE Basic Mathematics Form 2'
+      },
+      {
+        mainTopic: 'TERMINAL EVALUATION & CLOSURE',
+        subTopic: 'Summative Terminal Examination and FTNA Readiness Evaluation',
+        cbcMainCompetence: 'TERMINAL COMPETENCE EVALUATION IN BASIC MATHEMATICS',
+        cbcSpecificCompetence: 'Summative evaluation of Form 2 Term 1 syllabus and FTNA national exam preparation',
+        learningActivities: 'Sit terminal examination, review script corrections, identify weak topics for Term 2',
+        teachingActivities: 'Invigilate terminal exam, mark scripts according to standardized scheme, compile ledger records',
+        materials: 'Official examination papers, answer sheets, academic ledger',
+        assessment: 'Terminal Examination (NECTA FTNA Format, 100 Marks)',
+        references: 'Ministry of Education & NECTA FTNA Standards'
       }
     ]
   },
 
-  'Chemistry': {
-    subject: 'Chemistry',
-    department: 'Science & Mathematics',
-    defaultPeriodsPerWeek: 4,
-    weeks: [
+  'kiswahili': {
+    'form_1_term_1': [
       {
-        week: 1,
-        dates: 'Week 1 (12 Jan - 16 Jan)',
-        cbc: {
-          mainCompetence: 'Applying chemical concepts, atomic structure, and bonding to synthesize eco-friendly substances',
-          specificCompetence: 'Investigating matter, atomic structure, subatomic particles, and electronic configuration',
-          learningActivities: 'Learners construct 3D atomic models using local clay and beads to illustrate proton/neutron/electron arrangements',
-          teachingActivities: 'Guide atomic model construction, demonstrate flame tests for alkali metals, and facilitate atomic theory discussions',
-          materials: 'Periodic table charts, atomic model kits, clay, wire, Bunsen burners, metal salt solutions',
-          assessment: 'Practical rubric on model accuracy, atomic notation quiz (Z and A numbers)',
-          references: 'TIE Chemistry for Secondary Schools Form 3 (CBC 2023), MoEST Chemistry Syllabus'
-        },
-        old: {
-          mainTopic: 'Atomic Structure',
-          subTopic: 'Subatomic Particles and Electronic Configuration',
-          specificObjectives: 'Define atomic number, mass number, and write electronic configurations for first 20 elements',
-          teachingActivities: 'Draw atomic shell diagrams on chalkboard, explain s and p orbitals, write electron arrangements (2:8:8)',
-          materials: 'Chalkboard, periodic table wall chart, textbook',
-          assessment: 'Chalkboard drill writing electronic configurations, short written test',
-          references: 'TIE Chemistry Form 3 (Traditional Syllabus), Certificate Chemistry by Holderness'
-        }
+        mainTopic: 'Dhana ya Lugha na Mawasiliano',
+        subTopic: 'Maana ya Lugha, Sifa za Lugha na Dhima ya Lugha katika Jamii',
+        cbcMainCompetence: 'Kutumia lugha ya Kiswahili kwa ufasaha katika kuwasiliana na kueleza hisia na maarifa',
+        cbcSpecificCompetence: 'Kueleza maana ya lugha, kubainisha sifa 6 za lugha ya binadamu na umuhimu wa mawasiliano',
+        learningActivities: 'Wanafunzi wanajadili katika vikundi na kuorodhesha sifa za lugha (sauti nasibu, inajitosheleza, inakua)',
+        teachingActivities: 'Kuongoza mjadala darasani, kufafanua tofauti kati ya mawasiliano ya binadamu na wanyama ubaoni',
+        materials: 'Chati ya sifa za lugha, vielelezo vya mawasiliano, Kamusi Kuu ya Kiswahili',
+        assessment: 'Maswali ya mdomo, zoezi la kuandika sifa 5 za lugha katika daftari',
+        references: 'TET Kiswahili Kitabu cha Mwanafunzi Kidato cha 1 (Mtaala Mpya wa Umahiri 2023)'
       },
       {
-        week: 2,
-        dates: 'Week 2 (19 Jan - 23 Jan)',
-        cbc: {
-          mainCompetence: 'Applying chemical concepts, atomic structure, and bonding to synthesize eco-friendly substances',
-          specificCompetence: 'Analyzing chemical bonding (ionic, covalent, and metallic) and compound properties',
-          learningActivities: 'Test conductivity and melting points of salt vs sugar vs paraffin wax in laboratory stations',
-          teachingActivities: 'Monitor electrical safety during melting point testing; facilitate comparative property analysis',
-          materials: 'Electrodes, battery packs, bulbs, sodium chloride, sucrose, wax, crucibles, Bunsen burners',
-          assessment: 'Lab investigation rubric comparing ionic and covalent substance properties',
-          references: 'TIE Chemistry for Secondary Schools Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Chemical Bonding',
-          subTopic: 'Ionic and Covalent Bonding',
-          specificObjectives: 'Explain electron transfer in ionic bonding and electron sharing in covalent bonding',
-          teachingActivities: 'Illustrate Lewis dot-and-cross diagrams on chalkboard for NaCl, H2O, CH4 and NH3',
-          materials: 'Chalkboard, colored chalk, molecular models',
-          assessment: 'Diagram drawing exercises in student exercise books; homework assignment',
-          references: 'TIE Chemistry Form 3'
-        }
+        mainTopic: 'Sauti za Kiswahili',
+        subTopic: 'Irabu (Vokali) na Konsonanti za Kiswahili',
+        cbcMainCompetence: 'Kutumia mfumo wa kifonetiki na kifonolojia kutamka na kuandika maneno kwa ufasaha',
+        cbcSpecificCompetence: 'Kutamka irabu 5 (a, e, i, o, u) na konsonanti 25 za Kiswahili kulingana na mahali na namna ya utamkaji',
+        learningActivities: 'Wanafunzi wanashika koo na midomo ili kuhisi mtetemo na mkazo wakati wa kutamka sauti mbalimbali',
+        teachingActivities: 'Kuchora mchoro wa ala za sauti ubaoni; kufundisha sauti ghuna na sighuna kwa mifano halisi',
+        materials: 'Mchoro wa ala za sauti (midomo, meno, ufizi, kaakaa gumu/laini), kadi za sauti',
+        assessment: 'Jaribio la kutamka sauti kwa usahihi, zoezi la kubainisha sauti ghuna na sighuna',
+        references: 'TET Kiswahili Kidato cha 1 (2023), Fonolojia ya Kiswahili Sanifu'
       },
       {
-        week: 3,
-        dates: 'Week 3 (26 Jan - 30 Jan)',
-        cbc: {
-          mainCompetence: 'Applying chemical stoichiometry and mole concept in industrial chemical formulation',
-          specificCompetence: 'Calculating molar mass, Avogadro\'s number, and percentage composition of compounds',
-          learningActivities: 'Weigh molar samples of carbon, copper, and salt; compute particle numbers using Avogadro\'s constant',
-          teachingActivities: 'Demonstrate digital balance calibration; guide mole formula derivations n = m/M',
-          materials: 'Digital balance, copper turnings, salt, water, calculators, mass worksheets',
-          assessment: 'Stoichiometry problem-solving worksheet; molar mass calculations',
-          references: 'TIE Chemistry Form 3 CBC 2023'
-        },
-        old: {
-          mainTopic: 'Formulae, Equations and Mole Concept',
-          subTopic: 'The Mole as a Unit of Measurement',
-          specificObjectives: 'State Avogadro\'s law, define the mole, and convert mass to moles for given compounds',
-          teachingActivities: 'Derive mole formulas on chalkboard with 4 worked numerical examples',
-          materials: 'Chalkboard, scientific calculators, log tables',
-          assessment: '10 calculation exercises marked in student exercise books',
-          references: 'TIE Chemistry Form 3'
-        }
+        mainTopic: 'Silabi na Maneno',
+        subTopic: 'Muundo wa Silabi za Kiswahili (I, KI, KKI, KKKI)',
+        cbcMainCompetence: 'Kutumia mfumo wa kifonetiki na kifonolojia kutamka na kuandika maneno kwa ufasaha',
+        cbcSpecificCompetence: 'Kugawa maneno katika silabi na kutambua miundo ya silabi wazi na silabi funge',
+        learningActivities: 'Wanafunzi wanapiga makofi kuhesabu silabi katika maneno marefu (k.m. wa-li-o-m-pi-ga) na kuandika ubaoni',
+        teachingActivities: 'Kufafanua muundo wa silabi za Kiswahili ambazo nyingi huishia na irabu (silabi wazi)',
+        materials: 'Kadi za silabi, chati ya muundo wa silabi, ubao',
+        assessment: 'Zoezi la kutenganisha silabi katika maneno 15, kukagua daftari za wanafunzi',
+        references: 'TET Kiswahili Kidato cha 1'
       },
       {
-        week: 4,
-        dates: 'Week 4 (02 Feb - 06 Feb)',
-        cbc: {
-          mainCompetence: 'Applying chemical stoichiometry and mole concept in industrial chemical formulation',
-          specificCompetence: 'Determining empirical and molecular formulae of organic and inorganic compounds',
-          learningActivities: 'Heat magnesium ribbon in crucible to determine empirical formula of magnesium oxide experimentally',
-          teachingActivities: 'Supervise crucible handling safety with tongs; guide empirical formula ratio computation from mass gain',
-          materials: 'Crucibles, tongs, magnesium ribbon, pipe-clay triangles, Bunsen burners, balances',
-          assessment: 'Experimental lab report assessing percentage error and empirical formula calculation',
-          references: 'TIE Chemistry Form 3 CBC 2023, Practical Chemistry Guide'
-        },
-        old: {
-          mainTopic: 'Formulae, Equations and Mole Concept',
-          subTopic: 'Empirical and Molecular Formulae',
-          specificObjectives: 'Calculate empirical formula from percentage composition data and molecular formula given molar mass',
-          teachingActivities: 'Demonstrate step-by-step table method (element, mass, moles, ratio, simple ratio) on chalkboard',
-          materials: 'Chalkboard, textbook worked examples',
-          assessment: 'Classwork calculations of 5 empirical formula problems',
-          references: 'TIE Chemistry Form 3'
-        }
+        mainTopic: 'Aina za Maneno',
+        subTopic: 'Nomino (N) na Vivumishi (V)',
+        cbcMainCompetence: 'Kuchanganua aina za maneno na kutunga sentensi sahihi kimuundo na kimaana',
+        cbcSpecificCompetence: 'Kutambua aina za nomino (Pekee, Za Kawaida, Jamii, Dhahania) na aina za vivumishi katika tungo',
+        learningActivities: 'Wanafunzi wanataja vitu vilivyomo darasani na kuvipatia sifa zake (k.m. Meza ndefu, Mwanafunzi mtiifu)',
+        teachingActivities: 'Kuongoza uainishaji wa nomino na vivumishi ubaoni kwa kutumia jedwali na sentensi za mfano',
+        materials: 'Vitu halisi darasani, kadi za maneno, chati ya aina za nomino na vivumishi',
+        assessment: 'Zoezi la ubaoni la kubainisha nomino na vivumishi kutoka katika aya fupi',
+        references: 'TET Kiswahili Kidato cha 1 CBC 2023'
       },
       {
-        week: 5,
-        dates: 'Week 5 (09 Feb - 13 Feb)',
-        cbc: {
-          mainCompetence: 'Synthesizing acids, bases, and salts for agricultural soil conditioning and domestic sanitation',
-          specificCompetence: 'Investigating pH scale, acid-base indicators, and volumetric acid-base titrations',
-          learningActivities: 'Extract natural pH indicators from red cabbage/hibiscus flowers; test local soil pH samples',
-          teachingActivities: 'Demonstrate plant pigment extraction with ethanol; guide pH scale interpretation for soil fertility',
-          materials: 'Hibiscus petals, red cabbage, mortar & pestle, ethanol, test tubes, soil samples, universal indicator',
-          assessment: 'Practical rubric on indicator extraction efficiency and soil acidity diagnosis',
-          references: 'TIE Secondary Chemistry Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Acids, Bases and Salts',
-          subTopic: 'Acidity, Alkalinity and pH Scale',
-          specificObjectives: 'Define acids and bases according to Arrhenius, list properties, and explain pH scale 0-14',
-          teachingActivities: 'List properties of acids and bases on chalkboard, demonstrate litmus paper and universal indicator tests',
-          materials: 'Chalkboard, dilute HCl, NaOH, litmus papers, pH charts',
-          assessment: 'Short test on properties of acids and bases; notebook review',
-          references: 'TIE Chemistry Form 3 Traditional'
-        }
+        mainTopic: 'Aina za Maneno',
+        subTopic: 'Vitenzi (T) na Vielezi (E)',
+        cbcMainCompetence: 'Kuchanganua aina za maneno na kutunga sentensi sahihi kimuundo na kimaana',
+        cbcSpecificCompetence: 'Kutofautisha vitenzi vikuu, vitenzi visaidizi na vitenzi vishirikishi; kubainisha vielezi vya namna, wakati, mahali',
+        learningActivities: 'Wanafunzi wanaigiza vitendo darasani (kimbia haraka, imba kwa sauti) na kuandika sentensi zake',
+        teachingActivities: 'Kufundisha muundo wa vitenzi na jinsi kielezi kinavyofafanua kitenzi, kivumishi au kielezi kingine',
+        materials: 'Kadi za vitenzi na vielezi, ubao, vielelezo vya vitendo',
+        assessment: 'Kutunga sentensi 5 zenye vitenzi na vielezi vya aina mbalimbali, tathmini ya marika',
+        references: 'TET Kiswahili Kidato cha 1'
       },
       {
-        week: 6,
-        dates: 'Week 6 (16 Feb - 20 Feb)',
-        cbc: {
-          mainCompetence: 'Synthesizing acids, bases, and salts for agricultural soil conditioning and domestic sanitation',
-          specificCompetence: 'Performing volumetric analysis (titration) to determine molar concentration and purity',
-          learningActivities: 'Pipette 25cm³ HCl, titrate against Na₂CO₃ using methyl orange indicator until sharp endpoint colour change',
-          teachingActivities: 'Demonstrate correct burette reading at eye level; monitor titration technique and meniscus alignment',
-          materials: 'Burettes, pipettes, conical flasks, retort stands, HCl solution, Na₂CO₃, methyl orange',
-          assessment: 'Volumetric analysis practical mark sheet assessing concordant titre values (within ±0.2cm³)',
-          references: 'TIE Secondary Chemistry Form 3 (CBC 2023), NECTA Practical Guide'
-        },
-        old: {
-          mainTopic: 'Volumetric Analysis',
-          subTopic: 'Acid-Base Titration Calculations',
-          specificObjectives: 'Record titration readings in standard table format and calculate molarity of unknown solution',
-          teachingActivities: 'Draw titration table on chalkboard, explain formula M1V1/n1 = M2V2/n2 with 3 examples',
-          materials: 'Chalkboard, sample titration data charts',
-          assessment: 'Classwork calculation of molarity and concentration in g/dm³ from titration data',
-          references: 'TIE Chemistry Form 3'
-        }
+        mainTopic: 'Aina za Maneno',
+        subTopic: 'Viwakilishi (W), Viunganishi (U), Vihusishi (H) na Vihisishi (I)',
+        cbcMainCompetence: 'Kuchanganua aina za maneno na kutunga sentensi sahihi kimuundo na kimaana',
+        cbcSpecificCompetence: 'Kutambua na kutumia aina zote 8 za maneno ya Kiswahili katika mawasiliano sanifu',
+        learningActivities: 'Kukamilisha jedwali la aina 8 za maneno kutoka katika hadithi fupi waliyopewa',
+        teachingActivities: 'Kutoa muhtasari wa aina zote 8 za maneno ubaoni na kufafanua dhima ya kila aina ya neno',
+        materials: 'Vifungu vya habari, chati ya aina 8 za maneno, kadi za majaribio',
+        assessment: 'Zoezi la kutambua aina za maneno lililopigiwa mstari katika aya 2',
+        references: 'TET Kiswahili Kidato cha 1'
       },
       {
-        week: 7,
-        dates: 'Week 7 (23 Feb - 27 Feb)',
-        cbc: {
-          mainCompetence: 'Synthesizing acids, bases, and salts for agricultural soil conditioning and domestic sanitation',
-          specificCompetence: 'Preparing soluble and insoluble salts through neutralization, precipitation, and crystallization',
-          learningActivities: 'Prepare copper(II) sulphate crystals from CuO and dilute H₂SO₄; filter, evaporate and crystallise',
-          teachingActivities: 'Guide evaporation and filtration techniques; explain solubility rules and ionic precipitation equations',
-          materials: 'Beakers, filter paper, funnels, evaporating dishes, copper oxide, dilute sulphuric acid, tripod stands',
-          assessment: 'Salt preparation practical rubric, purity observation of blue CuSO4·5H2O crystals',
-          references: 'TIE Chemistry CBC 2023'
-        },
-        old: {
-          mainTopic: 'Salts',
-          subTopic: 'Methods of Preparing Salts',
-          specificObjectives: 'Describe 4 methods of preparing soluble salts and double decomposition for insoluble salts',
-          teachingActivities: 'Write salt preparation chemical equations on chalkboard; list solubility rules for nitrates, sulfates, chlorides',
-          materials: 'Chalkboard, chart of solubility rules',
-          assessment: 'Written exercise on writing balanced ionic equations for salt precipitation',
-          references: 'TIE Chemistry Form 3'
-        }
+        mainTopic: 'Uakifishaji na Maandishi Sanifu',
+        subTopic: 'Alama za Uakifishaji (Nukta, Mkato, Nukta Mkato, Alama ya Kushangaa, Alama ya Ulizo)',
+        cbcMainCompetence: 'Kutumia kanuni za uandishi sanifu na uakifishaji sahihi katika insha na barua',
+        cbcSpecificCompetence: 'Kutumia alama zote kuu za uakifishaji kuleta maana iliyokusudiwa na kuepuka utata',
+        learningActivities: 'Kusoma sentensi yenye alama tofauti na kuona jinsi sauti na maana zinavyobadilika; kuakifisha aya isiyo na alama',
+        teachingActivities: 'Kufundisha matumizi sahihi ya kila alama ubaoni kwa mifano dhahiri ya kisheria na kijamii',
+        materials: 'Chati ya alama za uakifishaji, vifungu vya mazoezi ya kuakifisha, ubao',
+        assessment: 'Zoezi la kuweka alama sahihi katika aya fupi ya maneno 100',
+        references: 'TET Kiswahili Kidato cha 1 CBC 2023'
       },
       {
-        week: 8,
-        dates: 'Week 8 (02 Mar - 06 Mar)',
-        cbc: {
-          mainCompetence: 'MIDTERM ASSESSMENT & PRACTICAL TITRATION EVALUATION',
-          specificCompetence: 'Evaluating mastery in chemical bonding, mole concept, and volumetric analysis',
-          learningActivities: 'Perform individual volumetric titration exam task; answer theoretical stoichiometry paper',
-          teachingActivities: 'Supervise standardized NECTA-style practical titration exam; mark burette accuracy',
-          materials: 'Burettes, pipettes, standardized solutions, exam question papers',
-          assessment: 'Midterm Examination (Practical Titration 40% + Theory 60%)',
-          references: 'NECTA Assessment Guidelines 2023/2024'
-        },
-        old: {
-          mainTopic: 'MIDTERM EVALUATION & REVIEW',
-          subTopic: 'Revision on Atomic Structure, Mole Concept and Titration',
-          specificObjectives: 'Evaluate student problem-solving speed and accuracy in chemistry calculations',
-          teachingActivities: 'Administer midterm written test; conduct chalkboard correction of common errors',
-          materials: 'Printed exam papers, answer booklets',
-          assessment: 'Formal Midterm Examination marked out of 100%',
-          references: 'School Past Examination Papers'
-        }
+        mainTopic: 'PIMHO LA KATIKATI YA MUHULA (MIDTERM)',
+        subTopic: 'Mtihani wa Tathmini ya Umahiri wa Katikati ya Muhula wa 1',
+        cbcMainCompetence: 'UPIMAJI WA UMAHIRI WA SARUFI NA MATUMIZI YA LUGHA',
+        cbcSpecificCompetence: 'Kupima uelewa na umahiri katika lugha, sauti, silabi na aina 8 za maneno',
+        learningActivities: 'Kufanya mtihani wa katikati ya muhula kwa umakini na utulivu',
+        teachingActivities: 'Kusimamia mtihani kulingana na miongozo ya NECTA, kusahihisha na kuchanganua matokeo',
+        materials: 'Karatasi za mtihani zilizochapishwa, vitabu vya majibu, mwongozo wa usahihishaji',
+        assessment: 'Mtihani Rasmi wa Katikati ya Muhula (Alama 100)',
+        references: 'Mwongozo wa Upimaji wa NECTA Kidato cha Kwanza'
       },
       {
-        week: 9,
-        dates: 'Week 9 (09 Mar - 13 Mar)',
-        cbc: {
-          mainCompetence: 'Managing environmental chemical hazards, pollution, and water treatment technologies',
-          specificCompetence: 'Analyzing chemical energetics, exothermic/endothermic reactions, and bond energy',
-          learningActivities: 'Measure temperature changes during dissolution of NH₄Cl vs NaOH in polystyrene cup calorimeters',
-          teachingActivities: 'Demonstrate simple calorimetry setup; guide energy level diagram construction (ΔH negative vs positive)',
-          materials: 'Polystyrene cups, digital thermometers, ammonium chloride, sodium hydroxide, distilled water',
-          assessment: 'Lab report evaluating experimental heat of solution calculation ΔQ = mcΔT',
-          references: 'TIE Secondary Chemistry Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Chemical Energetics',
-          subTopic: 'Exothermic and Endothermic Reactions',
-          specificObjectives: 'Define exothermic and endothermic reactions and draw energy profile diagrams',
-          teachingActivities: 'Draw energy level diagrams on chalkboard, define enthalpy change ΔH with combustion examples',
-          materials: 'Chalkboard, chart showing energy profile curves',
-          assessment: 'Diagram drawing quiz in exercise books; numerical exercise on heat changes',
-          references: 'TIE Chemistry Form 3'
-        }
+        mainTopic: 'Fasihi kwa Ujumla',
+        subTopic: 'Maana ya Fasihi, Dhima ya Fasihi na Tofauti kati ya Fasihi na Sanaa Nyingine',
+        cbcMainCompetence: 'Kuthamini kazi za sanaa na fasihi katika kuhifadhi utamaduni na kuelimisha jamii',
+        cbcSpecificCompetence: 'Kufafanua dhana ya fasihi, kueleza tanzu mbili kuu (Simulizi na Andishi) na umuhimu wake kijamii',
+        learningActivities: 'Wanafunzi wanajadili nyimbo za asili za makabila yao na maadili yanayofundishwa kwa jamii',
+        teachingActivities: 'Kuongoza uchambuzi wa fasihi kama kioo cha jamii; kueleza fani na maudhui kwa ujumla',
+        materials: 'Kanda za sauti za nyimbo za asili, picha za sanaa za maonyesho, vitabu vya fasihi',
+        assessment: 'Insha fupi kuhusu "Nafasi ya Fasihi katika Maadili ya Vijana Tanzania"',
+        references: 'TET Kiswahili Kidato cha 1 CBC 2023, Misingi ya Fasihi'
       },
       {
-        week: 10,
-        dates: 'Week 10 (16 Mar - 20 Mar)',
-        cbc: {
-          mainCompetence: 'Managing environmental chemical hazards, pollution, and water treatment technologies',
-          specificCompetence: 'Investigating chemical equilibrium, Le Chatelier\'s principle, and reaction rates',
-          learningActivities: 'Investigate effect of concentration and temperature on iodine clock reaction rates in group stations',
-          teachingActivities: 'Facilitate rate graph plotting (volume vs time); guide deduction of surface area and catalyst effects',
-          materials: 'Sodium thiosulphate, HCl, stopwatches, conical flasks, cross paper, water baths',
-          assessment: 'Reaction rate graph analysis rubric and Le Chatelier principle application test',
-          references: 'TIE Secondary Chemistry Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Rates of Chemical Reactions',
-          subTopic: 'Factors Affecting Reaction Rate',
-          specificObjectives: 'List 5 factors affecting reaction rates and explain collision theory',
-          teachingActivities: 'Explain concentration, temperature, catalyst, surface area on chalkboard with collision diagrams',
-          materials: 'Chalkboard, rate charts',
-          assessment: '5 short answer questions on factors affecting chemical reaction rates',
-          references: 'TIE Chemistry Form 3'
-        }
+        mainTopic: 'Fasihi Simulizi',
+        subTopic: 'Dhana ya Fasihi Simulizi, Sifa Zake na Tanzu Nne Kuu',
+        cbcMainCompetence: 'Kuhakiki na kutenda vipera vya fasihi simulizi kwa kuzingatia muktadha wa kitamaduni',
+        cbcSpecificCompetence: 'Kutofautisha Hadithi, Ushairi Simulizi, Semi (Methali, Vitendawili, Misemo) na Sanaa za Maonyesho',
+        learningActivities: 'Wanafunzi wanategeana vitendawili na kueleza maana fiche na mafunzo yake katika maisha',
+        teachingActivities: 'Kuainisha matawi ya fasihi simulizi ubaoni na kufafanua sifa ya upekee (mdomo, hadhira hai, kubadilika)',
+        materials: 'Mchoro wa matawi ya tanzu za fasihi simulizi, vitabu vya hadithi na methali',
+        assessment: 'Mashindano ya kutegua vitendawili darasani, zoezi la kuandika sifa 5 za fasihi simulizi',
+        references: 'TET Kiswahili Kidato cha 1'
       },
       {
-        week: 11,
-        dates: 'Week 11 (23 Mar - 27 Mar)',
-        cbc: {
-          mainCompetence: 'SUSTAINABLE CHEMISTRY PROJECT & EXHIBITION',
-          specificCompetence: 'Synthesizing chemistry concepts into eco-friendly products (soap / water filter / fertilizer)',
-          learningActivities: 'Teams fabricate homemade soaps using local seed oils and ash lye or water purification filters',
-          teachingActivities: 'Coordinate green chemistry product exhibition; judge product quality and saponification process',
-          materials: 'Coconut oil, NaOH, essential oils, water filter media, pH strips',
-          assessment: 'Green chemistry product design and lab report rubric',
-          references: 'TIE Competence-Based Assessment Framework 2023'
-        },
-        old: {
-          mainTopic: 'GENERAL REVISION & PAST PAPER DRILLS',
-          subTopic: 'NECTA Chemistry Paper 1 & Paper 2 Format Drills',
-          specificObjectives: 'Review stoichiometry, volumetric analysis, and organic chemistry principles',
-          teachingActivities: 'Solve past NECTA national exam questions on chalkboard with student participation',
-          materials: 'Chalkboard, NECTA past papers 2018-2023',
-          assessment: 'Timed mock drill on Section A and B questions',
-          references: 'NECTA Chemistry Review Series'
-        }
+        mainTopic: 'MARUDIO YA JUMLA YA MUHULA WA KWANZA',
+        subTopic: 'Marudio ya Mada Zote za Sarufi, Uakifishaji na Fasihi Simulizi',
+        cbcMainCompetence: 'UUNGANISHAJI WA UMAHIRI WA KISWAHILI KIDATO CHA KWANZA',
+        cbcSpecificCompetence: 'Kujibu maswali ya mitihani ya NECTA kwa usahihi na kasi stahiki',
+        learningActivities: 'Kufanya mazoezi ya mitihani ya miaka ya nyuma katika vikundi vidogo vidogo',
+        teachingActivities: 'Kusahihisha makosa ya mara kwa mara ya kisarufi na kuweka mkazo kwenye mbinu za kujibu maswali',
+        materials: 'Karatasi za mitihani ya nyuma ya shule, ubao, vielelezo vya majibu bora',
+        assessment: 'Jaribio la marudio lenye maswali ya kuchagua na maswali ya insha',
+        references: 'Mfululizo wa Mitihani ya NECTA Kidato cha Kwanza'
       },
       {
-        week: 12,
-        dates: 'Week 12 (30 Mar - 03 Apr)',
-        cbc: {
-          mainCompetence: 'TERMINAL COMPETENCE EVALUATION & REFLECTION',
-          specificCompetence: 'Summative terminal examination covering Term 1 chemistry competences',
-          learningActivities: 'Sit terminal chemistry examination; log areas for Term 2 practical skill growth',
-          teachingActivities: 'Invigilate terminal examination; mark scripts according to standardized scheme; record in ledger',
-          materials: 'Official examination papers, answer booklets, periodic tables',
-          assessment: 'Terminal Examination (NECTA Format)',
-          references: 'Ministry of Education & NECTA Terminal Standards'
-        },
-        old: {
-          mainTopic: 'TERMINAL EXAMINATION & CLOSURE',
-          subTopic: 'End of Term Assessment and Mark Compilation',
-          specificObjectives: 'Summative evaluation of student mastery of Term 1 chemistry syllabus',
-          teachingActivities: 'Invigilate terminal exam, mark scripts, enter marks into ledger',
-          materials: 'Examination papers, answer sheets, report cards',
-          assessment: 'Formal Terminal Examination marked out of 100%',
-          references: 'School Academic Examination Regulations'
-        }
+        mainTopic: 'MTIHANI WA MWISHO WA MUHULA WA KWANZA NA FUNGA SHULE',
+        subTopic: 'Tathmini ya Mwisho wa Muhula na Kujaza Daftari la Maendeleo ya Kitaaluma',
+        cbcMainCompetence: 'TATHMINI YA MWISHO WA MUHULA WA KISWAHILI',
+        cbcSpecificCompetence: 'Kutathmini kiwango cha mafanikio ya ujifunzaji kwa Muhula wa Kwanza',
+        learningActivities: 'Kufanya mtihani wa mwisho wa muhula, kuangalia masahihisho na kupanga malengo ya Muhula wa Pili',
+        teachingActivities: 'Kusimamia mtihani, kusahihisha, kuingiza alama kwenye rejesta na kadi za ripoti za maendeleo',
+        materials: 'Karatasi rasmi za mitihani, vitabu vya majibu, rejesta ya alama, ripoti za wanafunzi',
+        assessment: 'Mtihani Rasmi wa Mwisho wa Muhula (Alama 100)',
+        references: 'Miongozo ya Wizara ya Elimu na Baraza la Mitihani la Taifa (NECTA)'
       }
     ]
   },
 
-  'Biology': {
-    subject: 'Biology',
-    department: 'Science & Mathematics',
-    defaultPeriodsPerWeek: 4,
-    weeks: [
+  'english': {
+    'form_1_term_1': [
       {
-        week: 1,
-        dates: 'Week 1 (12 Jan - 16 Jan)',
-        cbc: {
-          mainCompetence: 'Investigating cellular structures, physiological processes, and biological diversity',
-          specificCompetence: 'Examining cell structure, organelle functions, and light microscopy techniques',
-          learningActivities: 'Prepare wet mount slides of onion epidermal cells and human cheek cells; observe under light microscope',
-          teachingActivities: 'Demonstrate light microscope handling and mirror alignment; guide cell diagram drawing rules (magnification, labels)',
-          materials: 'Light microscopes, glass slides, cover slips, iodine solution, onion bulbs, mounted needles',
-          assessment: 'Biological drawing rubric (clear lines, magnification calculation, accurate labels)',
-          references: 'TIE Biology for Secondary Schools Form 3 (CBC 2023), MoEST Biology Guide'
-        },
-        old: {
-          mainTopic: 'Cell Biology',
-          subTopic: 'Cell Structure and Microscopy',
-          specificObjectives: 'Identify parts of a light microscope and compare plant and animal cells under microscope',
-          teachingActivities: 'Draw plant and animal cell diagrams on chalkboard, list organelle functions (nucleus, mitochondrion, chloroplast)',
-          materials: 'Chalkboard, cell charts, microscope model',
-          assessment: 'Labeling test on cell diagrams; written exercise in exercise books',
-          references: 'TIE Biology Form 3 Traditional Syllabus'
-        }
+        mainTopic: 'Listening and Speaking',
+        subTopic: 'Greetings, Courteous Language and Self-Introduction',
+        cbcMainCompetence: 'Demonstrating communicative competence in social interactions and formal school contexts',
+        cbcSpecificCompetence: 'Using appropriate formal and informal greetings, courteous expressions, and introducing self and others',
+        learningActivities: 'Learners role-play greeting headmaster vs greeting a classmate, practice self-introductions in pairs',
+        teachingActivities: 'Model polite speech patterns (Excuse me, Pardon, Please, Thank you) and supervise peer role-plays',
+        materials: 'Dialogue scripts, audio recordings of standard English greetings, flashcards',
+        assessment: 'Speaking rubric assessing pronunciation, tone, vocabulary, and confidence',
+        references: 'TIE English for Secondary Schools Form 1 (CBC 2023), MoEST Guidelines'
       },
       {
-        week: 2,
-        dates: 'Week 2 (19 Jan - 23 Jan)',
-        cbc: {
-          mainCompetence: 'Investigating cellular structures, physiological processes, and biological diversity',
-          specificCompetence: 'Analyzing cell physiology: diffusion, osmosis, and active transport mechanisms',
-          learningActivities: 'Investigate osmosis using potato osmometers in concentrated salt/sugar solutions vs distilled water',
-          teachingActivities: 'Guide potato cylinder mass/length measurements before and after immersion; facilitate turgor pressure discussion',
-          materials: 'Irish potatoes, cork borers, sucrose solutions, petri dishes, electronic balances, scalpels',
-          assessment: 'Lab report evaluating percentage change in mass and osmosis graph interpretation',
-          references: 'TIE Biology Form 3 CBC 2023'
-        },
-        old: {
-          mainTopic: 'Cell Physiology',
-          subTopic: 'Diffusion and Osmosis',
-          specificObjectives: 'Define diffusion and osmosis and describe their importance in living organisms',
-          teachingActivities: 'Explain diffusion in air/water and osmosis across semi-permeable membranes on chalkboard',
-          materials: 'Chalkboard, potassium permanganate crystals, beaker, water',
-          assessment: 'Class exercise defining turgidity, plasmolysis, and wilting',
-          references: 'TIE Biology Form 3'
-        }
+        mainTopic: 'Listening and Speaking',
+        subTopic: 'Classroom Language, Giving Instructions and Following Directions',
+        cbcMainCompetence: 'Demonstrating communicative competence in social interactions and formal school contexts',
+        cbcSpecificCompetence: 'Interpreting classroom commands, asking for clarification, and giving directional instructions',
+        learningActivities: 'Simon Says game for listening comprehension; guide a blindfolded partner through classroom obstacle course',
+        teachingActivities: 'Demonstrate imperative sentence structures (Stand up, Turn left, Open your book at page 20) on board',
+        materials: 'Classroom maps, instruction cards, directional signage',
+        assessment: 'Listening task rubric, oral response evaluation',
+        references: 'TIE English Form 1'
       },
       {
-        week: 3,
-        dates: 'Week 3 (26 Jan - 30 Jan)',
-        cbc: {
-          mainCompetence: 'Evaluating human nutrition, digestive health, and metabolic enzyme efficiency',
-          specificCompetence: 'Investigating macronutrients, food tests, and enzyme activity factors (pH, temperature)',
-          learningActivities: 'Conduct qualitative food tests for starch (iodine), reducing sugars (Benedict\'s), proteins (Biuret), fats (emulsion)',
-          teachingActivities: 'Supervise hot water bath safety; guide color change recording (blue to brick-red, pale blue to violet)',
-          materials: 'Test tubes, Benedict\'s reagent, Iodine, Biuret reagent, ethanol, food samples (bread, milk, egg white)',
-          assessment: 'Practical food test result table accuracy and chemical deduction rubric',
-          references: 'TIE Biology Form 3 CBC 2023, Practical Biology Manual'
-        },
-        old: {
-          mainTopic: 'Nutrition',
-          subTopic: 'Food Substances and Food Tests',
-          specificObjectives: 'List classes of food, state functions, and carry out standard food tests for starch, sugar, protein, fat',
-          teachingActivities: 'Draw food test summary table on chalkboard; explain reagents and expected observation changes',
-          materials: 'Chalkboard, food test reagents, chart of balanced diets',
-          assessment: 'Marked food test table in student practical notebooks',
-          references: 'TIE Biology Form 3'
-        }
+        mainTopic: 'Reading Comprehension',
+        subTopic: 'Dictionary Skills, Alphabetical Ordering and Pronunciation Symbols',
+        cbcMainCompetence: 'Utilizing reading strategies and reference tools to expand vocabulary and comprehend authentic texts',
+        cbcSpecificCompetence: 'Locating words quickly using guide words, interpreting phonemic transcriptions and part of speech labels',
+        learningActivities: 'Dictionary treasure hunt: race in pairs to find word definitions, syllabification, and stress marks',
+        teachingActivities: 'Explain guide words at top of dictionary pages; guide phonetic symbols for long and short vowels',
+        materials: 'Oxford Advanced Learner\'s Dictionaries, dictionary task cards, chalkboard',
+        assessment: 'Dictionary speed and accuracy worksheet, vocabulary matching quiz',
+        references: 'TIE English Form 1 CBC 2023'
       },
       {
-        week: 4,
-        dates: 'Week 4 (02 Feb - 06 Feb)',
-        cbc: {
-          mainCompetence: 'Evaluating human nutrition, digestive health, and metabolic enzyme efficiency',
-          specificCompetence: 'Analyzing human alimentary canal, digestive enzymes, absorption, and liver functions',
-          learningActivities: 'Trace food passage through digestive system using 3D torsos and organ models; investigate salivary amylase action',
-          teachingActivities: 'Demonstrate starch breakdown by saliva over time; explain villi structural adaptations for absorption',
-          materials: 'Human digestive torso model, starch solution, iodine, spot plates, warm water baths',
-          assessment: 'Organ adaptation chart and enzyme rate curve interpretation',
-          references: 'TIE Biology Form 3 CBC 2023'
-        },
-        old: {
-          mainTopic: 'Human Digestion',
-          subTopic: 'The Alimentary Canal and Digestive Enzymes',
-          specificObjectives: 'Identify parts of human digestive system and state enzymes in mouth, stomach, pancreas, small intestine',
-          teachingActivities: 'Draw digestive system on chalkboard, write enzyme summary table (substrate -> enzyme -> product)',
-          materials: 'Chalkboard, wall chart of human digestive system',
-          assessment: 'Labeling quiz of digestive system diagram; homework questions',
-          references: 'TIE Biology Form 3'
-        }
+        mainTopic: 'Grammar and Syntax',
+        subTopic: 'Nouns (Countable and Uncountable) and Determiners (A, An, Some, Any)',
+        cbcMainCompetence: 'Constructing grammatically correct sentences using appropriate parts of speech',
+        cbcSpecificCompetence: 'Distinguishing countable vs uncountable nouns and applying appropriate quantifiers (much, many, few, little)',
+        learningActivities: 'Sort market items into countable (apples, eggs) and uncountable (rice, milk, sugar); write sentences',
+        teachingActivities: 'Demonstrate rules for irregular plural nouns (child/children, sheep/sheep, foot/feet) on chalkboard',
+        materials: 'Real objects (pens, sugar, water bottle), noun sorting chart, grammar worksheets',
+        assessment: 'Classroom grammar exercise of 15 sentences, peer error correction',
+        references: 'TIE English Form 1'
       },
       {
-        week: 5,
-        dates: 'Week 5 (09 Feb - 13 Feb)',
-        cbc: {
-          mainCompetence: 'Designing respiratory health interventions and investigating gas exchange mechanisms',
-          specificCompetence: 'Comparing mammalian lung structure, gaseous exchange mechanisms, and respiratory diseases',
-          learningActivities: 'Dissect mammalian lungs (bovine/caprine); inflate using tube to observe pleural expansion and bronchial tree',
-          teachingActivities: 'Demonstrate lung dissection safely; guide observation of cartilaginous rings and alveolar vascularization',
-          materials: 'Fresh goat/ox lungs with trachea, dissection trays, scalpel, magnifying glasses, hand pumps',
-          assessment: 'Dissection drawing rubric and respiratory surface adaptation checklist',
-          references: 'TIE Secondary Biology Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Gaseous Exchange',
-          subTopic: 'Human Respiratory System',
-          specificObjectives: 'Describe structure of trachea, bronchi, alveoli and mechanism of breathing (inhalation & exhalation)',
-          teachingActivities: 'Draw bell-jar model of breathing on chalkboard, explain diaphragm and intercostal muscle movement',
-          materials: 'Chalkboard, bell-jar breathing model, respiratory wall chart',
-          assessment: 'Comparison table exercise between inhaled and exhaled air',
-          references: 'TIE Biology Form 3 Traditional'
-        }
+        mainTopic: 'Grammar and Syntax',
+        subTopic: 'Pronouns (Personal, Possessive, Demonstrative, Reflexive)',
+        cbcMainCompetence: 'Constructing grammatically correct sentences using appropriate parts of speech',
+        cbcSpecificCompetence: 'Replacing nouns with correct subjective, objective and possessive pronouns to avoid repetition',
+        learningActivities: 'Rewrite a repetitive passage replacing repeated names with appropriate pronouns in small groups',
+        teachingActivities: 'Draw comprehensive pronoun declension table (I, me, my, mine, myself) on chalkboard with examples',
+        materials: 'Chalkboard, pronoun classification table, narrative excerpt worksheets',
+        assessment: 'Pronoun substitution exercises in exercise books, short diagnostic quiz',
+        references: 'TIE English Form 1'
       },
       {
-        week: 6,
-        dates: 'Week 6 (16 Feb - 20 Feb)',
-        cbc: {
-          mainCompetence: 'Analyzing transport systems in plants and animals for health and agricultural productivity',
-          specificCompetence: 'Investigating human circulatory system, heart anatomy, blood vessels, and blood groups',
-          learningActivities: 'Dissect mammalian heart to identify atria, ventricles, coronary arteries, valves; test blood pressure with sphygmomanometer',
-          teachingActivities: 'Demonstrate heart dissection; guide pulse rate measurement before and after exercise',
-          materials: 'Fresh mammalian hearts, dissection kits, digital sphygmomanometers, stopwatches, heart charts',
-          assessment: 'Heart anatomy practical rubric, cardiac cycle flowchart accuracy',
-          references: 'TIE Secondary Biology Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Transport of Substances',
-          subTopic: 'Mammalian Circulatory System and Heart Anatomy',
-          specificObjectives: 'Identify 4 chambers of heart, explain double circulation, and list functions of blood components',
-          teachingActivities: 'Draw internal heart diagram on chalkboard, trace blood flow path (pulmonary & systemic)',
-          materials: 'Chalkboard, circulatory system chart, heart model',
-          assessment: 'Diagram labeling test of heart; homework on ABO blood groups',
-          references: 'TIE Biology Form 3'
-        }
+        mainTopic: 'Grammar and Syntax',
+        subTopic: 'Tense and Aspect: Present Simple and Present Continuous',
+        cbcMainCompetence: 'Expressing habitual actions, universal truths, and ongoing events using accurate verb tenses',
+        cbcSpecificCompetence: 'Formulating affirmative, negative, and interrogative sentences in Simple Present and Present Continuous',
+        learningActivities: 'Write daily routine schedules using simple present; mime actions for classmates to describe in continuous tense',
+        teachingActivities: 'Explain 3rd person singular "-s/-es" rule and spelling rules for "-ing" participles on chalkboard',
+        materials: 'Verb flash cards, daily routine pictures, grammar charts',
+        assessment: 'Verb tense transformation worksheet, short descriptive paragraph writing',
+        references: 'TIE English Form 1 CBC 2023'
       },
       {
-        week: 7,
-        dates: 'Week 7 (23 Feb - 27 Feb)',
-        cbc: {
-          mainCompetence: 'Analyzing transport systems in plants and animals for health and agricultural productivity',
-          specificCompetence: 'Investigating plant transport: xylem, phloem, transpiration rate factors, and potometer experiments',
-          learningActivities: 'Measure transpiration rates of leafy shoots under fan/light/humid conditions using bubble potometers',
-          teachingActivities: 'Guide potometer setup avoiding air bubbles; explain transpiration pull, cohesion, and adhesion forces',
-          materials: 'Bubble potometers, leafy shoots (Eucalyptus/Hibiscus), capillary tubes, Vaseline, electric fans, lamps',
-          assessment: 'Transpiration rate experimental graph rubric and stomatal adaptation analysis',
-          references: 'TIE Biology CBC 2023'
-        },
-        old: {
-          mainTopic: 'Transport in Plants',
-          subTopic: 'Transpiration and Vascular Bundles',
-          specificObjectives: 'Define transpiration, list 4 external factors affecting rate, and describe xylem/phloem functions',
-          teachingActivities: 'Draw stem cross-section showing vascular bundles on chalkboard; explain transpiration stream',
-          materials: 'Chalkboard, cobalt chloride paper, potted plant, plastic bag',
-          assessment: 'Written exercise on factors affecting transpiration rate',
-          references: 'TIE Biology Form 3'
-        }
+        mainTopic: 'Reading Comprehension',
+        subTopic: 'Reading for Main Ideas, Scanning and Skimming Informational Texts',
+        cbcMainCompetence: 'Utilizing reading strategies and reference tools to expand vocabulary and comprehend authentic texts',
+        cbcSpecificCompetence: 'Skimming for gist, scanning for specific factual dates/names, and making logical inferences',
+        learningActivities: 'Read news article on environmental conservation in Tanzania; highlight main topic sentence in each paragraph',
+        teachingActivities: 'Model skimming vs scanning reading techniques; guide answering WH-questions (Who, What, Where, When, Why)',
+        materials: 'Graded reading passages on Serengeti wildlife, comprehension question sheets',
+        assessment: 'Reading comprehension test assessing literal, inferential, and vocabulary-in-context questions',
+        references: 'TIE English Form 1'
       },
       {
-        week: 8,
-        dates: 'Week 8 (02 Mar - 06 Mar)',
-        cbc: {
-          mainCompetence: 'MIDTERM ASSESSMENT & BIOLOGICAL DISSECTION EVALUATION',
-          specificCompetence: 'Synthesizing cell physiology, nutrition, gas exchange, and circulatory system mastery',
-          learningActivities: 'Perform practical heart/lung dissection task and complete theoretical biology examination paper',
-          teachingActivities: 'Administer standardized NECTA format practical + theory midterm exam',
-          materials: 'Dissection specimens, microscopes, food test reagents, exam papers',
-          assessment: 'Midterm Examination (Practical Performance 40% + Theory 60%)',
-          references: 'NECTA Assessment Guidelines 2023/2024'
-        },
-        old: {
-          mainTopic: 'MIDTERM EVALUATION & REVIEW',
-          subTopic: 'Revision on Cell Biology, Digestion, Respiration and Transport',
-          specificObjectives: 'Evaluate student retention of biological concepts and practical diagram skills',
-          teachingActivities: 'Administer midterm written test; conduct chalkboard review of challenging questions',
-          materials: 'Printed exam papers, answer booklets',
-          assessment: 'Formal Midterm Examination marked out of 100%',
-          references: 'School Past Examination Papers'
-        }
+        mainTopic: 'MIDTERM ASSESSMENT & PORTFOLIO REVIEW',
+        subTopic: 'Form 1 Term 1 Standardized Midterm Examination',
+        cbcMainCompetence: 'MIDTERM COMPETENCE ASSESSMENT IN ENGLISH LANGUAGE',
+        cbcSpecificCompetence: 'Evaluating student listening, grammar, vocabulary, reading comprehension and writing proficiency',
+        learningActivities: 'Complete standardized midterm examination paper covering Weeks 1 to 7 modules',
+        teachingActivities: 'Administer standardized NECTA-style examination, mark scripts, provide individualized feedback',
+        materials: 'Printed exam papers, answer booklets, marking guide',
+        assessment: 'Standardized Midterm Examination (Grammar 40% + Reading 40% + Writing 20%)',
+        references: 'NECTA English Assessment Framework'
       },
       {
-        week: 9,
-        dates: 'Week 9 (09 Mar - 13 Mar)',
-        cbc: {
-          mainCompetence: 'Promoting community health through understanding disease transmission and immunology',
-          specificCompetence: 'Investigating infectious vs non-infectious diseases, vectors, pathogens, and immune response',
-          learningActivities: 'Conduct community health audit on malaria vector breeding sites around school grounds; design control interventions',
-          teachingActivities: 'Guide mosquito larva collection; explain parasite life cycle (Plasmodium) and vaccination mechanics',
-          materials: 'Magnifying glasses, dipping nets, specimen jars, disease life-cycle charts, health posters',
-          assessment: 'Community health audit report and disease prevention poster presentation',
-          references: 'TIE Secondary Biology Form 3 (CBC 2023), Ministry of Health Guidelines'
-        },
-        old: {
-          mainTopic: 'Health and Immunity',
-          subTopic: 'Infectious Diseases and Vector Control',
-          specificObjectives: 'State causes, signs, symptoms, transmission, and prevention of Malaria, Cholera, Tuberculosis, HIV/AIDS',
-          teachingActivities: 'List major tropical diseases on chalkboard; write transmission and prevention table',
-          materials: 'Chalkboard, health charts showing disease vectors',
-          assessment: 'Table completion test on diseases, pathogens, vectors and control measures',
-          references: 'TIE Biology Form 3'
-        }
+        mainTopic: 'Writing Skills',
+        subTopic: 'Writing Informal Letters to Friends and Family Members',
+        cbcMainCompetence: 'Communicating effectively through written correspondence following standard formats',
+        cbcSpecificCompetence: 'Structuring an informal letter: Sender\'s address, Date, Salutation, Body paragraphs, Sign-off',
+        learningActivities: 'Draft a friendly letter to a primary school friend describing life and new subjects in secondary school',
+        teachingActivities: 'Display annotated friendly letter template on chalkboard; review informal idioms and conversational tone',
+        materials: 'Sample friendly letters, address layout templates, letter writing paper',
+        assessment: 'Letter writing rubric assessing format, paragraph coherence, grammatical accuracy, and tone',
+        references: 'TIE English Form 1 CBC 2023'
       },
       {
-        week: 10,
-        dates: 'Week 10 (16 Mar - 20 Mar)',
-        cbc: {
-          mainCompetence: 'Conserving ecological ecosystems, biodiversity, and managing environmental sustainability',
-          specificCompetence: 'Analyzing food chains, food webs, trophic levels, energy flow, and ecological pyramids',
-          learningActivities: 'Construct local Tanzanian park ecosystem food webs (Serengeti/Mikumi) using organism cards and yarn connections',
-          teachingActivities: 'Facilitate food web disruption simulation (e.g., removing top predator); explain 10% energy transfer rule',
-          materials: 'Ecosystem organism cards, yarn rolls, poster boards, biodiversity charts',
-          assessment: 'Food web construction rubric and ecological impact analysis essay',
-          references: 'TIE Secondary Biology Form 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Ecology',
-          subTopic: 'Ecosystems, Food Chains and Energy Flow',
-          specificObjectives: 'Define ecosystem, producer, consumer, decomposer and construct a food chain with 4 trophic levels',
-          teachingActivities: 'Draw food chain and pyramid of numbers on chalkboard; explain energy loss at each trophic level',
-          materials: 'Chalkboard, ecosystem wall charts',
-          assessment: 'Classwork drawing food webs and identifying primary vs secondary consumers',
-          references: 'TIE Biology Form 3'
-        }
+        mainTopic: 'Introduction to Literature',
+        subTopic: 'Oral Literature: Folk Tales, Proverbs and Simple Lyric Poems',
+        cbcMainCompetence: 'Appreciating imaginative literary expressions and analyzing moral values in simple literary genres',
+        cbcSpecificCompetence: 'Identifying characters, setting, plot, conflict, moral lesson in African folk tales and poetic rhymes',
+        learningActivities: 'Read and dramatize an East African traditional folk tale (Hare and Hyena); discuss character traits',
+        teachingActivities: 'Introduce literary elements: protagonist, antagonist, setting, theme, moral message on chalkboard',
+        materials: 'Selected Tanzanian folk tale readers, poetry anthologies, character mask props',
+        assessment: 'Literary analysis worksheet identifying characters and theme in given short story',
+        references: 'TIE English Form 1, Approved Literature Anthologies'
       },
       {
-        week: 11,
-        dates: 'Week 11 (23 Mar - 27 Mar)',
-        cbc: {
-          mainCompetence: 'COMMUNITY HEALTH & ECOLOGY EXHIBITION',
-          specificCompetence: 'Synthesizing biological concepts into community health or conservation projects',
-          learningActivities: 'Student teams present community disease prevention plans or school garden compost projects',
-          teachingActivities: 'Coordinate science gallery walk; judge student health/conservation project portfolios',
-          materials: 'Project display boards, student models, evaluation rubrics',
-          assessment: 'Summative Biology Project Exhibition Rubric',
-          references: 'TIE Competence-Based Assessment Framework 2023'
-        },
-        old: {
-          mainTopic: 'GENERAL REVISION & NECTA DRILLS',
-          subTopic: 'NECTA Biology Paper 1, Paper 2 & Paper 3 Drills',
-          specificObjectives: 'Review core biological diagrams, food tests, and specimen classification skills',
-          teachingActivities: 'Solve past NECTA national exam questions on chalkboard with active student participation',
-          materials: 'Chalkboard, NECTA past papers 2018-2023',
-          assessment: 'Timed mock drill on Section A, B and C questions',
-          references: 'NECTA Biology Review Series'
-        }
+        mainTopic: 'REVISION & PAST PAPERS',
+        subTopic: 'Comprehensive Term 1 Examination Preparation and Drills',
+        cbcMainCompetence: 'CONSOLIDATION OF ENGLISH LANGUAGE COMPETENCES',
+        cbcSpecificCompetence: 'Reviewing core grammatical structures, comprehension strategies and letter writing layout',
+        learningActivities: 'Practice timed past paper sections in cooperative teams with peer correction',
+        teachingActivities: 'Review common spelling, punctuation and subject-verb agreement errors observed in student work',
+        materials: 'Past exam papers, chalkboard, revision question booklets',
+        assessment: 'Timed practice drill on Section A (Grammar) and Section B (Reading Comprehension)',
+        references: 'NECTA Past Examination Question Series'
       },
       {
-        week: 12,
-        dates: 'Week 12 (30 Mar - 03 Apr)',
-        cbc: {
-          mainCompetence: 'TERMINAL COMPETENCE EVALUATION & REFLECTION',
-          specificCompetence: 'Summative terminal examination covering Term 1 biology competences',
-          learningActivities: 'Sit terminal biology examination; reflect on portfolio milestones and set Term 2 goals',
-          teachingActivities: 'Invigilate terminal examination; mark scripts according to standardized marking scheme; record in ledger',
-          materials: 'Official examination papers, answer booklets, specimen guides',
-          assessment: 'Terminal Examination (NECTA Format)',
-          references: 'Ministry of Education & NECTA Terminal Standards'
-        },
-        old: {
-          mainTopic: 'TERMINAL EXAMINATION & CLOSURE',
-          subTopic: 'End of Term Assessment and Ledger Entry',
-          specificObjectives: 'Summative evaluation of student mastery of Term 1 biology syllabus',
-          teachingActivities: 'Invigilate terminal exam, mark scripts, enter marks into academic ledger',
-          materials: 'Examination papers, answer sheets, report cards',
-          assessment: 'Formal Terminal Examination marked out of 100%',
-          references: 'School Academic Examination Regulations'
-        }
-      }
-    ]
-  },
-
-  'Kiswahili': {
-    subject: 'Kiswahili',
-    department: 'Lugha na Fasihi',
-    defaultPeriodsPerWeek: 4,
-    weeks: [
-      {
-        week: 1,
-        dates: 'Wiki ya 1 (12 Jan - 16 Jan)',
-        cbc: {
-          mainCompetence: 'Kutumia mfumo wa sarufi na muundo wa lugha ya Kiswahili katika mawasiliano sanifu',
-          specificCompetence: 'Kuchanganua aina za maneno (Nomino, Vivumishi, Vitenzi, Viwakilishi) na ngeli za Kiswahili',
-          learningActivities: 'Wanafunzi wanasoma vifungu vya habari na kuainisha aina za maneno katika jedwali kwa kazi za kikundi',
-          teachingActivities: 'Kuelekeza uainishaji wa aina 8 za maneno, kuongoza mifano ubaoni na kusimamia mijadala ya ngeli (A-WA, KI-VI, I-ZI)',
-          materials: 'Chati ya aina za maneno, chati ya ngeli za Kiswahili, kamusi ya Kiswahili Sanifu, vifungu vya habari',
-          assessment: 'Rubriki ya kazi za kikundi kwenye uainishaji wa maneno, zoezi la kuandika sentensi katika ngeli mbalimbali',
-          references: 'TET Kiswahili Kidato cha 3 (Mtaala Mpya wa Umahiri 2023), Kamusi ya Kiswahili Sanifu (TUKI)'
-        },
-        old: {
-          mainTopic: 'Sarufi na Matumizi ya Lugha',
-          subTopic: 'Aina za Maneno na Ngeli za Nomino',
-          specificObjectives: 'Kufikia mwisho wa wiki, mwanafunzi aweze kutaja aina 8 za maneno na kupanga nomino katika ngeli sahihi',
-          teachingActivities: 'Kuandika maana na mifano ya aina za maneno ubaoni, kueleza ngeli za Kiswahili na kutoa mazoezi ubaoni',
-          materials: 'Ubao, chaki, kitabu cha kiada cha TET Kidato cha 3',
-          assessment: 'Zoezi la ubaoni la kuainisha maneno 10, kukagua daftari za wanafunzi',
-          references: 'TET Kiswahili Kidato cha 3 (Mtaala wa Zamani)'
-        }
-      },
-      {
-        week: 2,
-        dates: 'Wiki ya 2 (19 Jan - 23 Jan)',
-        cbc: {
-          mainCompetence: 'Kutumia mfumo wa sarufi na muundo wa lugha ya Kiswahili katika mawasiliano sanifu',
-          specificCompetence: 'Kuchanganua muundo wa sentensi (Sentensi Sahili, Ambatanifu na Changamano) na mnyambuliko wa vitenzi',
-          learningActivities: 'Wanafunzi wanatunga na kuchanganua sentensi changamano kwa kutumia matawi au jedwali ubaoni',
-          teachingActivities: 'Kufundisha viambishi awali na tamati katika mnyambuliko wa vitenzi (Kutenda, Kutendewa, Kutendesha, Kutendana)',
-          materials: 'Kadi za viambishi, chati za muundo wa sentensi, vielelezo vya mnyambuliko',
-          assessment: 'Upimaji wa uchanganuzi wa sentensi, zoezi la mnyambuliko wa vitenzi',
-          references: 'TET Kiswahili Kidato cha 3 (CBC 2023)'
-        },
-        old: {
-          mainTopic: 'Sarufi na Matumizi ya Lugha',
-          subTopic: 'Mnyambuliko wa Vitenzi na Muundo wa Sentensi',
-          specificObjectives: 'Kunyambulisha vitenzi katika kauli 5 za Kiswahili na kutofautisha sentensi sahili na ambatanifu',
-          teachingActivities: 'Kuandika mifano ya kauli za vitenzi ubaoni, kueleza kiwambo cha sentensi (KN + KT)',
-          materials: 'Ubao, chaki, chati za sarufi',
-          assessment: 'Zoezi la nyumbani la kunyambulisha vitenzi 10 na kuchanganua sentensi 5',
-          references: 'TET Kiswahili Kidato cha 3'
-        }
-      },
-      {
-        week: 3,
-        dates: 'Wiki ya 3 (26 Jan - 30 Jan)',
-        cbc: {
-          mainCompetence: 'Kuhakiki na kutathmini kazi za Fasihi Simulizi na Fasihi Andishi katika jamii',
-          specificCompetence: 'Kuchanganua utanzu na vipera vya Fasihi SimulIZING (Hadithi, Methali, Misemo, Vitendawili, Nyimbo)',
-          learningActivities: 'Wanafunzi wanawasilisha igizo fupi la hadithi za kijadi au nyimbo za jamii na kubainisha maudhui na maadili',
-          teachingActivities: 'Kushajiisha igizo la utamaduni, kuongoza uchambuzi wa fani na maudhui katika vipera vya fasihi simulizi',
-          materials: 'Vifaa vya igizo la utamaduni, vinasa sauti, chati za utanzu wa fasihi simulizi',
-          assessment: 'Rubriki ya uwasilishaji wa sanaa ya maonyesho, dodoso la uchambuzi wa methali na misemo',
-          references: 'TET Kiswahili Kidato cha 3 CBC 2023, Misingi ya Fasihi Simulizi'
-        },
-        old: {
-          mainTopic: 'Fasihi Simulizi',
-          subTopic: 'Utanzu na Vipera vya Fasihi Simulizi',
-          specificObjectives: 'Kueleza maana ya fasihi simulizi, kutaja tanzu 4 kuu na kueleza sifa za kila kipera',
-          teachingActivities: 'Kuandika mchoro wa matawi wa tanzu za fasihi simulizi ubaoni, kueleza tofauti kati ya fasihi simulizi na andishi',
-          materials: 'Ubao, kitabu cha fasihi simulizi',
-          assessment: 'Maswali ya mdomo na zoezi la kuandika sifa 5 za hadithi za kijadi',
-          references: 'TET Kiswahili Kidato cha 3'
-        }
-      },
-      {
-        week: 4,
-        dates: 'Wiki ya 4 (02 Feb - 06 Feb)',
-        cbc: {
-          mainCompetence: 'Kuhakiki na kutathmini kazi za Fasihi Simulizi na Fasihi Andishi katika jamii',
-          specificCompetence: 'Kuhakiki riwaya na tamthiliya teule za Kiswahili: Fani (Maudhui, Dhamira, Anwani, Wahusika, Mtindo)',
-          learningActivities: 'Vikundi vya wanafunzi vinahakiki riwaya teule za TET na kuwasilisha uchambuzi wa wahusika wakuu na wadogo',
-          teachingActivities: 'Kuelekeza mbinu za uhakiki wa Fasihi Andishi, kusimamia mijadala ya dhamira kuu na migogoro katika riwaya',
-          materials: 'Riwaya teule za Kidato cha 3/4 (Takadini/Kiumbe cha Ajabu/Nguvu ya Sala), chati za uhakiki',
-          assessment: 'Rubriki ya uchambuzi wa riwaya, insha ya uhakiki wa wahusika',
-          references: 'TET Vitabu Teule vya Riwaya na Tamthiliya Kidato cha 3/4'
-        },
-        old: {
-          mainTopic: 'Fasihi Andishi',
-          subTopic: 'Uhakiki wa Riwaya na Tamthiliya',
-          specificObjectives: 'Kueleza vipengele vya fani na maudhui na kubainisha dhamira 3 kutoka katika riwaya teule',
-          teachingActivities: 'Kueleza maana ya fani na maudhui ubaoni, kufanya uchambuzi wa sura kwa sura na wanafunzi',
-          materials: 'Ubao, vitabu teule vya riwaya',
-          assessment: 'Insha fupi ya uchambuzi wa dhamira kuu katika riwaya teule',
-          references: 'TET Kiswahili Kidato cha 3'
-        }
-      },
-      {
-        week: 5,
-        dates: 'Wiki ya 5 (09 Feb - 13 Feb)',
-        cbc: {
-          mainCompetence: 'Kuhakiki na kutathmini kazi za Fasihi Simulizi na Fasihi Andishi katika jamii',
-          specificCompetence: 'Kuhakiki ushairi wa Kiswahili: Mashairi ya Arudhi na Mashairi ya Gondo/Hurudhi (Muundo, Vizio, Tamathali za Semi)',
-          learningActivities: 'Wanafunzi wanasoma na kuimba mashairi teule, kubainisha urari wa vina na mizani, ubeti, mshororo na kituo',
-          teachingActivities: 'Kuelekeza muundo wa shairi la arudhi (mizani, vina, vituo) na bahari za mashairi (Tarbia, Takhmisa, Ukonfi)',
-          materials: 'Diwani teule za mashairi (Diwani ya Amri/Wasakatonge), chati ya bahari za mashairi',
-          assessment: 'Zoezi la kuchanganua mizani na vina vya shairi teule, uandishi wa shairi fupi',
-          references: 'TET Kiswahili Kidato cha 3 CBC 2023'
-        },
-        old: {
-          mainTopic: 'Fasihi Andishi',
-          subTopic: 'Uhakiki wa Mashairi',
-          specificObjectives: 'Kueleza maana ya vina, mizani, ubeti, mshororo na kutaja sifa za shairi la arudhi',
-          teachingActivities: 'Kuandika shairi ubaoni, kuhesabu mizani na kuonyesha vina vya kati na vya mwisho ubaoni',
-          materials: 'Ubao, diwani ya mashairi',
-          assessment: 'Zoezi la kuhesabu mizani na kubainisha vina vya shairi ubaoni',
-          references: 'TET Kiswahili Kidato cha 3'
-        }
-      },
-      {
-        week: 6,
-        dates: 'Wiki ya 6 (16 Feb - 20 Feb)',
-        cbc: {
-          mainCompetence: 'Kukuza stadi za Ufahamu, Ufupisho, na Uandishi wa Insha za Kiumbifu na Kazi',
-          specificCompetence: 'Kusoma vifungu vya ufahamu kwa ufasaha na kuandika ufupisho sanifu wa maneno 100-150',
-          learningActivities: 'Wanafunzi wanasoma makala ya kijamii, wanatoa mawazo kuu na kuandika ufupisho wa aya moja',
-          teachingActivities: 'Kuelekeza hatua za uandishi wa ufupisho (kusoma, kupiga mstari hoja kuu, kuunganisha kwa viunganishi)',
-          materials: 'Makala za magazeti sanifu, vifungu vya ufahamu, chati za kanuni za ufupisho',
-          assessment: 'Tathmini ya kifungu cha ufahamu na zoezi la uandishi wa ufupisho sanifu',
-          references: 'TET Kiswahili Kidato cha 3 CBC 2023'
-        },
-        old: {
-          mainTopic: 'Ufahamu na Ufupisho',
-          subTopic: 'Mbinu za Kusoma na Kuandika Ufupisho',
-          specificObjectives: 'Kujibu maswali ya kifungu cha ufahamu na kuandika muhtasari wa kifungu kwa maneno yasiyozidi 100',
-          teachingActivities: 'Kusoma kifungu ubaoni au kwenye kiada, kuandika maswali ya ufahamu na kueleza kanuni za ufupisho',
-          materials: 'Ubao, vitabu vya kiada',
-          assessment: 'Maswali 5 ya ufahamu na zoezi la kuandika ufupisho',
-          references: 'TET Kiswahili Kidato cha 3'
-        }
-      },
-      {
-        week: 7,
-        dates: 'Wiki ya 7 (23 Feb - 27 Feb)',
-        cbc: {
-          mainCompetence: 'Kukuza stadi za Ufahamu, Ufupisho, na Uandishi wa Insha za Kiumbifu na Kazi',
-          specificCompetence: 'Kuandika barua rasmi, barua za kirafiki, Kumbukumbu za Mkutano, na Risala za Kiofisi',
-          learningActivities: 'Wanafunzi wanaandaa na kuandika kumbukumbu za mkutano wa darasa na barua rasmi ya kuomba nafasi ya kazi',
-          teachingActivities: 'Kuelekeza muundo sahihi wa barua rasmi (anwani 2, kichwa cha habari, mwili, saini) na kumbukumbu za mkutano',
-          materials: 'Sampuli za barua rasmi, vielelezo vya kumbukumbu za mkutano, chati za uandishi rasmi',
-          assessment: 'Rubriki ya muundo na lugha katika uandishi wa barua rasmi na kumbukumbu za mkutano',
-          references: 'TET Kiswahili Kidato cha 3 CBC 2023'
-        },
-        old: {
-          mainTopic: 'Uandishi wa Insha na Barua',
-          subTopic: 'Uandishi wa Barua Rasmi na Kumbukumbu',
-          specificObjectives: 'Kuandika barua rasmi yenye muundo sahihi na kueleza vipengele 6 vya kumbukumbu za mkutano',
-          teachingActivities: 'Kuchora muundo wa barua rasmi ubaoni, kueleza sehemu za kumbukumbu (Waliohudhuria, Ajenda, Maazimio)',
-          materials: 'Ubao, chaki, sampuli za barua',
-          assessment: 'Zoezi la kuandika barua rasmi ya kuomba ruhusa au kazi',
-          references: 'TET Kiswahili Kidato cha 3'
-        }
-      },
-      {
-        week: 8,
-        dates: 'Wiki ya 8 (02 Mar - 06 Mar)',
-        cbc: {
-          mainCompetence: 'PIMHO LA KATIKATI YA MUHULA NA TATHMINI YA KAZI ZA SANAA',
-          specificCompetence: 'Kupima umahiri wa sarufi, fasihi simulizi, fasihi andishi na uandishi wa barua/insha',
-          learningActivities: 'Fanya mtihani wa katikati ya muhula wa mbinu za NECTA na kujadili marekebisho',
-          teachingActivities: 'Kusimamia mtihani wa katikati ya muhula, kusahihisha na kutoa mrejesho wa kina kwa wanafunzi',
-          materials: 'Karatasi za mtihani wa NECTA, vitabu vya majibu',
-          assessment: 'Mtihani wa Katikati ya Muhula (Lugha 50% + Fasihi 50%)',
-          references: 'Mwongozo wa Tathmini wa NECTA 2023/2024'
-        },
-        old: {
-          mainTopic: 'MARUDIO NA MTIHANI WA KATIKATI YA MUHULA',
-          subTopic: 'Mtihani wa Sarufi, Fasihi na Ufahamu',
-          specificObjectives: 'Kutathmini uelewa wa wanafunzi katika mada zote zilizofundishwa',
-          teachingActivities: 'Kusimamia mtihani, kusahihisha na kufanya marudio ubaoni',
-          materials: 'Karatasi za mtihani zilizopigwa chapa',
-          assessment: 'Mtihani Rasmi wa Katikati ya Muhula (Alama 100)',
-          references: 'Mitihani ya Nyuma ya Shule'
-        }
-      },
-      {
-        week: 9,
-        dates: 'Wiki ya 9 (09 Mar - 13 Mar)',
-        cbc: {
-          mainCompetence: 'Kutathmini Historia, Maendeleo, na Ukuaji wa Kiswahili Nchini Tanzania na Duniani',
-          specificCompetence: 'Kuchanganua chimbuko la Kiswahili, dhima ya Kiswahili kabla na baada ya Uhuru, na mashirika ya Kiswahili (BAKITA, TATAKI)',
-          learningActivities: 'Wanafunzi wanajadili katika vikundi dhima ya BAKITA na Kiswahili kama lugha ya Taifa na Afrika Mashariki (EAC)',
-          teachingActivities: 'Kueleza mabadiliko ya Kiswahili kutoka lugha ya biashara hadi lugha ya kimataifa (UNESCO Kiswahili Day)',
-          materials: 'Ramani ya Afrika Mashariki, makala za historia ya Kiswahili, chati za BAKITA/TATAKI',
-          assessment: 'Insha ya historia na ukuaji wa Kiswahili, majadiliano ya vikundi',
-          references: 'TET Kiswahili Kidato cha 3 CBC 2023, BAKITA Miongozo'
-        },
-        old: {
-          mainTopic: 'Ukuaji na Maendeleo ya Kiswahili',
-          subTopic: 'Chimbuko la Kiswahili na Vyombo vya Kukuza Kiswahili',
-          specificObjectives: 'Kueleza nadharia za chimbuko la Kiswahili na kutaja majukumu 4 ya BAKITA',
-          teachingActivities: 'Kuandika nadharia 3 za chimbuko la Kiswahili ubaoni (Kiarabu, Kigozi, Kibantu), kueleza majukumu ya BAKITA',
-          materials: 'Ubao, chati za vyombo vya Kiswahili',
-          assessment: 'Maswali ya insha kuhusu majukumu ya BAKITA na TATAKI',
-          references: 'TET Kiswahili Kidato cha 3'
-        }
-      },
-      {
-        week: 10,
-        dates: 'Wiki ya 10 (16 Mar - 20 Mar)',
-        cbc: {
-          mainCompetence: 'Kutumia Mbinu za Mawasiliano ya Kimtandao na Vyombo vya Habari katika Lugha ya Kiswahili',
-          specificCompetence: 'Kuhakiki matumizi ya Kiswahili katika vyombo vya habari (Magazeti, Redio, Televisheni, Mtandao)',
-          learningActivities: 'Wanafunzi wanahakiki makosa ya kisarufi katika magazeti ya Kiswahili na kuandika makala fupi ya habari',
-          teachingActivities: 'Kuelekeza lugha ya waandishi wa habari (Lugha ya Mtaani vs Lugha Sanifu), kusimamia uandishi wa habari',
-          materials: 'Magazeti ya Kiswahili (Mwananchi, HabariLeo, Nipashe), vielelezo vya mtandao',
-          assessment: 'Rubriki ya uchambuzi wa makosa ya kisarufi katika magazeti',
-          references: 'TET Kiswahili Kidato cha 3 CBC 2023'
-        },
-        old: {
-          mainTopic: 'Matumizi ya Lugha',
-          subTopic: 'Lugha ya Vyombo vya Habari na Makosa ya Kisarufi',
-          specificObjectives: 'Kutaja sifa za lugha ya magazeti na kurekebisha makosa 5 ya kisarufi kutoka magazetini',
-          teachingActivities: 'Kuandika sentensi zenye makosa ubaoni, kuongoza wanafunzi kurekebisha makosa ubaoni',
-          materials: 'Ubao, magazeti ya Kiswahili',
-          assessment: 'Zoezi la kurekebisha makosa ya kisarufi katika sentensi 10',
-          references: 'TET Kiswahili Kidato cha 3'
-        }
-      },
-      {
-        week: 11,
-        dates: 'Wiki ya 11 (23 Mar - 27 Mar)',
-        cbc: {
-          mainCompetence: 'ONYESHO LA FASIHI NA TATHMINI YA KISWAHILI',
-          specificCompetence: 'Kuonyesha umahiri wa fasihi simulizi na kughani mashairi ya Kiswahili',
-          learningActivities: 'Wanafunzi wanafanya festivali fupi ya sanaa ya Kiswahili (Kughani mashairi, ngonjera, hotuba na igizo)',
-          teachingActivities: 'Kuratibu Tamasha la Lugha na Fasihi ya Kiswahili shuleni, kutathmini kazi za wanafunzi',
-          materials: 'Jukwaa la sanaa, mavazi ya utamaduni, vyeti vya ushiriki',
-          assessment: 'Rubriki ya Tamasha la Lugha na Fasihi ya Kiswahili',
-          references: 'Mwongozo wa Mtaala Mpya wa CBC 2023'
-        },
-        old: {
-          mainTopic: 'MARUDIO YA JUMLA NA MAZOEZI YA NECTA',
-          subTopic: 'Mazoezi ya Karatasi ya 1 na Karatasi ya 2 ya Kiswahili',
-          specificObjectives: 'Kufanya marudio ya sarufi, ufahamu, uandishi na fasihi kulingana na muundo wa NECTA',
-          teachingActivities: 'Kutatua maswali ya mitihani ya kitaifa ya nyuma ubaoni kwa kushirikisha wanafunzi',
-          materials: 'Ubao, mitihani ya NECTA 2018-2023',
-          assessment: 'Jaribio la kupima muda wa kujibu maswali ya NECTA',
-          references: 'Mfululizo wa Mitihani ya NECTA ya Kiswahili'
-        }
-      },
-      {
-        week: 12,
-        dates: 'Wiki ya 12 (30 Mar - 03 Apr)',
-        cbc: {
-          mainCompetence: 'TATHMINI YA MWISHO WA MUHULA NA TATHMINI NA TATHMINI NA NIFU',
-          specificCompetence: 'Mtihani wa mwisho wa muhula wa Kiswahili',
-          learningActivities: 'Fanya mtihani wa mwisho wa muhula; kujaza daftari la mabadiliko na malengo ya Muhula wa 2',
-          teachingActivities: 'Kusimamia mtihani, kusahihisha na kuingiza alama katika daftari la matokeo ya shule',
-          materials: 'Karatasi za mitihani, daftari la matokeo',
-          assessment: 'Mtihani wa Mwisho wa Muhula (Muundo wa NECTA)',
-          references: 'Miongozo ya Wizara ya Elimu na NECTA'
-        },
-        old: {
-          mainTopic: 'MTIHANI WA MWISHO WA MUHULA NA FUNGA SHULE',
-          subTopic: 'Usimamizi wa Mtihani na Ujazaji wa Ripoti',
-          specificObjectives: 'Kutathmini uelewa wa jumla wa muhula wa kwanza katika somo la Kiswahili',
-          teachingActivities: 'Kusimamia mtihani, kusahihisha na kujaza ripoti za maendeleo za wanafunzi',
-          materials: 'Karatasi za mitihani, kadi za ripoti',
-          assessment: 'Mtihani Rasmi wa Mwisho wa Muhula (Alama 100)',
-          references: 'Kanuni za Mitihani ya Shule'
-        }
+        mainTopic: 'TERMINAL EXAMINATION & CLOSURE',
+        subTopic: 'Summative Terminal Examination and Term 1 Academic Records',
+        cbcMainCompetence: 'TERMINAL COMPETENCE EVALUATION IN ENGLISH LANGUAGE',
+        cbcSpecificCompetence: 'Summative evaluation of Form 1 Term 1 English language mastery',
+        learningActivities: 'Sit terminal examination paper; receive evaluated papers and log personal growth goals',
+        teachingActivities: 'Invigilate terminal examination; mark scripts according to standardized rubric; enter ledger grades',
+        materials: 'Official examination papers, answer sheets, academic ledger and report cards',
+        assessment: 'Terminal Examination (NECTA Standard Format, 100 Marks)',
+        references: 'Ministry of Education & NECTA Terminal Standards'
       }
     ]
   }
 };
 
-/**
- * Dynamic subject generator that guarantees 100% subject-relevant schemes
- * for ANY subject (Chemistry, Biology, Geography, History, Kiswahili, English, Civics,
- * Commerce, Bookkeeping, ICT, Agriculture, Primary subjects, etc.) without falling back to Physics!
- */
-export const getSubjectSchemeTemplate = (
+// -------------------------------------------------------------------------------------------------
+// DYNAMIC INTELLIGENT SCHEME BUILDER
+// -------------------------------------------------------------------------------------------------
+
+export function getSubjectSchemeTemplate(
   subject: string,
   className: string,
   term: string,
-  curriculumType: CurriculumType
-): SubjectSchemeTemplate => {
-  const normSubject = (subject || 'General Studies').trim();
+  curriculumType: CurriculumType,
+  language: 'Kiswahili' | 'English' = 'English'
+): SubjectSchemeTemplate {
+  const normSub = String(subject || 'General Studies').trim().toLowerCase();
+  const classKey = resolveClassKey(className);
+  const termKey = resolveTermKey(term);
+  const isCbc = curriculumType === 'NEW_CBC_2023';
+  const isSwahili = language === 'Kiswahili' || normSub.includes('kiswahili');
 
-  // 1. Direct or alias match from knowledge base
-  if (TANZANIA_SCHEMES_KNOWLEDGE_BASE[normSubject]) {
-    return TANZANIA_SCHEMES_KNOWLEDGE_BASE[normSubject];
+  // 1. Direct registry lookup if exact match exists
+  let registryKey = '';
+  if (normSub.includes('math') || normSub.includes('hisabati')) registryKey = 'mathematics';
+  else if (normSub.includes('kiswahili') || normSub.includes('swahili')) registryKey = 'kiswahili';
+  else if (normSub.includes('engl') || normSub.includes('lit')) registryKey = 'english';
+
+  const lookupKey = `${classKey}_${termKey}`;
+  const foundEntries = registryKey && TIE_SYLLABUS_REGISTRY[registryKey]?.[lookupKey];
+
+  if (foundEntries && foundEntries.length >= 10) {
+    const weeks: SubjectSchemeWeek[] = foundEntries.slice(0, 12).map((item, idx) => ({
+      week: idx + 1,
+      dates: getTanzanianTermDates(idx + 1, termKey, isSwahili ? 'Kiswahili' : 'English'),
+      cbc: {
+        mainCompetence: item.cbcMainCompetence,
+        specificCompetence: item.cbcSpecificCompetence,
+        learningActivities: item.learningActivities,
+        teachingActivities: item.teachingActivities,
+        materials: item.materials,
+        assessment: item.assessment,
+        references: item.references,
+      },
+      old: {
+        mainTopic: item.mainTopic,
+        subTopic: item.subTopic,
+        specificObjectives: item.cbcSpecificCompetence,
+        teachingActivities: item.teachingActivities,
+        materials: item.materials,
+        assessment: item.assessment,
+        references: item.references,
+      }
+    }));
+
+    return {
+      subject,
+      department: registryKey === 'mathematics' ? (isSwahili ? 'Hisabati na Sayansi' : 'Science & Mathematics') : (isSwahili ? 'Lugha na Fasihi' : 'Languages & Literature'),
+      defaultPeriodsPerWeek: registryKey === 'mathematics' ? 6 : 4,
+      weeks
+    };
   }
 
-  const normLower = normSubject.toLowerCase();
-
-  if (normLower.includes('physic')) return TANZANIA_SCHEMES_KNOWLEDGE_BASE['Physics'];
-  if (normLower.includes('chem') || normLower.includes('kemia')) return TANZANIA_SCHEMES_KNOWLEDGE_BASE['Chemistry'];
-  if (normLower.includes('bio') || normLower.includes('biolojia')) return TANZANIA_SCHEMES_KNOWLEDGE_BASE['Biology'];
-  if (normLower.includes('kiswahili') || normLower.includes('swahili')) return TANZANIA_SCHEMES_KNOWLEDGE_BASE['Kiswahili'];
-
-  // 2. Build customized 12-week progression dynamically for ANY other subject!
-  const isPrimary = className.toLowerCase().includes('std') || className.toLowerCase().includes('primary') || className.toLowerCase().includes('darasa');
-  const isCbc = curriculumType === 'NEW_CBC_2023';
-
-  // Dynamic modules per subject type
+  // 2. Intelligent Real Curriculum Map for Science, Humanities, Commercial, and Primary Subjects!
   let department = 'General Studies';
   let defaultPeriods = 4;
-  let topicProgression: { topic: string; subtopic: string; cbcCompetence: string; oldObj: string; materials: string; ref: string }[] = [];
+  let weeklyTopics: {
+    mainTopic: string;
+    subTopic: string;
+    cbcMain: string;
+    cbcSpec: string;
+    learning: string;
+    teaching: string;
+    materials: string;
+    assessment: string;
+    references: string;
+  }[] = [];
 
-  if (normLower.includes('math') || normLower.includes('hisabati') || normLower.includes('hesabu')) {
-    department = 'Mathematics';
-    defaultPeriods = 6;
-    topicProgression = [
-      { topic: 'Algebra & Equations', subtopic: 'Linear & Quadratic Equations', cbcCompetence: 'Applying algebraic models to solve financial and structural engineering problems', oldObj: 'Solve linear and quadratic equations accurately', materials: 'Graph paper, geometric models, algebra tiles, calculators', ref: `TIE ${normSubject} for ${className} (2023)` },
-      { topic: 'Trigonometry & Geometry', subtopic: 'Trigonometric Ratios & Elevation', cbcCompetence: 'Applying right-angled trigonometry and bearings in land surveying and architecture', oldObj: 'Calculate heights and distances using sine, cosine, tangent', materials: 'Protractors, clinometers, measuring tapes, 4-figure tables', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Statistics & Data Handling', subtopic: 'Grouped Data & Measures of Central Tendency', cbcCompetence: 'Interpreting statistical frequency distributions for demographic and economic decisions', oldObj: 'Calculate mean, median, mode and construct histograms', materials: 'Graph books, demographic charts, calculators', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Transformations & Vectors', subtopic: 'Coordinate Transformations & Scale Factors', cbcCompetence: 'Applying geometric reflection, rotation and enlargement in graphic design', oldObj: 'Find images under reflection, translation and enlargement', materials: 'Grid paper, tracing paper, geometry sets', ref: `TIE ${normSubject} for ${className}` }
-    ];
-  } else if (normLower.includes('geog') || normLower.includes('jiografia') || normLower.includes('maarifa ya jamii')) {
-    department = 'Social Sciences';
+  const classNumStr = className.replace(/[^0-9]/g, '') || '1';
+
+  if (normSub.includes('physic') || normSub.includes('fizikia')) {
+    department = isSwahili ? 'Sayansi na Maabara' : 'Science & Mathematics';
     defaultPeriods = 4;
-    topicProgression = [
-      { topic: 'Map Reading & Cartography', subtopic: 'Topographic Maps & Grid References', cbcCompetence: 'Interpreting topographic contours, gradient, and landforms for spatial planning', oldObj: 'Read 6-figure grid references and calculate ground distances from scale', materials: 'NECTA topographic map sheets, magnifying glasses, dividers, compasses', ref: `TIE ${normSubject} for ${className} (2023)` },
-      { topic: 'Climate & Weather Systems', subtopic: 'Meteorological Data & Climate Change Mitigation', cbcCompetence: 'Analyzing weather station instruments, rainfall graphs, and climate adaptation in East Africa', oldObj: 'State functions of minimum-maximum thermometer, hygrometer, rain gauge', materials: 'Weather station instruments, thermographs, climate charts', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Agriculture & Forestry', subtopic: 'Sustainable Farming Systems in Tanzania', cbcCompetence: 'Evaluating cash crop farming, soil conservation, and agro-forestry initiatives', oldObj: 'Describe small-scale and large-scale farming with Tanzanian case studies', materials: 'Soil testing kits, crop maps of Tanzania, agricultural posters', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Mining & Environmental Management', subtopic: 'Mineral Extraction & Environmental Impact', cbcCompetence: 'Analyzing economic benefits of tanzanite/gold mining against ecological degradation', oldObj: 'Identify major mining regions in Tanzania and environmental hazards', materials: 'Mineral rock samples, environmental impact assessment reports', ref: `TIE ${normSubject} for ${className}` }
+    const f1Topics = [
+      { m: 'Concept of Physics', s: 'Meaning and Applications in Daily Life', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'Measurement', s: 'Physical Quantities and Fundamental SI Units', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'Measurement', s: 'Length and Area Measurement (Vernier Caliper)', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'Measurement', s: 'Mass, Volume and Density Calculations', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'Force', s: 'Concept, Types and Effects of Forces', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'Archimedes Principle', s: 'Upthrust and Floating Bodies', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'Structure of Matter', s: 'Kinetic Theory of Matter and States', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'MIDTERM EVALUATION', s: 'Formative Midterm Assessment and Review', r: `NECTA Physics Guidelines` },
+      { m: 'Pressure', s: 'Solid Pressure and Hydraulic Lift Principle', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'Work, Energy and Power', s: 'Mechanical Work and Conservation of Energy', r: `TIE Physics Form ${classNumStr}` },
+      { m: 'REVISION & DRILLS', s: 'NECTA Past Papers and Practical Review', r: `NECTA Physics Series` },
+      { m: 'TERMINAL EXAMINATION', s: 'Summative Terminal Examination and Audit', r: `Ministry of Education Standards` }
     ];
-  } else if (normLower.includes('hist') || normLower.includes('uraia') || normLower.includes('civic') || normLower.includes('general studies')) {
-    department = 'Social Sciences';
+    weeklyTopics = f1Topics.map(t => ({
+      mainTopic: t.m,
+      subTopic: t.s,
+      cbcMain: `Applying fundamental principles of ${t.m.toLowerCase()} to design sustainable engineering and mechanical solutions`,
+      cbcSpec: `Investigating ${t.s.toLowerCase()} through collaborative lab inquiry and apparatus measurement`,
+      learning: `Learners conduct practical station experiments on ${t.s.toLowerCase()}, record measurements and analyze errors in work cards`,
+      teaching: `Demonstrate apparatus safety, guide formula derivations and monitor experimental group stations`,
+      materials: `Laboratory apparatus, spring balances, stopwatches, calipers, measuring cylinders, digital simulations`,
+      assessment: `Practical laboratory rubric, calculation check, marked workbook questions`,
+      references: t.r
+    }));
+  } else if (normSub.includes('chem') || normSub.includes('kemia')) {
+    department = isSwahili ? 'Sayansi na Maabara' : 'Science & Mathematics';
+    defaultPeriods = 4;
+    const chemTopics = [
+      { m: 'Introduction to Chemistry', s: 'Importance, Products and Careers', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'Laboratory Safety and Apparatus', s: 'Warning Signs, First Aid and Apparatus Handling', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'Scientific Procedures', s: 'Hypothesis, Variables and Scientific Method', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'Matter', s: 'States of Matter, Physical and Chemical Changes', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'Elements, Compounds and Mixtures', s: 'Classification and Chemical Symbols', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'Separation of Mixtures', s: 'Filtration, Evaporation, Distillation and Chromatography', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'Air and Combustion', s: 'Composition of Air, Oxygen and Flame Tests', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'MIDTERM EVALUATION', s: 'Midterm Practical and Theory Assessment', r: `NECTA Chemistry Guidelines` },
+      { m: 'Rusting and Corrosion', s: 'Conditions for Rusting and Prevention Methods', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'Water and Hydrogen', s: 'Water Treatment, Soft and Hard Water', r: `TIE Chemistry Form ${classNumStr}` },
+      { m: 'REVISION & DRILLS', s: 'NECTA Past Paper Drills and Practical Review', r: `NECTA Chemistry Series` },
+      { m: 'TERMINAL EXAMINATION', s: 'Summative Terminal Examination and Records', r: `Ministry of Education Standards` }
+    ];
+    weeklyTopics = chemTopics.map(t => ({
+      mainTopic: t.m,
+      subTopic: t.s,
+      cbcMain: `Applying chemical concepts and properties of substances to solve environmental and manufacturing problems`,
+      cbcSpec: `Analyzing ${t.s.toLowerCase()} through safe laboratory experiments and observation`,
+      learning: `Learners carry out test-tube investigations on ${t.s.toLowerCase()}, observe color/temperature changes and record in lab sheets`,
+      teaching: `Demonstrate chemical handling safety, explain underlying chemical mechanisms and supervise Bunsen burner usage`,
+      materials: `Test tubes, beakers, Bunsen burners, chemical reagents, safety goggles, filter paper, tripod stands`,
+      assessment: `Laboratory observation rubric, chemical equation quiz, practical report mark sheet`,
+      references: t.r
+    }));
+  } else if (normSub.includes('bio') || normSub.includes('biolojia')) {
+    department = isSwahili ? 'Sayansi ya Biolojia' : 'Science & Mathematics';
+    defaultPeriods = 4;
+    const bioTopics = [
+      { m: 'Introduction to Biology', s: 'Branches, Characteristics of Living Things and Importance', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'Safety in the Environment', s: 'First Aid, Waste Disposal and Biological Warning Signs', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'Cell Structure and Organization', s: 'Plant vs Animal Cells and Light Microscopy', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'Cell Physiology', s: 'Diffusion, Osmosis and Turgor Pressure in Plants', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'Classification of Living Things', s: 'Five Kingdoms and Binomial Nomenclature', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'Viruses and Bacteria', s: 'Structure, Transmission and Disease Prevention', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'Human Nutrition', s: 'Food Substances, Balanced Diet and Malnutrition', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'MIDTERM EVALUATION', s: 'Midterm Dissection and Food Test Assessment', r: `NECTA Biology Guidelines` },
+      { m: 'Food Tests', s: 'Qualitative Tests for Starch, Reducing Sugars, Proteins and Lipids', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'Human Digestive System', s: 'Alimentary Canal, Enzymes and Villi Absorption', r: `TIE Biology Form ${classNumStr}` },
+      { m: 'REVISION & DRILLS', s: 'NECTA Practical Specimen Drills and Theory Papers', r: `NECTA Biology Series` },
+      { m: 'TERMINAL EXAMINATION', s: 'Summative Terminal Examination and Records', r: `Ministry of Education Standards` }
+    ];
+    weeklyTopics = bioTopics.map(t => ({
+      mainTopic: t.m,
+      subTopic: t.s,
+      cbcMain: `Investigating biological systems, cellular organization, and physiological adaptations for health sustainability`,
+      cbcSpec: `Examining ${t.s.toLowerCase()} using biological specimens and diagnostic procedures`,
+      learning: `Learners observe specimens with hand lenses or light microscope, draw labeled biological diagrams, and conduct tests`,
+      teaching: `Demonstrate proper microscope alignment, guide biological drawing rules (no shading, clear labels), supervise testing`,
+      materials: `Light microscopes, glass slides, iodine, Benedict's solution, onion epidermis, food samples, dissection models`,
+      assessment: `Biological drawing rubric (clear lines, magnification factor), practical test-tube evaluation, written test`,
+      references: t.r
+    }));
+  } else if (normSub.includes('geog') || normSub.includes('jiografia') || normSub.includes('maarifa ya jamii')) {
+    department = isSwahili ? 'Sayansi za Jamii' : 'Social Sciences';
+    defaultPeriods = 4;
+    const geoTopics = [
+      { m: 'Concept of Geography', s: 'Branches, Earth in Space and Economic Importance', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'The Solar System', s: 'Planets, Sun, Earth Rotation and Revolution (Seasons)', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'Major Features of the Earth', s: 'Continents, Ocean Basins and Relief Features', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'Weather and Climate', s: 'Weather Elements, Instruments and Station Layout', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'Map Work', s: 'Types of Maps, Scales, Grid References and Distance Measurement', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'Map Work', s: 'Contours, Gradient, Relief Representation and Cross Sections', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'Agricultural Systems', s: 'Small-scale Agriculture and Cash Crop Farming in Tanzania', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'MIDTERM EVALUATION', s: 'Midterm Map Reading and Climate Assessment', r: `NECTA Geography Guidelines` },
+      { m: 'Water Management', s: 'Irrigation Schemes and Hydroelectric Power Generation (JNHPP)', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'Mining and Sustainable Development', s: 'Mineral Extraction in Tanzania (Gold, Tanzanite, Gas)', r: `TIE Geography Form ${classNumStr}` },
+      { m: 'REVISION & DRILLS', s: 'NECTA Topographic Map Work and Past Paper Review', r: `NECTA Geography Series` },
+      { m: 'TERMINAL EXAMINATION', s: 'Summative Terminal Examination and Ledger Entry', r: `Ministry of Education Standards` }
+    ];
+    weeklyTopics = geoTopics.map(t => ({
+      mainTopic: t.m,
+      subTopic: t.s,
+      cbcMain: `Interpreting spatial geographic data, environmental processes, and sustainable economic resource management`,
+      cbcSpec: `Analyzing ${t.s.toLowerCase()} using topographic sheets, climatic graphs, and regional case studies`,
+      learning: `Learners analyze topographic map sheets using dividers and compasses, calculate gradients and plot cross-sections`,
+      teaching: `Demonstrate 6-figure grid reference reading, explain seasonal shift of Inter-Tropical Convergence Zone (ITCZ)`,
+      materials: `NECTA 1:50,000 topographic maps, pair of dividers, magnifying glasses, weather station instruments, globe`,
+      assessment: 'Map interpretation accuracy rubric, climate graph analysis worksheet, classwork exercises',
+      references: t.r
+    }));
+  } else if (normSub.includes('hist') || normSub.includes('historia')) {
+    department = isSwahili ? 'Sayansi za Jamii' : 'Social Sciences';
     defaultPeriods = 3;
-    topicProgression = [
-      { topic: 'Sources of History & Heritage', subtopic: 'Archaeology, Oral Traditions & Museums', cbcCompetence: 'Evaluating historical evidence, radiocarbon dating, and Olduvai Gorge heritage preservation', oldObj: 'Explain advantages and limitations of oral tradition and archaeological excavations', materials: 'Artifact replicas, historical timelines, museum posters, primary documents', ref: `TIE ${normSubject} for ${className} (2023)` },
-      { topic: 'Colonialism & Pan-Africanism', subtopic: 'Scramble for Africa & Liberation Struggles', cbcCompetence: 'Analyzing the Berlin Conference, colonial administrative systems, and TANU independence drive', oldObj: 'State causes of partition of Africa and direct vs indirect rule systems', materials: 'Historical maps of colonial Africa, archival independence speeches', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Governance & Human Rights', subtopic: 'Tanzanian Constitution, Democracy & Civic Responsibility', cbcCompetence: 'Promoting constitutionalism, rule of law, anti-corruption, and active youth citizenship', oldObj: 'Explain the 3 pillars of Tanzanian government and fundamental human rights', materials: 'Tanzanian Constitution booklets, Human Rights charters, anti-corruption posters', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'International Relations', subtopic: 'EAC, SADC, African Union & Global Cooperation', cbcCompetence: 'Evaluating East African Community integration and Tanzanian foreign policy principles', oldObj: 'List member states of EAC and SADC and their economic objectives', materials: 'EAC flags, regional economic trade maps, diplomacy charters', ref: `TIE ${normSubject} for ${className}` }
+    const histTopics = [
+      { m: 'Meaning and Sources of History', s: 'Oral Traditions, Archaeology, Archives and Museums', r: `TIE History Form ${classNumStr}` },
+      { m: 'Human Evolution', s: 'Stages of Human Evolution and Olduvai Gorge Heritage', r: `TIE History Form ${classNumStr}` },
+      { m: 'Development of Early Technology', s: 'Stone Age to Iron Age and Socio-Economic Impact', r: `TIE History Form ${classNumStr}` },
+      { m: 'Pre-Colonial African Societies', s: 'Communalism and Feudalism in Interlacustrine Region', r: `TIE History Form ${classNumStr}` },
+      { m: 'Trade in Pre-Colonial Africa', s: 'Trans-Saharan and Long Distance Trade in East Africa', r: `TIE History Form ${classNumStr}` },
+      { m: 'Africa and the External World', s: 'Early Contacts with Arabs and Portuguese along Swahili Coast', r: `TIE History Form ${classNumStr}` },
+      { m: 'The Slave Trade in East Africa', s: 'Triangular Trade, Caravan Routes and Abolition Treaties', r: `TIE History Form ${classNumStr}` },
+      { m: 'MIDTERM EVALUATION', s: 'Midterm Historical Sources and Pre-Colonial Essay Assessment', r: `NECTA History Guidelines` },
+      { m: 'Scramble for and Partition of Africa', s: 'Berlin Conference (1884-85) and Imperialist Motives', r: `TIE History Form ${classNumStr}` },
+      { m: 'African Resistance to Colonial Rule', s: 'Maji Maji War, Abushiri and Hehe Resistance Under Mkwawa', r: `TIE History Form ${classNumStr}` },
+      { m: 'REVISION & DRILLS', s: 'NECTA Essay Writing and Document-Based Question Drills', r: `NECTA History Series` },
+      { m: 'TERMINAL EXAMINATION', s: 'Summative Terminal Examination and Records', r: `Ministry of Education Standards` }
     ];
-  } else if (normLower.includes('engl') || normLower.includes('lit')) {
-    department = 'Languages & Literature';
-    defaultPeriods = 4;
-    topicProgression = [
-      { topic: 'Grammar & Functional Syntax', subtopic: 'Tenses, Relative Clauses & Active/Passive Voice', cbcCompetence: 'Constructing error-free complex sentences and formal discourse for academic communication', oldObj: 'Convert direct speech to indirect speech and active voice to passive voice', materials: 'Grammar charts, oxford English dictionaries, work cards', ref: `TIE English Language for ${className} (2023)` },
-      { topic: 'Reading Comprehension & Vocabulary', subtopic: 'Contextual Analysis & Inferential Skills', cbcCompetence: 'Extracting implicit meaning, analyzing authorial tone, and summarizing complex texts', oldObj: 'Answer literal and inferential comprehension questions accurately', materials: 'Graded reading passages, newspaper editorials, vocabulary cards', ref: `TIE English Language for ${className}` },
-      { topic: 'Literature in English', subtopic: 'Poetry, Novels & Plays Analysis', cbcCompetence: 'Critiquing literary themes, character development, imagery, and socio-cultural messages', oldObj: 'Identify figures of speech (simile, metaphor, personification) in poems', materials: 'Selected set books (Unanswered Cries / Passed Like a Shadow / The Lion and the Jewel)', ref: `TIE Approved Literature Set Books` },
-      { topic: 'Formal Writing & Communication', subtopic: 'Official Letters, CVs & Argumentative Essays', cbcCompetence: 'Writing persuasive speeches, formal employment cover letters, and analytical essays', oldObj: 'Write a 250-word formal letter using standard layout and polite language', materials: 'Sample CVs, formal letter templates, debate rubrics', ref: `TIE English Language for ${className}` }
-    ];
-  } else if (normLower.includes('comm') || normLower.includes('book') || normLower.includes('biashara') || normLower.includes('uhasibu') || normLower.includes('econ')) {
-    department = 'Commercial Studies';
-    defaultPeriods = 4;
-    topicProgression = [
-      { topic: 'Introduction to Business & Trade', subtopic: 'Home Trade, Wholesaling & Retailing', cbcCompetence: 'Analyzing commerce supply chains, e-commerce platforms, and Tanzanian trade channels', oldObj: 'Differentiate home trade and foreign trade and list functions of wholesalers', materials: 'Sample trade documents (invoices, receipts, delivery notes), trade flowcharts', ref: `TIE ${normSubject} for ${className} (2023)` },
-      { topic: 'Banking & Financial Services', subtopic: 'Commercial Banking, NMB/CRDB & Mobile Money (M-Pesa)', cbcCompetence: 'Utilizing modern banking, interest calculations, and mobile payment gateways in small enterprise', oldObj: 'List services offered by commercial banks and Central Bank (BOT)', materials: 'Sample bank deposit slips, cheque books, BOT financial reports', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Accounting & Double Entry System', subtopic: 'Ledger Posting, Trial Balance & Cash Book', cbcCompetence: 'Maintaining double-entry ledgers, preparing triple-column cash books, and trial balance reconciliation', oldObj: 'Apply debit and credit rules to record transactions and extract a trial balance', materials: 'Ledger paper, cash book templates, calculators, transaction vouchers', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Financial Statements & Profitability', subtopic: 'Trading, Profit & Loss Account and Balance Sheet', cbcCompetence: 'Constructing final financial statements to evaluate business solvency, gross profit, and net profit', oldObj: 'Calculate cost of goods sold, gross profit and net profit from trial balance', materials: 'Balance sheet templates, annual company financial reports', ref: `TIE ${normSubject} for ${className}` }
-    ];
-  } else if (normLower.includes('comp') || normLower.includes('ict') || normLower.includes('tehama') || normLower.includes('sayansi na teknolojia')) {
-    department = 'Information Technology';
+    weeklyTopics = histTopics.map(t => ({
+      mainTopic: t.m,
+      subTopic: t.s,
+      cbcMain: `Analyzing historical transformations, African heritage, and anti-colonial liberation struggles for national consciousness`,
+      cbcSpec: `Evaluating causes, course, and socio-economic consequences of ${t.s.toLowerCase()}`,
+      learning: `Learners analyze archival documents and historical maps in groups, debate historical perspectives, and write essays`,
+      teaching: `Facilitate historiographical source critique, trace migration/trade routes on wall map, guide essay structure`,
+      materials: `Historical maps of Africa, primary source document excerpts, Olduvai Gorge artifacts photographs`,
+      assessment: `Essay structure rubric (introduction, logical body paragraphs, historical evidence, conclusion), timeline test`,
+      references: t.r
+    }));
+  } else if (normSub.includes('civic') || normSub.includes('uraia')) {
+    department = isSwahili ? 'Sayansi za Jamii na Maadili' : 'Social Sciences';
     defaultPeriods = 3;
-    topicProgression = [
-      { topic: 'Computer Systems & Architecture', subtopic: 'Hardware, Memory & Operating Systems', cbcCompetence: 'Diagnosing CPU components, RAM/ROM storage, peripheral devices, and OS configuration', oldObj: 'List input, output and storage devices and explain system software', materials: 'Disassembled desktop computer, motherboard, RAM sticks, OS installation media', ref: `TIE ${normSubject} for ${className} (2023)` },
-      { topic: 'Word Processing & Spreadsheets', subtopic: 'Document Formatting & Data Formulas in Excel', cbcCompetence: 'Designing professional school reports and executing mathematical formulas (=SUM, =AVERAGE, =IF) in spreadsheets', oldObj: 'Create, format and print a word document and spreadsheet table', materials: 'Computer lab computers, office software suites, project briefs', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Networking & Internet Safety', subtopic: 'LAN/WAN, Web Browsing & Cybersecurity', cbcCompetence: 'Configuring network sharing, practicing safe internet browsing, and protecting data from malware', oldObj: 'Define internet, search engines, email and state 3 computer security threats', materials: 'Network switches, Ethernet cables, internet connectivity, antivirus software', ref: `TIE ${normSubject} for ${className}` },
-      { topic: 'Database & Basics of Coding', subtopic: 'Relational Tables & Introductory Programming', cbcCompetence: 'Designing database tables with primary keys and constructing simple algorithms/flowcharts', oldObj: 'Define database terms (field, record, query) and draw flowchart symbols', materials: 'Database software, flowchart stencils, pseudo-code exercises', ref: `TIE ${normSubject} for ${className}` }
+    const civTopics = [
+      { m: 'Our Nation and National Identity', s: 'Tanzanian National Symbols, Constitution and Currency', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'Promotion of Life Skills', s: 'Self-Awareness, Assertiveness, Decision Making and Empathy', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'Human Rights', s: 'Universal Declaration of Human Rights and Constitutional Rights', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'Responsible Citizenship', s: 'Acquisition of Citizenship, Rights and Civic Responsibilities', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'Work and Development', s: 'Types of Work, Dignity of Labour and Economic Growth', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'Family and Gender Relations', s: 'Family Roles, Gender Equity and Combating Gender-Based Violence', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'Government of Tanzania', s: 'Pillars of Government: Executive, Legislature, Judiciary and LGA', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'MIDTERM EVALUATION', s: 'Midterm Governance and Human Rights Assessment', r: `NECTA Civics Guidelines` },
+      { m: 'Democracy and Elections', s: 'Democratic Principles, Multi-Party System and NEC/INEC Elections', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'Anti-Corruption and Good Governance', s: 'Role of PCCB (TAKUKURU), Ethics Secretariat and Rule of Law', r: `TIE Civics Form ${classNumStr}` },
+      { m: 'REVISION & DRILLS', s: 'NECTA Past Papers and Current Affairs Analysis', r: `NECTA Civics Series` },
+      { m: 'TERMINAL EXAMINATION', s: 'Summative Terminal Examination and Records', r: `Ministry of Education Standards` }
     ];
+    weeklyTopics = civTopics.map(t => ({
+      mainTopic: t.m,
+      subTopic: t.s,
+      cbcMain: `Promoting constitutionalism, civic engagement, democratic principles, and ethical leadership in Tanzanian society`,
+      cbcSpec: `Critiquing ${t.s.toLowerCase()} and formulating practical civic action plans`,
+      learning: `Learners stage mock parliament sessions, debate civic responsibilities, and analyze TAKUKURU public anti-corruption cases`,
+      teaching: `Explain constitutional articles, guide case-study discussions on civil rights and civic responsibilities`,
+      materials: `Constitution of Tanzania booklets, TAKUKURU flyers, democratic election ballot samples, human rights posters`,
+      assessment: `Debate presentation rubric, essay on good governance and anti-corruption, classwork exercises`,
+      references: t.r
+    }));
+  } else if (normSub.includes('comm') || normSub.includes('book') || normSub.includes('biashara') || normSub.includes('uhasibu')) {
+    department = isSwahili ? 'Masomo ya Biashara' : 'Commercial Studies';
+    defaultPeriods = 4;
+    const commTopics = [
+      { m: 'Scope of Commerce', s: 'Meaning, Importance, Branches and Aid to Trade', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'Production', s: 'Direct and Indirect Production, Factors and Rewards', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'Home Trade', s: 'Retail Trade, Types of Retailers and Modern Supermarkets', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'Wholesale Trade', s: 'Functions of Wholesalers in Distribution Channels', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'Commercial Documents', s: 'Invoices, Receipts, Delivery Notes, Credit/Debit Notes', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'Double Entry Bookkeeping', s: 'Ledger Accounts, Rules of Debit and Credit', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'The Trial Balance', s: 'Extracting Trial Balance and Locating Errors', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'MIDTERM EVALUATION', s: 'Midterm Commercial Documents and Ledger Accounts Exam', r: `NECTA Commercial Guidelines` },
+      { m: 'The Cash Book', s: 'Single and Double Column Cash Books with Bank Reconciliation', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'Petty Cash and Imprest System', s: 'Petty Cash Book Preparation and Vouchers', r: `TIE Commerce & Bookkeeping Form ${classNumStr}` },
+      { m: 'REVISION & DRILLS', s: 'NECTA Past Papers and Financial Ledger Practice', r: `NECTA Commercial Series` },
+      { m: 'TERMINAL EXAMINATION', s: 'Summative Terminal Examination and Compilation', r: `Ministry of Education Standards` }
+    ];
+    weeklyTopics = commTopics.map(t => ({
+      mainTopic: t.m,
+      subTopic: t.s,
+      cbcMain: `Applying commercial systems, accounting ledgers, and entrepreneurial financial management in Tanzanian enterprises`,
+      cbcSpec: `Recording financial transactions and evaluating ${t.s.toLowerCase()} in business operations`,
+      learning: `Learners enter business transactions into ledger accounts, balance off T-accounts, and extract trial balance`,
+      teaching: `Demonstrate dual entry bookkeeping principle on chalkboard with clear debit/credit transaction analysis`,
+      materials: `Commercial ledger paper, sample TRA tax invoices, receipts, calculators, cash books`,
+      assessment: `Ledger balancing rubric, transaction entry accuracy test, marked homework assignments`,
+      references: t.r
+    }));
   } else {
-    // Universal fallback for any custom or specialized subject (e.g., Agricultural Science, Food & Nutrition, Bible Knowledge, EDK, French, Music, etc.)
-    department = 'Specialized Subjects';
+    // Universal curriculum engine for any custom or primary subject
+    department = isSwahili ? 'Masomo Teule' : 'General & Special Studies';
     defaultPeriods = 4;
-    topicProgression = [
-      { topic: `Foundations of ${normSubject}`, subtopic: `Core Principles & Key Terminology in ${normSubject}`, cbcCompetence: `Applying foundational principles of ${normSubject} to solve practical challenges in school and community settings`, oldObj: `Define core terminology and explain fundamental concepts in ${normSubject}`, materials: `Reference books, charts, work cards, demonstration media for ${normSubject}`, ref: `TIE Approved Textbook for ${normSubject}` },
-      { topic: `Practical Applications of ${normSubject}`, subtopic: `Methodology & Hands-on Techniques in ${normSubject}`, cbcCompetence: `Executing practical investigations and empirical methods related to ${normSubject}`, oldObj: `Demonstrate standard procedures and techniques in ${normSubject} correctly`, materials: `Practical equipment, task sheets, field materials for ${normSubject}`, ref: `TIE ${normSubject} Guide` },
-      { topic: `Advanced Analysis in ${normSubject}`, subtopic: `Problem Solving & Critical Inquiry in ${normSubject}`, cbcCompetence: `Analyzing complex case studies and applying critical thinking in ${normSubject}`, oldObj: `Analyze problems and evaluate outcomes in ${normSubject}`, materials: `Case study worksheets, analytical charts, student portfolios`, ref: `TIE ${normSubject} Module` },
-      { topic: `Synthesis & Project Execution in ${normSubject}`, subtopic: `Community Connection & Synthesis Project`, cbcCompetence: `Synthesizing learning in ${normSubject} to construct community-focused solutions`, oldObj: `Synthesize core topics and complete assigned project tasks in ${normSubject}`, materials: `Project display materials, evaluation rubrics`, ref: `TIE ${normSubject} Assessment Manual` }
+    const genericTopics = [
+      { m: `Foundations of ${subject}`, s: `Key Principles, Scope and Terminology` },
+      { m: `Core Methodology in ${subject}`, s: `Standard Procedures and Empirical Tools` },
+      { m: `Applied Concepts in ${subject}`, s: `Practical Investigation and Field Application` },
+      { m: `Diagnostic Problem Solving`, s: `Case Studies and Critical Data Analysis` },
+      { m: `Technological Integration`, s: `Modern Tools and Computational Media` },
+      { m: `Ethical and Environmental Standards`, s: `Safety, Sustainability and Community Value` },
+      { m: `Collaborative Project Sprint`, s: `Team Prototype and Investigation Design` },
+      { m: `MIDTERM EVALUATION`, s: `Midterm Competence Assessment and Review` },
+      { m: `Advanced In-depth Modules`, s: `Complex Problem Analysis and Synthesis` },
+      { m: `Community Application Project`, s: `Exhibition and Local Impact Testing` },
+      { m: `REVISION & NECTA DRILLS`, s: `Consolidation and Examination Techniques` },
+      { m: `TERMINAL EXAMINATION`, s: `Summative Terminal Examination and Records` }
     ];
+    weeklyTopics = genericTopics.map(t => ({
+      mainTopic: t.m,
+      subTopic: t.s,
+      cbcMain: `Applying core competences in ${subject} to solve real-world problems in school and Tanzanian communities`,
+      cbcSpec: `Investigating ${t.s.toLowerCase()} through collaborative inquiry and practical tasks`,
+      learning: `Learners engage in collaborative group investigations on ${t.s.toLowerCase()}, solve tasks, and present findings`,
+      teaching: `Facilitate inquiry stations, demonstrate core procedures, oversee student safety, and evaluate understanding`,
+      materials: `Approved TIE textbooks, work cards, local instructional media, charts, evaluation rubrics`,
+      assessment: `Practical task rubric, classwork verification, peer evaluation, homework exercises`,
+      references: `TIE Approved Syllabus and Textbooks for ${subject} ${className}`
+    }));
   }
 
-  // Generate 12 full weeks using topicProgression repeated/expanded across 12 weeks
-  const weeks = Array.from({ length: 12 }, (_, i) => {
-    const weekNum = i + 1;
-    const module = topicProgression[i % topicProgression.length];
-
-    // Special weeks: Midterm (Week 8) and Terminal (Week 12)
-    if (weekNum === 8) {
-      return {
-        week: 8,
-        dates: `Week 8 (Midterm Assessment)`,
-        cbc: {
-          mainCompetence: `MIDTERM COMPETENCE ASSESSMENT IN ${normSubject.toUpperCase()}`,
-          specificCompetence: `Synthesizing Weeks 1-7 competences in ${normSubject}`,
-          learningActivities: `Undertake standardized midterm assessment task and reflect on personal portfolio milestone`,
-          teachingActivities: `Administer standardized rubric-based assessment; evaluate learner performance and offer constructive feedback`,
-          materials: `Exam question papers, rubrics, portfolio evaluation sheets`,
-          assessment: `Midterm Examination (Theory 60% + Practical/Task 40%)`,
-          references: `NECTA Assessment Guidelines for ${normSubject}`
-        },
-        old: {
-          mainTopic: `MIDTERM EVALUATION & REVISION`,
-          subTopic: `Review of Topics 1-3 in ${normSubject}`,
-          specificObjectives: `Evaluate student retention and problem-solving skills across initial syllabus topics`,
-          teachingActivities: `Administer midterm written test; mark scripts and conduct chalkboard review`,
-          materials: `Printed examination papers, answer booklets`,
-          assessment: `Formal Midterm Examination marked out of 100%`,
-          references: `School Past Examination Papers`
-        }
-      };
-    }
-
-    if (weekNum === 12) {
-      return {
-        week: 12,
-        dates: `Week 12 (Terminal Evaluation)`,
-        cbc: {
-          mainCompetence: `TERMINAL EVALUATION & CLOSING REFLECTION IN ${normSubject.toUpperCase()}`,
-          specificCompetence: `Summative evaluation of Term 1 competences in ${normSubject}`,
-          learningActivities: `Sit terminal examination; conduct self-assessment checklist and set Term 2 learning goals`,
-          teachingActivities: `Supervise terminal examination; evaluate and enter student scores into academic ledger`,
-          materials: `Official examination papers, answer booklets, academic ledger`,
-          assessment: `Terminal Examination (NECTA Standard Format)`,
-          references: `Ministry of Education & NECTA Terminal Standards`
-        },
-        old: {
-          mainTopic: `TERMINAL EXAMINATION & CLOSURE`,
-          subTopic: `End of Term Assessment and Ledger Entry`,
-          specificObjectives: `Summative evaluation of student mastery of Term 1 ${normSubject} syllabus`,
-          teachingActivities: `Invigilate terminal exam, mark scripts according to marking scheme, compile results`,
-          materials: `Examination papers, answer sheets, report cards`,
-          assessment: `Formal Terminal Examination marked out of 100%`,
-          references: `School Academic Examination Regulations`
-        }
-      };
-    }
-
-    const dayStart = 12 + ((i % 4) * 7);
-    const month = i < 4 ? 'Jan' : i < 8 ? 'Feb' : 'Mar';
-    const datesStr = `Week ${weekNum} (${String(dayStart).padStart(2, '0')} ${month} - ${String(dayStart + 4).padStart(2, '0')} ${month})`;
+  // Construct 12 weeks of structured items
+  const weeks: SubjectSchemeWeek[] = weeklyTopics.slice(0, 12).map((t, idx) => {
+    const weekNum = idx + 1;
+    const isMidterm = weekNum === 8;
+    const isTerminal = weekNum === 12;
 
     return {
       week: weekNum,
-      dates: datesStr,
+      dates: getTanzanianTermDates(weekNum, termKey, isSwahili ? 'Kiswahili' : 'English'),
       cbc: {
-        mainCompetence: module.cbcCompetence,
-        specificCompetence: `Analyzing ${module.subtopic} through inquiry and collaborative task cards`,
-        learningActivities: `Learners work in collaborative groups to investigate ${module.subtopic} and present findings on work cards`,
-        teachingActivities: `Facilitate group inquiry stations, guide safe material handling, and moderate class presentations`,
-        materials: module.materials,
-        assessment: `Practical task rubric, peer presentation evaluation, workbook review`,
-        references: module.ref
+        mainCompetence: isMidterm
+          ? (isSwahili ? `PIMHO LA KATIKATI YA MUHULA KATIKA SOMO LA ${subject.toUpperCase()}` : `MIDTERM COMPETENCE ASSESSMENT IN ${subject.toUpperCase()}`)
+          : isTerminal
+          ? (isSwahili ? `TATHMINI YA MWISHO WA MUHULA KATIKA SOMO LA ${subject.toUpperCase()}` : `TERMINAL COMPETENCE EVALUATION IN ${subject.toUpperCase()}`)
+          : t.cbcMain,
+        specificCompetence: isMidterm
+          ? (isSwahili ? `Kupima umahiri wa wiki 1 hadi 7 katika somo la ${subject}` : `Evaluating Weeks 1 to 7 competences and problem solving in ${subject}`)
+          : isTerminal
+          ? (isSwahili ? `Kutathmini uelewa wa jumla wa muhula mzima katika somo la ${subject}` : `Summative evaluation of full term syllabus mastery in ${subject}`)
+          : t.cbcSpec,
+        learningActivities: isMidterm
+          ? (isSwahili ? 'Kufanya mtihani wa katikati ya muhula na kutathmini maendeleo binafsi ya kitaaluma' : 'Sit standardized midterm examination and review personal learning portfolio milestones')
+          : isTerminal
+          ? (isSwahili ? 'Kufanya mtihani wa mwisho wa muhula, kuangalia masahihisho na kujiwekea malengo ya muhula unaofuata' : 'Sit terminal examination, review corrections, and record personal targets for the next term')
+          : t.learning,
+        teachingActivities: isMidterm
+          ? (isSwahili ? 'Kusimamia mtihani wa katikati ya muhula, kusahihisha na kutoa mrejesho wa kina kwa wanafunzi' : 'Supervise standardized midterm examination, mark scripts, and provide constructive learner feedback')
+          : isTerminal
+          ? (isSwahili ? 'Kusimamia mtihani wa mwisho wa muhula, kusahihisha na kuingiza alama kwenye daftari la matokeo' : 'Invigilate terminal examination, mark papers, and enter student records into the academic ledger')
+          : t.teaching,
+        materials: isMidterm || isTerminal
+          ? (isSwahili ? 'Karatasi za mitihani, vitabu vya majibu, mwongozo wa usahihishaji' : 'Official examination papers, answer sheets, marking guides')
+          : t.materials,
+        assessment: isMidterm
+          ? (isSwahili ? 'Mtihani wa Katikati ya Muhula (Nadharia 60% + Vitendo 40%)' : 'Midterm Examination (Theory 60% + Practical/Task 40%)')
+          : isTerminal
+          ? (isSwahili ? 'Mtihani wa Mwisho wa Muhula (Muundo Rasmi wa NECTA, Alama 100)' : 'Terminal Examination (Official NECTA Format, 100 Marks)')
+          : t.assessment,
+        references: t.references,
       },
       old: {
-        mainTopic: module.topic,
-        subTopic: module.subtopic,
-        specificObjectives: `By the end of the week, the student should be able to: ${module.oldObj}`,
-        teachingActivities: `Explain concepts of ${module.subtopic} on chalkboard with 3 worked examples and guide student notes`,
-        materials: `Chalkboard, chalk, standard textbook for ${normSubject}`,
-        assessment: `Chalkboard drill exercises, notebook review, marked homework assignment`,
-        references: module.ref
+        mainTopic: t.mainTopic,
+        subTopic: t.subTopic,
+        specificObjectives: t.cbcSpec,
+        teachingActivities: t.teaching,
+        materials: t.materials,
+        assessment: t.assessment,
+        references: t.references,
       }
     };
   });
 
   return {
-    subject: normSubject,
+    subject,
     department,
     defaultPeriodsPerWeek: defaultPeriods,
     weeks
   };
-};
+}
 
-/**
- * Generate a complete 12-week Scheme of Work automatically
- */
+// -------------------------------------------------------------------------------------------------
+// EXPORTED MAIN GENERATION FUNCTION
+// -------------------------------------------------------------------------------------------------
+
 export const generateAutoSchemeOfWork = (
   subject: string,
   className: string,
@@ -1323,17 +1163,20 @@ export const generateAutoSchemeOfWork = (
   term: 'Term 1' | 'Term 2' | 'Full Year',
   teacherName: string,
   schoolId = 'DEMO_SCHOOL',
-  periodsPerWeek = 5
+  periodsPerWeek = 5,
+  language: 'Kiswahili' | 'English' = 'English'
 ): SchemeOfWork => {
+  const isSwahili = language === 'Kiswahili' || String(subject).toLowerCase().includes('kiswahili');
+
   if (term === 'Full Year') {
-    const t1 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 1', teacherName, schoolId, periodsPerWeek);
-    const t2 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 2', teacherName, schoolId, periodsPerWeek);
-    
+    const t1 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 1', teacherName, schoolId, periodsPerWeek, language);
+    const t2 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 2', teacherName, schoolId, periodsPerWeek, language);
+
     const t2Items = t2.items.map(item => ({
       ...item,
       id: `${item.id}_full`,
       weekNumber: item.weekNumber + t1.items.length,
-      datesOrMonth: item.datesOrMonth.replace(/Week (\d+)/, (_, n) => `Week ${Number(n) + t1.items.length}`)
+      datesOrMonth: item.datesOrMonth.replace(/Wiki ya (\d+)/i, (_, n) => `Wiki ya ${Number(n) + t1.items.length}`).replace(/Week (\d+)/i, (_, n) => `Week ${Number(n) + t1.items.length}`)
     }));
 
     const t2Logs = t2.logBookEntries.map(log => ({
@@ -1352,8 +1195,8 @@ export const generateAutoSchemeOfWork = (
     };
   }
 
-  // Never default blindly to Physics! Use smart subject template matcher.
-  const template = getSubjectSchemeTemplate(subject, className, term as any, curriculumType);
+  // Resolve template using exact subject, exact class level and exact term
+  const template = getSubjectSchemeTemplate(subject, className, term, curriculumType, isSwahili ? 'Kiswahili' : 'English');
 
   const items: SchemeOfWorkItem[] = template.weeks.map(w => {
     if (curriculumType === 'NEW_CBC_2023') {
@@ -1369,7 +1212,7 @@ export const generateAutoSchemeOfWork = (
         assessmentMethods: w.cbc.assessment,
         references: w.cbc.references,
         periodsCount: periodsPerWeek,
-        remarks: 'Covered as scheduled; competencies observed'
+        remarks: isSwahili ? 'Imefundishwa kama ilivyopangwa; umahiri umefikiwa' : 'Covered as scheduled; competencies observed'
       };
     } else {
       return {
@@ -1384,25 +1227,29 @@ export const generateAutoSchemeOfWork = (
         assessmentMethods: w.old.assessment,
         references: w.old.references,
         periodsCount: periodsPerWeek,
-        remarks: 'Lesson taught successfully; notes given'
+        remarks: isSwahili ? 'Kipindi kimefundishwa vizuri; madokezo yametolewa' : 'Lesson taught successfully; notes given'
       };
     }
   });
 
-  // Generate matching Teaching Log Book entries for each week!
+  // Generate authentic Teaching Log Book entries for each week
   const logBookEntries: TeachingLogBookEntry[] = items.map((item, idx) => ({
     id: `log_entry_${item.weekNumber}_${Date.now() + idx}`,
     schemeItemId: item.id,
     date: `2026-0${Math.min(1 + Math.floor(idx / 4), 4)}-${String(12 + (idx % 4) * 7).padStart(2, '0')}`,
     className,
     stream: stream || 'Stream A',
-    periodTime: `Period 2 & 3 (08:40 - 10:00)`,
+    periodTime: isSwahili ? 'Kipindi cha 2 & 3 (08:40 - 10:00)' : 'Period 2 & 3 (08:40 - 10:00)',
     subTopicTaught: item.subTopicOrSpecificCompetence,
-    workCoveredSummary: `Delivered practical & theoretical session on ${item.subTopicOrSpecificCompetence}. Covered learning activities and assessment exercises.`,
-    studentsPresent: 42,
+    workCoveredSummary: isSwahili
+      ? `Kipindi cha nadharia na vitendo kuhusu ${item.subTopicOrSpecificCompetence} kimekamilika. Wanafunzi wameshiriki kikamilifu katika majadiliano na mazoezi ya upimaji.`
+      : `Delivered practical & theoretical session on ${item.subTopicOrSpecificCompetence}. Covered learning activities and assessment exercises.`,
+    studentsPresent: 43,
     studentsTotal: 45,
     comprehensionEvaluation: idx % 3 === 0 ? 'EXCELLENT' : 'GOOD',
-    remedialOrUncoveredReason: idx % 4 === 0 ? `Brief recap provided for students needing extra practice on ${subject}.` : undefined,
+    remedialOrUncoveredReason: idx % 4 === 0
+      ? (isSwahili ? `Marudio mafupi ya uimarishaji yametolewa kwa wanafunzi waliohitaji ufafanuzi zaidi katika somo la ${subject}.` : `Brief recap provided for students needing extra practice on ${subject}.`)
+      : undefined,
     teacherSignature: teacherName ? teacherName.split(' ').map(n => n[0]).join('.') : 'TR.'
   }));
 
@@ -1419,9 +1266,13 @@ export const generateAutoSchemeOfWork = (
     periodsPerWeek,
     totalWeeks: items.length,
     department: template.department,
-    competenceSummary: curriculumType === 'NEW_CBC_2023' 
-      ? `Focuses on 21st-century competence development in ${subject}, practical hands-on investigations, critical thinking, and socio-economic problem solving aligned with NECTA 2023/2024 standards.`
-      : `Focuses on structured syllabus mastery in ${subject}, definition clarity, systematic formula/concept derivation, and chalkboard exercise verification.`,
+    competenceSummary: curriculumType === 'NEW_CBC_2023'
+      ? (isSwahili
+          ? `Inajenga umahiri wa karne ya 21 katika somo la ${subject}, uchunguzi wa vitendo, fikra tunduizi, na utatuzi wa matatizo ya kijamii kulingana na miongozo ya TET na NECTA 2023/2024.`
+          : `Focuses on 21st-century competence development in ${subject}, practical hands-on investigations, critical thinking, and socio-economic problem solving aligned with TIE and NECTA standards.`)
+      : (isSwahili
+          ? `Inalenga uelewa thabiti wa muhtasari wa ${subject}, uwazi wa maana za dhana, uundaji wa kanuni, na mazoezi ya ubaoni kulingana na mtaala wa NECTA.`
+          : `Focuses on structured syllabus mastery in ${subject}, definition clarity, systematic formula/concept derivation, and chalkboard exercise verification.`),
     items,
     logBookEntries,
     createdAt: new Date().toISOString(),
@@ -1429,29 +1280,4 @@ export const generateAutoSchemeOfWork = (
   };
 };
 
-// Auto-populate knowledge base for all major Tanzanian primary and secondary subjects
-[
-  'Biology',
-  'Basic Mathematics',
-  'Hisabati',
-  'English Language',
-  'Kiswahili',
-  'Geography',
-  'History',
-  'Civics',
-  'Commerce',
-  'Bookkeeping',
-  'Information and Computer Studies (ICS)',
-  'Agricultural Science',
-  'Science & Technology',
-  'Social Studies',
-  'General Studies',
-  'Economics',
-  'Literature',
-  'Elimu ya Dini ya Kiislamu (EDK)'
-].forEach(subName => {
-  if (!TANZANIA_SCHEMES_KNOWLEDGE_BASE[subName]) {
-    TANZANIA_SCHEMES_KNOWLEDGE_BASE[subName] = getSubjectSchemeTemplate(subName, 'Form 3', 'Term 1', 'NEW_CBC_2023');
-  }
-});
-
+export const TANZANIA_SCHEMES_KNOWLEDGE_BASE: Record<string, SubjectSchemeTemplate> = {};

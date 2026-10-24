@@ -1,7 +1,19 @@
 import React, { useState, useMemo } from 'react';
 import { Teacher, TimetableAssignment, StreamSetting, PeriodSetting, TeacherAssignment } from '../../types';
-import { Save, Clock, BookOpen, AlertTriangle, Check, Search, User, Calendar, ShieldCheck } from 'lucide-react';
+import { Save, Clock, BookOpen, AlertTriangle, Check, Search, User, Calendar, ShieldCheck, Lock } from 'lucide-react';
 import { DAYS_OF_WEEK } from '../../constants/defaults';
+import { isSameClass } from '../../utils/reportCardUtils';
+import {
+  isSameStream,
+  isSamePeriod,
+  isSameSubjectName,
+  parseClassAndStream,
+  getConfiguredDays,
+  getPeriodsForDayFromSettings,
+  isPeriodLocked,
+  isAcademicReligiousSubject,
+  getRegisteredSubjectsForTeacher
+} from '../../lib/timetableService';
 
 interface TeacherEntryFormProps {
   teachers: Teacher[];
@@ -40,54 +52,69 @@ export const TeacherEntryForm: React.FC<TeacherEntryFormProps> = ({
   }, [teachers, searchTeacherQuery]);
 
   const selectedTeacher = useMemo(() => {
-    return teachers.find(t => t.id === selectedTeacherId) || teachers[0];
+    return teachers.find(t => Number(t.id) === Number(selectedTeacherId)) || teachers[0];
   }, [teachers, selectedTeacherId]);
 
-  // Get subjects and streams assigned to this teacher during setup
-  const teacherAssignmentRecord = useMemo(() => {
-    return teacherAssignments.find(ta => ta.teacherId === selectedTeacherId);
-  }, [teacherAssignments, selectedTeacherId]);
+  // Get ALL assignment records for this teacher during setup
+  const teacherAssignmentRecords = useMemo(() => {
+    return (teacherAssignments || []).filter(ta => ta && Number(ta.teacherId) === Number(selectedTeacher?.id ?? selectedTeacherId));
+  }, [teacherAssignments, selectedTeacher, selectedTeacherId]);
 
+  // STRICT RULE: Only subjects officially registered for the selected teacher are allowed
   const allowedSubjects = useMemo(() => {
-    if (teacherAssignmentRecord?.subjects && teacherAssignmentRecord.subjects.length > 0) {
-      return teacherAssignmentRecord.subjects;
-    }
-    if (selectedTeacher?.subjects && selectedTeacher.subjects.length > 0) {
-      return selectedTeacher.subjects;
-    }
-    // Fallback general subjects
-    return ['Mathematics', 'English Language', 'Kiswahili', 'Biology', 'Chemistry', 'Geography', 'History', 'Physics', 'Civics', 'Computer Studies'];
-  }, [teacherAssignmentRecord, selectedTeacher]);
+    return getRegisteredSubjectsForTeacher(selectedTeacher, teacherAssignments);
+  }, [selectedTeacher, teacherAssignments]);
 
   const allowedStreams = useMemo(() => {
-    if (teacherAssignmentRecord?.streams && teacherAssignmentRecord.streams.length > 0) {
-      return teacherAssignmentRecord.streams;
+    const streamsSet = new Set<string>();
+    if (selectedTeacher?.teachingStreams && selectedTeacher.teachingStreams.length > 0) {
+      selectedTeacher.teachingStreams.forEach(st => {
+        if (st && st.trim()) streamsSet.add(st.trim());
+      });
     }
-    if (streamSettings.length > 0) {
-      return streamSettings.flatMap(s => (s.streams || []).map(st => `${s.className} - ${st}`));
+    teacherAssignmentRecords.forEach(rec => {
+      // Only include streams from teacherAssignmentRecords whose subject is registered for this teacher
+      const hasValidSubject = (rec.subjects || []).some(sub =>
+        allowedSubjects.some(regSub => isSameSubjectName(regSub, sub))
+      );
+      if (hasValidSubject || !selectedTeacher?.teachingStreams?.length) {
+        (rec.streams || []).forEach(st => {
+          if (st && st.trim()) streamsSet.add(st.trim());
+        });
+      }
+    });
+    if (streamsSet.size === 0 && streamSettings.length > 0) {
+      streamSettings.forEach(ss => {
+        (ss.streams || []).forEach(st => {
+          streamsSet.add(`${ss.className} - ${st}`);
+        });
+      });
     }
-    return ['Form 1 - STREAM A', 'Form 1 - STREAM B', 'Form 2 - STREAM A', 'Form 2 - STREAM B'];
-  }, [teacherAssignmentRecord, streamSettings]);
+    return Array.from(streamsSet);
+  }, [teacherAssignmentRecords, selectedTeacher, streamSettings, allowedSubjects]);
 
-  // Days list
-  const activeDays = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
+  // Days list (only days configured with periods in General Timetable)
+  const activeDays = useMemo(() => getConfiguredDays(periodSettings), [periodSettings]);
 
-  // Periods per day from periodSettings or default
-  const getPeriodsForDay = (day: string) => {
-    const list = (periodSettings || []).filter(p => p && p.day === day && !p.isBreak);
+  // Periods per day from periodSettings
+  const getPeriodsForDay = (day: string): PeriodSetting[] => {
+    const list = getPeriodsForDayFromSettings(day, periodSettings).filter(p => !p.isBreak);
     if (list.length > 0) {
-      return [...list].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+      return list;
     }
-    return [
-      { name: 'Period 1', start: '08:00', end: '08:40' },
-      { name: 'Period 2', start: '08:40', end: '09:20' },
-      { name: 'Period 3', start: '09:40', end: '10:20' },
-      { name: 'Period 4', start: '10:20', end: '11:00' },
-      { name: 'Period 5', start: '11:20', end: '12:00' },
-      { name: 'Period 6', start: '12:00', end: '12:40' },
-      { name: 'Period 7', start: '14:00', end: '14:40' },
-      { name: 'Period 8', start: '14:40', end: '15:20' },
-    ];
+    if (!periodSettings || periodSettings.length === 0) {
+      return [
+        { id: 1, day, name: 'Period 1', start: '08:00', end: '08:40' },
+        { id: 2, day, name: 'Period 2', start: '08:40', end: '09:20' },
+        { id: 3, day, name: 'Period 3', start: '09:40', end: '10:20' },
+        { id: 4, day, name: 'Period 4', start: '10:20', end: '11:00' },
+        { id: 5, day, name: 'Period 5', start: '11:20', end: '12:00' },
+        { id: 6, day, name: 'Period 6', start: '12:00', end: '12:40' },
+        { id: 7, day, name: 'Period 7', start: '14:00', end: '14:40' },
+        { id: 8, day, name: 'Period 8', start: '14:40', end: '15:20' },
+      ];
+    }
+    return [];
   };
 
   const handleAssignmentChange = (
@@ -97,57 +124,212 @@ export const TeacherEntryForm: React.FC<TeacherEntryFormProps> = ({
     field: 'subject' | 'streamString',
     value: string
   ) => {
-    // Find existing assignment for this teacher, day, and periodName
+    const activeTeacherId = selectedTeacher?.id ?? selectedTeacherId;
+    const normDay = day.trim().toLowerCase();
+
+    if (allowedSubjects.length === 0) {
+      setMessage({
+        text: `Mwalimu ${selectedTeacher?.name || ''} hajasajiliwa na somo lolote! Tafadhali msajilie somo kwanza kwenye ukurasa wa Walimu.`,
+        type: 'error'
+      });
+      return;
+    }
+
+    // Find existing assignment for this teacher, day, and periodName using exact period match
     const existingIndex = (assignments || []).findIndex(a => {
-      if (!a || a.teacherId !== selectedTeacherId || a.day !== day) return false;
-      const pNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
-      return pNorm === periodName;
+      if (!a || Number(a.teacherId) !== Number(activeTeacherId)) return false;
+      if ((a.day || '').trim().toLowerCase() !== normDay) return false;
+      return isSamePeriod(a.period, a.periodName, periodName);
     });
 
-    let currentAssignment = existingIndex >= 0 ? { ...assignments[existingIndex] } : {
+    // Check comprehensive lock state (PeriodSettings lock, non-academic activity, or teacher/stream lock)
+    const slotLock = isPeriodLocked(day, periodName, periodSettings, assignments, {
+      teacherId: activeTeacherId,
+      allowedStreams
+    });
+
+    if (slotLock.isLocked) {
+      setMessage({
+        text: `Kipindi hiki (${periodName}) kimefungwa (Locked: ${slotLock.reason}). Huwezi kumpangia mwalimu kipindi cha masomo hapa.`,
+        type: 'error'
+      });
+      return;
+    }
+
+    // Check for individual assignment lock (ignoring academic religious subjects)
+    if (existingIndex >= 0 && assignments[existingIndex].isLocked && !isAcademicReligiousSubject(assignments[existingIndex].subject)) {
+      setMessage({ text: 'Kipindi hiki kimefungwa (Locked) na hakiwezi kubadilishwa hapa.', type: 'error' });
+      return;
+    }
+
+    // If user selected a stream, verify that specific class+stream is not locked on this day+period
+    if (field === 'streamString' && value.trim()) {
+      const parsedTarget = parseClassAndStream(value);
+      const targetStreamLock = isPeriodLocked(day, periodName, periodSettings, assignments, {
+        className: parsedTarget.className,
+        stream: parsedTarget.stream
+      });
+      if (targetStreamLock.isLocked) {
+        setMessage({
+          text: `Darasa la ${parsedTarget.className} (${parsedTarget.stream}) limefungwa kwenye ${periodName} (${targetStreamLock.reason}). Huwezi kupanga kipindi cha kawaida hapa.`,
+          type: 'error'
+        });
+        return;
+      }
+    }
+
+    // Validate subject belongs to this teacher's registered subjects
+    if (field === 'subject' && value.trim()) {
+      const matchedRegistered = allowedSubjects.find(s => isSameSubjectName(s, value));
+      if (!matchedRegistered) {
+        setMessage({
+          text: `Huwezi kuweka somo la "${value}" kwa ${selectedTeacher?.name} kwa sababu hajasajiliwa kufundisha somo hilo!`,
+          type: 'error'
+        });
+        return;
+      }
+    }
+
+    // If user cleared the stream dropdown to empty ("")
+    if (field === 'streamString' && !value.trim()) {
+      const withoutSlot = (assignments || []).filter((a, idx) => idx !== existingIndex);
+      onUpdateAssignments(withoutSlot);
+      setMessage({ text: 'Kipindi kimeondolewa.', type: 'info' });
+      setTimeout(() => setMessage(null), 2500);
+      return;
+    }
+
+    // If user cleared the subject dropdown to empty ("") when teacher has multiple subjects
+    if (field === 'subject' && !value.trim() && allowedSubjects.length > 1) {
+      if (existingIndex >= 0) {
+        const updatedList = [...assignments];
+        updatedList[existingIndex] = { ...updatedList[existingIndex], subject: '' };
+        onUpdateAssignments(updatedList);
+      }
+      return;
+    }
+
+    // Ensure existing subject is valid for this teacher
+    const existingValidSub =
+      existingIndex >= 0 &&
+      assignments[existingIndex].subject &&
+      allowedSubjects.find(s => isSameSubjectName(s, assignments[existingIndex].subject));
+
+    let currentAssignment: TimetableAssignment = existingIndex >= 0 ? {
+      ...assignments[existingIndex],
+      subject: existingValidSub || (allowedSubjects.length === 1 ? allowedSubjects[0] : ''),
+      period: periodFull,
+      periodName
+    } : {
       id: Date.now() + Math.floor(Math.random() * 10000),
       day,
       period: periodFull,
       periodName,
-      teacherId: selectedTeacherId,
-      className: allowedStreams[0]?.split(' - ')[0] || 'Form 1',
-      stream: allowedStreams[0]?.split(' - ')[1] || 'STREAM A',
-      subject: allowedSubjects[0] || 'Subject',
+      teacherId: activeTeacherId,
+      className: '',
+      stream: '',
+      subject: allowedSubjects.length === 1 ? allowedSubjects[0] : '',
       activityType: 'academic' as const
     };
 
     if (field === 'subject') {
-      currentAssignment.subject = value;
+      const canonicalSub = allowedSubjects.find(s => isSameSubjectName(s, value)) || value;
+      currentAssignment.subject = canonicalSub;
     } else if (field === 'streamString') {
-      const parts = value.split(' - ');
-      currentAssignment.className = parts[0] || 'Form 1';
-      currentAssignment.stream = parts[1] || 'STREAM A';
+      const parsed = parseClassAndStream(value);
+      currentAssignment.className = parsed.className;
+      currentAssignment.stream = parsed.stream;
+
+      // CORE RULE: If teacher has only 1 registered subject, auto-fill it immediately!
+      if (allowedSubjects.length === 1) {
+        currentAssignment.subject = allowedSubjects[0];
+      } else if (!currentAssignment.subject && allowedSubjects.length > 1) {
+        // Check if this specific stream is uniquely linked to 1 registered subject in teacherAssignmentRecords
+        const matchingRecords = teacherAssignmentRecords.filter(rec =>
+          (rec.streams || []).some(st => {
+            const pSt = parseClassAndStream(st);
+            return isSameClass(pSt.className, parsed.className) && isSameStream(pSt.stream, parsed.stream);
+          })
+        );
+        const streamSubjects = Array.from(
+          new Set(
+            matchingRecords
+              .flatMap(r => r.subjects || [])
+              .map(sub => allowedSubjects.find(reg => isSameSubjectName(reg, sub)) || '')
+              .filter(Boolean)
+          )
+        );
+        if (streamSubjects.length === 1) {
+          currentAssignment.subject = streamSubjects[0];
+        }
+      }
     }
 
-    // Validation: check if teacher is assigned to this subject/stream
-    if (field === 'subject' && value && !allowedSubjects.includes(value)) {
-      setMessage({ text: `Onyo: Mwalimu hakusajiliwa kufundisha somo la '${value}'.`, type: 'error' });
-      return;
+    // Remove any duplicate entries for the same teacher + day + periodName before inserting/updating
+    const cleaned = (assignments || []).filter((a, idx) => {
+      if (!a) return false;
+      if (idx === existingIndex) return true;
+      if (
+        Number(a.teacherId) === Number(activeTeacherId) &&
+        (a.day || '').trim().toLowerCase() === normDay &&
+        isSamePeriod(a.period, a.periodName, periodName)
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const targetIdx = cleaned.findIndex(a =>
+      a &&
+      Number(a.teacherId) === Number(activeTeacherId) &&
+      (a.day || '').trim().toLowerCase() === normDay &&
+      isSamePeriod(a.period, a.periodName, periodName)
+    );
+
+    if (targetIdx >= 0) {
+      cleaned[targetIdx] = currentAssignment;
+    } else if (currentAssignment.subject || currentAssignment.className) {
+      cleaned.push(currentAssignment);
     }
 
-    let updated = [...assignments];
-    if (existingIndex >= 0) {
-      updated[existingIndex] = currentAssignment;
-    } else {
-      updated.push(currentAssignment);
-    }
-
-    onUpdateAssignments(updated);
+    onUpdateAssignments(cleaned);
     setMessage({ text: `Imerejeshwa na kuhifadhiwa kwenye Ratiba Kuu!`, type: 'success' });
     setTimeout(() => setMessage(null), 3000);
   };
 
   const handleRemoveAssignment = (day: string, periodName: string) => {
-    const filtered = (assignments || []).filter(a => {
-      if (!a || a.teacherId !== selectedTeacherId || a.day !== day) return true;
-      const pNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
-      return pNorm !== periodName;
+    const activeTeacherId = selectedTeacher?.id ?? selectedTeacherId;
+    const normDay = day.trim().toLowerCase();
+
+    const slotLock = isPeriodLocked(day, periodName, periodSettings, assignments, {
+      teacherId: activeTeacherId,
+      allowedStreams
     });
+
+    if (slotLock.isLocked) {
+      setMessage({ text: `Kipindi hiki kimefungwa (${slotLock.reason}) na hakiwezi kufutwa hapa.`, type: 'error' });
+      return;
+    }
+
+    const existing = (assignments || []).find(a => {
+      if (!a || Number(a.teacherId) !== Number(activeTeacherId)) return false;
+      if ((a.day || '').trim().toLowerCase() !== normDay) return false;
+      return isSamePeriod(a.period, a.periodName, periodName);
+    });
+
+    if (existing?.isLocked && !isAcademicReligiousSubject(existing?.subject)) {
+      setMessage({ text: 'Kipindi hiki kimefungwa (Locked) na hakiwezi kufutwa.', type: 'error' });
+      return;
+    }
+
+    const filtered = (assignments || []).filter(a => {
+      if (!a || Number(a.teacherId) !== Number(activeTeacherId)) return true;
+      if ((a.day || '').trim().toLowerCase() !== normDay) return true;
+      const match = isSamePeriod(a.period, a.periodName, periodName);
+      if (match && a.isLocked && !isAcademicReligiousSubject(a.subject)) return true;
+      return !match;
+    });
+
     onUpdateAssignments(filtered);
     setMessage({ text: 'Kipindi kimefutwa kwa mafanikio.', type: 'info' });
     setTimeout(() => setMessage(null), 3000);
@@ -253,7 +435,7 @@ export const TeacherEntryForm: React.FC<TeacherEntryFormProps> = ({
               : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
           }`}
         >
-          Siku Zote (Monday - Friday)
+          Siku Zote ({activeDays.length})
         </button>
         {activeDays.map(day => (
           <button
@@ -270,10 +452,27 @@ export const TeacherEntryForm: React.FC<TeacherEntryFormProps> = ({
         ))}
       </div>
 
+      {/* Color Legend for Period Status */}
+      <div className="flex flex-wrap items-center gap-3 p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+        <span className="font-black text-slate-700 uppercase tracking-wider text-[11px]">Alama za Rangi (Status Colors):</span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-emerald-100 text-emerald-950 border border-emerald-400 font-black shadow-2xs">
+          <Check className="w-3.5 h-3.5 text-emerald-700" />
+          <span>Kijani (Green): Kipindi Kimeingizwa &amp; Hakina Shida</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-100 text-rose-950 border border-rose-400 font-black shadow-2xs">
+          <AlertTriangle className="w-3.5 h-3.5 text-rose-700" />
+          <span>Nyekundu (Red): Kipindi Kina Mgongano / Shida</span>
+        </span>
+        <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-amber-100 text-amber-950 border border-amber-400 font-black shadow-2xs">
+          <Lock className="w-3.5 h-3.5 text-amber-700" />
+          <span>Dhahabu (Gold): Kipindi Kimefungwa (Locked 🔒)</span>
+        </span>
+      </div>
+
       {/* Timetable Grid Form for Selected Teacher */}
       {selectedTeacher && (
         <div className="space-y-6">
-          {(selectedDay === 'All' ? activeDays : [selectedDay]).map(day => {
+          {(selectedDay === 'All' ? activeDays : activeDays.filter(d => d === selectedDay)).map(day => {
             const dayPeriods = getPeriodsForDay(day);
             return (
               <div key={day} className="border border-slate-200 rounded-2xl overflow-hidden shadow-2xs bg-white">
@@ -292,8 +491,8 @@ export const TeacherEntryForm: React.FC<TeacherEntryFormProps> = ({
                     <thead className="bg-slate-100 text-slate-800 uppercase text-[10px] tracking-wider">
                       <tr>
                         <th className="p-3 border-b border-slate-200">Kipindi / Muda</th>
+                        <th className="p-3 border-b border-slate-200">Darasa &amp; Mkondo (Stream)</th>
                         <th className="p-3 border-b border-slate-200">Somo (Subject)</th>
-                        <th className="p-3 border-b border-slate-200">Darasa &amp; Stream</th>
                         <th className="p-3 border-b border-slate-200 text-center">Hali / Mgongano</th>
                         <th className="p-3 border-b border-slate-200 text-center">Vitendo</th>
                       </tr>
@@ -302,73 +501,308 @@ export const TeacherEntryForm: React.FC<TeacherEntryFormProps> = ({
                       {dayPeriods.map((per, index) => {
                         const periodName = per.name;
                         const periodFull = `${per.name} (${per.start}-${per.end})`;
+                        const activeTeacherId = selectedTeacher?.id ?? selectedTeacherId;
+                        const normDay = day.trim().toLowerCase();
 
                         // Find existing assignment for this teacher at this day & period
                         const existing = (assignments || []).find(a => {
-                          if (!a || a.teacherId !== selectedTeacherId || a.day !== day) return false;
-                          const pNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
-                          return pNorm === periodName;
+                          if (!a || Number(a.teacherId) !== Number(activeTeacherId)) return false;
+                          if ((a.day || '').trim().toLowerCase() !== normDay) return false;
+                          return isSamePeriod(a.period, a.periodName, periodName);
                         });
 
-                        const currentSubject = existing?.subject || '';
-                        const currentStreamStr = existing ? `${existing.className} - ${existing.stream}` : '';
+                        // Comprehensive Lock Check for this period row
+                        const slotLock = isPeriodLocked(day, periodName, periodSettings, assignments, {
+                          teacherId: activeTeacherId,
+                          allowedStreams
+                        });
+                        const isRowLocked = Boolean(
+                          slotLock.isLocked ||
+                          per.isBreak ||
+                          (!isAcademicReligiousSubject(existing?.subject) && (
+                            existing?.isLocked ||
+                            (existing?.activityType && existing.activityType !== 'academic' && existing.activityType !== 'religion')
+                          ))
+                        );
+                        const isGlobalOrSpecialLocked = Boolean(
+                          slotLock.isGlobalLock ||
+                          per.isBreak
+                        );
+
+                        const currentSubject = existing?.subject || (!isRowLocked && existing?.className && allowedSubjects.length === 1 ? allowedSubjects[0] : '');
+
+                        // Match currentStreamStr to the exact option string in allowedStreams if possible
+                        const matchedAllowedStream = existing && existing.className
+                          ? allowedStreams.find(st => {
+                              const parsed = parseClassAndStream(st);
+                              return isSameClass(parsed.className, existing.className) && isSameStream(parsed.stream, existing.stream);
+                            })
+                          : '';
+                        const currentStreamStr = matchedAllowedStream || (existing && existing.className ? `${existing.className} - ${existing.stream}` : '');
 
                         // Conflict check: is another teacher teaching this class+stream at this day+period?
-                        const conflict = existing && (assignments || []).find(a => {
-                          if (!a || a.teacherId === selectedTeacherId || a.day !== day) return false;
-                          const pNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
-                          const matchClass = a.className === existing.className && a.stream === existing.stream;
-                          return pNorm === periodName && matchClass;
+                        const conflict = existing && existing.className && (assignments || []).find(a => {
+                          if (!a || Number(a.teacherId) === Number(activeTeacherId)) return false;
+                          if ((a.day || '').trim().toLowerCase() !== normDay) return false;
+                          if (!isSamePeriod(a.period, a.periodName, periodName)) return false;
+                          if (a.isParallelElective && existing.isParallelElective) return false;
+                          return isSameClass(a.className, existing.className) && isSameStream(a.stream, existing.stream);
                         });
 
-                        const conflictTeacherName = conflict ? teachers.find(t => t.id === conflict.teacherId)?.name : null;
+                        const conflictTeacherName = conflict ? teachers.find(t => Number(t.id) === Number(conflict.teacherId))?.name || 'Mwalimu Mwingine' : null;
+
+                        // Check if this entry has a conflict or is incomplete (e.g., stream chosen without subject)
+                        const hasEntry = Boolean(existing && (existing.className || existing.subject));
+                        const isIncompleteEntry = !isRowLocked && hasEntry && (!currentStreamStr || !currentSubject);
+                        const hasConflictOrIssue = !isRowLocked && (Boolean(conflict) || isIncompleteEntry);
+                        const isValidEntry = !isRowLocked && !hasConflictOrIssue && Boolean(currentStreamStr && currentSubject);
 
                         return (
-                          <tr key={index} className="hover:bg-slate-50/80 transition">
-                            <td className="p-3 border-r border-slate-100 font-bold text-slate-800 whitespace-nowrap">
+                          <tr
+                            key={index}
+                            className={`transition ${
+                              isRowLocked
+                                ? 'bg-amber-100/75 hover:bg-amber-100/95 border-l-4 border-l-amber-500'
+                                : hasConflictOrIssue
+                                ? 'bg-rose-100/80 hover:bg-rose-100 border-l-4 border-l-rose-600'
+                                : isValidEntry
+                                ? 'bg-emerald-100/75 hover:bg-emerald-100/95 border-l-4 border-l-emerald-600'
+                                : 'hover:bg-slate-50/80'
+                            }`}
+                          >
+                            <td className={`p-3 border-r font-bold whitespace-nowrap ${
+                              isRowLocked
+                                ? 'border-amber-200 text-amber-950'
+                                : hasConflictOrIssue
+                                ? 'border-rose-200 text-rose-950'
+                                : isValidEntry
+                                ? 'border-emerald-200 text-emerald-950'
+                                : 'border-slate-100 text-slate-800'
+                            }`}>
                               <div className="flex items-center gap-1.5">
-                                <Clock className="w-3.5 h-3.5 text-blue-600" />
+                                {isRowLocked ? (
+                                  <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                                ) : hasConflictOrIssue ? (
+                                  <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                ) : isValidEntry ? (
+                                  <Check className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                                ) : (
+                                  <Clock className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                )}
                                 <span>{per.name}</span>
+                                {isRowLocked && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-200/90 text-amber-950 border border-amber-400 font-black uppercase">
+                                    Locked 🔒
+                                  </span>
+                                )}
+                                {hasConflictOrIssue && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-rose-200/90 text-rose-950 border border-rose-400 font-black uppercase">
+                                    {conflictTeacherName ? 'Mgongano ⚠️' : 'Chagua Somo ⚠️'}
+                                  </span>
+                                )}
+                                {isValidEntry && (
+                                  <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-200/90 text-emerald-950 border border-emerald-400 font-black uppercase">
+                                    Sahihi ✓
+                                  </span>
+                                )}
                               </div>
-                              <span className="text-[10px] text-slate-500 font-normal">{per.start} - {per.end}</span>
+                              <span className={`text-[10px] font-semibold ${
+                                isRowLocked
+                                  ? 'text-amber-800'
+                                  : hasConflictOrIssue
+                                  ? 'text-rose-800'
+                                  : isValidEntry
+                                  ? 'text-emerald-800'
+                                  : 'text-slate-500 font-normal'
+                              }`}>{per.start} - {per.end}</span>
                             </td>
 
-                            <td className="p-3 border-r border-slate-100">
-                              <select
-                                value={currentSubject}
-                                onChange={(e) => handleAssignmentChange(day, periodName, periodFull, 'subject', e.target.value)}
-                                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                              >
-                                <option value="">-- Chagua Somo --</option>
-                                {allowedSubjects.map((sub, sIdx) => (
-                                  <option key={sIdx} value={sub}>{sub}</option>
-                                ))}
-                              </select>
+                            <td className={`p-3 border-r relative ${
+                              isRowLocked
+                                ? 'border-amber-200'
+                                : hasConflictOrIssue
+                                ? 'border-rose-200'
+                                : isValidEntry
+                                ? 'border-emerald-200'
+                                : 'border-slate-100'
+                            }`}>
+                              {isGlobalOrSpecialLocked && !currentStreamStr ? (
+                                <div
+                                  className="w-full px-3 py-2 border border-amber-300 bg-amber-100/90 text-amber-950 rounded-xl text-xs font-bold flex items-center justify-between cursor-not-allowed shadow-2xs"
+                                  title="Kipindi hiki kimefungwa (Locked); huwezi kumpangia mwalimu kipindi cha masomo hapa"
+                                >
+                                  <span className="truncate flex items-center gap-1.5">
+                                    <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                                    <span>Kipindi Kimefungwa ({slotLock.reason || per.name})</span>
+                                  </span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 border border-amber-400 font-black uppercase">
+                                    Locked
+                                  </span>
+                                </div>
+                              ) : (
+                                <>
+                                  <select
+                                    value={currentStreamStr}
+                                    disabled={isRowLocked}
+                                    onChange={(e) => handleAssignmentChange(day, periodName, periodFull, 'streamString', e.target.value)}
+                                    className={`w-full px-3 py-2 border rounded-xl text-xs font-bold outline-none focus:ring-2 transition shadow-2xs ${
+                                      isRowLocked
+                                        ? 'bg-amber-100/90 text-amber-950 border-amber-300 cursor-not-allowed focus:ring-amber-500'
+                                        : hasConflictOrIssue
+                                        ? 'bg-rose-50/95 text-rose-950 border-rose-400 cursor-pointer focus:ring-rose-500'
+                                        : isValidEntry
+                                        ? 'bg-emerald-50/95 text-emerald-950 border-emerald-400 cursor-pointer focus:ring-emerald-500'
+                                        : 'bg-slate-50 text-slate-900 border-slate-300 cursor-pointer focus:ring-blue-500'
+                                    }`}
+                                  >
+                                    <option value="">
+                                      {isRowLocked ? '🔒 Kipindi Kimefungwa (Locked)' : '-- Chagua Darasa & Mkondo --'}
+                                    </option>
+                                    {allowedStreams.length > 0 ? (
+                                      allowedStreams.map((st, stIdx) => {
+                                        const parsedSt = parseClassAndStream(st);
+                                        const stLock = isPeriodLocked(day, periodName, periodSettings, assignments, {
+                                          className: parsedSt.className,
+                                          stream: parsedSt.stream
+                                        });
+                                        const isOtherLocked = stLock.isLocked && st !== currentStreamStr;
+                                        return (
+                                          <option key={stIdx} value={st} disabled={isOtherLocked}>
+                                            {st}{isOtherLocked ? ' — [LOCKED 🔒]' : ''}
+                                          </option>
+                                        );
+                                      })
+                                    ) : (
+                                      <option disabled>Panga madarasa kwanza</option>
+                                    )}
+                                    {currentStreamStr && !allowedStreams.includes(currentStreamStr) && (
+                                      <option value={currentStreamStr}>{currentStreamStr}</option>
+                                    )}
+                                  </select>
+                                  {isRowLocked && (
+                                    <div className="absolute right-8 top-1/2 -translate-y-1/2 pointer-events-none">
+                                      <Lock className="w-3.5 h-3.5 text-amber-700" />
+                                    </div>
+                                  )}
+                                </>
+                              )}
                             </td>
 
-                            <td className="p-3 border-r border-slate-100">
-                              <select
-                                value={currentStreamStr}
-                                onChange={(e) => handleAssignmentChange(day, periodName, periodFull, 'streamString', e.target.value)}
-                                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
-                              >
-                                <option value="">-- Chagua Darasa &amp; Stream --</option>
-                                {allowedStreams.map((st, stIdx) => (
-                                  <option key={stIdx} value={st}>{st}</option>
-                                ))}
-                              </select>
+                            <td className={`p-3 border-r relative ${
+                              isRowLocked
+                                ? 'border-amber-200'
+                                : hasConflictOrIssue
+                                ? 'border-rose-200'
+                                : isValidEntry
+                                ? 'border-emerald-200'
+                                : 'border-slate-100'
+                            }`}>
+                              {isRowLocked ? (
+                                <div
+                                  className="w-full px-3 py-2 border border-amber-300 bg-amber-100/90 text-amber-950 rounded-xl text-xs font-bold flex items-center justify-between cursor-not-allowed shadow-2xs"
+                                  title="Kipindi hiki kimefungwa (Locked); huwezi kumpangia mwalimu somo la kawaida"
+                                >
+                                  <span className="truncate flex items-center gap-1.5">
+                                    <Lock className="w-3.5 h-3.5 text-amber-700 shrink-0" />
+                                    <span>{existing?.subject || slotLock.reason || 'Kipindi Kimefungwa (Locked)'}</span>
+                                  </span>
+                                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 border border-amber-400 font-black uppercase">
+                                    Locked 🔒
+                                  </span>
+                                </div>
+                              ) : allowedSubjects.length === 1 ? (
+                                <div
+                                  className={`w-full px-3 py-2 border rounded-xl text-xs font-bold flex items-center justify-between shadow-2xs ${
+                                    hasConflictOrIssue
+                                      ? 'bg-rose-50/95 border-rose-400 text-rose-950'
+                                      : isValidEntry
+                                      ? 'bg-emerald-50/95 border-emerald-400 text-emerald-950'
+                                      : 'bg-slate-50 border-slate-200 text-slate-500'
+                                  }`}
+                                  title="Mwalimu ana somo moja; linajazwa otomatiki ukichagua mkondo"
+                                >
+                                  <span className="truncate flex items-center gap-1.5">
+                                    {hasConflictOrIssue ? (
+                                      <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                                    ) : isValidEntry ? (
+                                      <Check className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                                    ) : null}
+                                    <span>{currentSubject || allowedSubjects[0]}</span>
+                                  </span>
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded font-black border ${
+                                    hasConflictOrIssue
+                                      ? 'bg-rose-200 text-rose-950 border-rose-400'
+                                      : isValidEntry
+                                      ? 'bg-emerald-200 text-emerald-950 border-emerald-400'
+                                      : 'bg-blue-100 text-blue-700 border-blue-200'
+                                  }`}>
+                                    {hasConflictOrIssue ? 'Mgongano ⚠️' : isValidEntry ? 'Imeingizwa ✓' : 'Somo 1 (Auto)'}
+                                  </span>
+                                </div>
+                              ) : (
+                                <>
+                                  <select
+                                    value={currentSubject}
+                                    disabled={isRowLocked}
+                                    onChange={(e) => handleAssignmentChange(day, periodName, periodFull, 'subject', e.target.value)}
+                                    className={`w-full px-3 py-2 border rounded-xl text-xs font-bold outline-none focus:ring-2 cursor-pointer transition shadow-2xs ${
+                                      hasConflictOrIssue
+                                        ? 'bg-rose-50/95 text-rose-950 border-rose-400 focus:ring-rose-500'
+                                        : isValidEntry
+                                        ? 'bg-emerald-50/95 text-emerald-950 border-emerald-400 focus:ring-emerald-500'
+                                        : 'bg-slate-50 text-slate-900 border-slate-300 focus:ring-blue-500'
+                                    }`}
+                                  >
+                                    <option value="">-- Chagua Somo --</option>
+                                    {allowedSubjects.length > 0 ? (
+                                      allowedSubjects.map((sub, sIdx) => (
+                                        <option key={sIdx} value={sub}>{sub}</option>
+                                      ))
+                                    ) : (
+                                      <option disabled>Sajili masomo kwanza</option>
+                                    )}
+                                  </select>
+                                </>
+                              )}
                             </td>
 
-                            <td className="p-3 border-r border-slate-100 text-center">
-                              {conflictTeacherName ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] bg-rose-100 text-rose-700 px-2 py-1 rounded-lg font-black animate-pulse" title={`Darasa hili limechukuliwa na ${conflictTeacherName} kwa kipindi hiki`}>
-                                  <AlertTriangle className="w-3 h-3" />
+                            <td className={`p-3 border-r text-center ${
+                              isRowLocked
+                                ? 'border-amber-200'
+                                : hasConflictOrIssue
+                                ? 'border-rose-200'
+                                : isValidEntry
+                                ? 'border-emerald-200'
+                                : 'border-slate-100'
+                            }`}>
+                              {isRowLocked ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] bg-amber-200/90 text-amber-950 border border-amber-400 px-2.5 py-1 rounded-lg font-black shadow-2xs"
+                                  title={`Kipindi kimefungwa: ${slotLock.reason || per.name}`}
+                                >
+                                  <Lock className="w-3 h-3 text-amber-800" />
+                                  <span>Kimefungwa (Locked)</span>
+                                </span>
+                              ) : conflictTeacherName ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] bg-rose-200/95 text-rose-950 border border-rose-400 px-2.5 py-1 rounded-lg font-black shadow-2xs animate-pulse"
+                                  title={`Darasa hili limechukuliwa na ${conflictTeacherName} kwa kipindi hiki`}
+                                >
+                                  <AlertTriangle className="w-3 h-3 text-rose-700" />
                                   <span>Mgongano: {conflictTeacherName}</span>
                                 </span>
-                              ) : currentSubject && currentStreamStr ? (
-                                <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-100 text-emerald-800 px-2 py-1 rounded-lg font-bold">
-                                  <Check className="w-3 h-3" />
-                                  <span>Sahihi</span>
+                              ) : isIncompleteEntry ? (
+                                <span
+                                  className="inline-flex items-center gap-1 text-[10px] bg-rose-200/95 text-rose-950 border border-rose-400 px-2.5 py-1 rounded-lg font-black shadow-2xs"
+                                  title="Tafadhali chagua somo na darasa kukamilisha kipindi hiki"
+                                >
+                                  <AlertTriangle className="w-3 h-3 text-rose-700" />
+                                  <span>Chagua Somo!</span>
+                                </span>
+                              ) : isValidEntry ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-200/90 text-emerald-950 border border-emerald-400 px-2.5 py-1 rounded-lg font-black shadow-2xs">
+                                  <Check className="w-3 h-3 text-emerald-800" />
+                                  <span>Sahihi (Imeingizwa)</span>
                                 </span>
                               ) : (
                                 <span className="text-[10px] text-slate-400 font-medium">Wazi</span>
@@ -376,16 +810,25 @@ export const TeacherEntryForm: React.FC<TeacherEntryFormProps> = ({
                             </td>
 
                             <td className="p-3 text-center">
-                              {existing && (
+                              {isRowLocked ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] text-amber-800 font-black">
+                                  <Lock className="w-3 h-3" />
+                                  <span>Locked</span>
+                                </span>
+                              ) : existing ? (
                                 <button
                                   type="button"
                                   onClick={() => handleRemoveAssignment(day, periodName)}
-                                  className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-lg text-[10px] font-bold transition cursor-pointer"
+                                  className={`px-2.5 py-1 rounded-lg text-[10px] font-black transition cursor-pointer border shadow-2xs ${
+                                    hasConflictOrIssue
+                                      ? 'bg-rose-600 hover:bg-rose-700 text-white border-rose-700'
+                                      : 'bg-white hover:bg-rose-600 text-rose-700 hover:text-white border-rose-300'
+                                  }`}
                                   title="Futa kipindi hiki"
                                 >
                                   Futa
                                 </button>
-                              )}
+                              ) : null}
                             </td>
                           </tr>
                         );

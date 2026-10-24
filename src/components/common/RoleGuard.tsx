@@ -18,10 +18,15 @@ const ALLOWED_TEACHER_VIEWS = [
   'invigilation',
   'attendance',
   'attendance-scan',
+  'teacher-attendance',
+  'staff-payroll',
   'academiccalendar',
   'studentid',
   'dailytracker',
-  'discipline'
+  'discipline',
+  'sms',
+  'officialletters',
+  'sittingplan'
 ];
 
 const RESTRICTED_SUPER_ADMIN_VIEWS = ['network', 'github', 'backup', 'multischool'];

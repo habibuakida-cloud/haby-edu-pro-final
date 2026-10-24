@@ -138,10 +138,11 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
 
       const matchSearch = !qLower || sName.includes(qLower) || sReg.includes(qLower);
       const matchClass = selClassLower === 'all' || sClass === selClassLower;
-      const matchStream = selectedStream === 'all' ||
+      const selStreamUpper = (selectedStream || 'all').toUpperCase();
+      const matchStream = selStreamUpper === 'ALL' ||
         (s.stream ? (
-          s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === selectedStream.toUpperCase() ||
-          s.stream.toUpperCase().includes(selectedStream.toUpperCase())
+          (s.stream || '').toUpperCase().replace(/^STREAM\s+/i, '') === selStreamUpper.replace(/^STREAM\s+/i, '') ||
+          (s.stream || '').toUpperCase().includes(selStreamUpper)
         ) : true);
       return matchSearch && matchClass && matchStream;
     });
@@ -287,10 +288,11 @@ export const AttendanceView: React.FC<AttendanceViewProps> = ({
       if (!s) return false;
       const sClass = (s.className || '').toLowerCase();
       const matchClass = rcClassLower === 'all' || sClass === rcClassLower;
-      const matchStream = rollCallStream === 'all' ||
+      const rcStreamUpper = (rollCallStream || 'all').toUpperCase();
+      const matchStream = rcStreamUpper === 'ALL' ||
         (s.stream ? (
-          s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === rollCallStream.toUpperCase() ||
-          s.stream.toUpperCase().includes(rollCallStream.toUpperCase())
+          (s.stream || '').toUpperCase().replace(/^STREAM\s+/i, '') === rcStreamUpper.replace(/^STREAM\s+/i, '') ||
+          (s.stream || '').toUpperCase().includes(rcStreamUpper)
         ) : true);
       return matchClass && matchStream;
     });

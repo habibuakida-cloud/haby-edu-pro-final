@@ -18,11 +18,26 @@ export const createPool = () => {
       database: process.env.SQL_DB_NAME,
       max: 10,
       connectionTimeoutMillis: 15000,
+      idleTimeoutMillis: 20000,
+      keepAlive: true,
+      keepAliveInitialDelayMillis: 10000,
+      allowExitOnIdle: false,
     });
 
-    // Prevent unhandled pool-level errors from crashing the application
+    // Gracefully handle pool-level events and idle client recycles
     globalThis._postgresPool.on('error', (err: any) => {
-      console.error('Unexpected error on idle SQL pool client:', err);
+      const isExpectedIdleTermination =
+        err?.message?.includes('Connection terminated unexpectedly') ||
+        err?.code === 'ECONNRESET' ||
+        err?.code === 'EPIPE' ||
+        err?.code === '57P01';
+
+      if (isExpectedIdleTermination) {
+        // Idle connection recycling by Cloud SQL proxy is normal behavior; pg.Pool automatically replaces it on next query
+        console.info('Database pool notice: Idle connection recycled by PostgreSQL pool.');
+      } else {
+        console.warn('Database pool warning:', err?.message || err);
+      }
     });
   }
   return globalThis._postgresPool;

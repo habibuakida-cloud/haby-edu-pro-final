@@ -18,16 +18,21 @@ import { InvigilationContainer } from './components/InvigilationContainer';
 import { SettingsView } from './components/SettingsView';
 import { AttendanceView } from './components/AttendanceView';
 import { AttendanceScanView } from './components/Attendance/AttendanceScanView';
+import { TeacherAttendanceView } from './components/Attendance/TeacherAttendanceView';
+import { BiometricReportView } from './components/Attendance/BiometricReportView';
+import { StaffPayrollManagement } from './components/Payroll/StaffPayrollManagement';
 import { MarkEntryView } from './components/MarkEntryView';
 import { StudentIDView } from './components/StudentIDView';
 import { SubscriptionData, getSchoolSubscription, initializeTrial, isSubscriptionValid } from './utils/SubscriptionService';
 import { SubscriptionModal } from './components/common/SubscriptionModal';
 import { DisciplineView } from './components/DisciplineView';
+import { OfficialLettersView } from './components/OfficialLettersView';
 import { EnvironmentModule } from './components/Environment/EnvironmentModule';
 import { LaboratoryInventoryView } from './components/Laboratory/LaboratoryInventoryView';
 import { LessonPlanView } from './components/LessonPlan/LessonPlanView';
 import { SchemeOfWorkView } from './components/SchemeOfWork/SchemeOfWorkView';
 import { TeacherPortalView } from './components/Teachers/TeacherPortalView';
+import { InvigilationCalendarView } from './components/Invigilation/InvigilationCalendarView';
 import { FloatingBubbles } from './components/FloatingBubbles';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { ParentPortalView } from './components/ParentPortalView';
@@ -36,6 +41,7 @@ import { EvaluationAnalysisView } from './components/EvaluationAnalysisView';
 import { ReamPaperModule } from './components/Academic/ReamPaperModule';
 import { NectaRegistrationView } from './components/Academic/NectaRegistrationView';
 import { PastPaperCenter } from './components/Academic/PastPaperCenter';
+import { StudentProgressTrackerView } from './components/Academic/StudentProgressTrackerView';
 import { RemedialTimetableSetup } from './components/Remedial/RemedialTimetableSetup';
 import { RemedialDailyTracker } from './components/Remedial/RemedialDailyTracker';
 import { RemedialPaymentAnalyzer } from './components/Remedial/RemedialPaymentAnalyzer';
@@ -90,6 +96,14 @@ import { QuickAddStudentModal } from './components/Students/QuickAddStudentModal
 import { saveTimetableAssignments } from './lib/timetableService';
 import { SuperAdminDashboard } from './components/SuperAdmin/SuperAdminDashboard';
 import { Loader2, Shield, Menu, RotateCw, Check, Building2, ShieldCheck, UserPlus } from 'lucide-react';
+import {
+  loadAutoBackupConfig,
+  saveAutoBackupConfig,
+  triggerJsonDownloadBackup,
+  triggerSupabaseStorageSnapshot,
+  getLocalDateKey,
+  getLocalTimeHHMM,
+} from './utils/backupService';
 
 const mergeById = (arr1: any[], arr2: any[]) => {
   const map = new Map();
@@ -108,10 +122,6 @@ const mergeById = (arr1: any[], arr2: any[]) => {
 };
 
 export default function App() {
-  if (typeof window !== 'undefined' && window.location.pathname.startsWith('/parent')) {
-    return <ParentPortalView onBackToMain={() => { window.location.pathname = '/'; }} />;
-  }
-
   const { userAccount, loading: authLoading, logout } = useAuth();
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
   const [data, setData] = useState<AppData>(() => {
@@ -201,82 +211,121 @@ export default function App() {
   const [subscription, setSubscription] = useState<SubscriptionData | null>(null);
   const [checkingSub, setCheckingSub] = useState<boolean>(true);
   const debounceTimer = useRef<NodeJS.Timeout | undefined>(undefined);
+  const snapshotTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const localCacheTimerRef = useRef<NodeJS.Timeout | undefined>(undefined);
+  const hasLoadedRemoteRef = useRef<boolean>(false);
+  const hasUnsavedChangesRef = useRef<boolean>(false);
+  const lastLocalMutationRef = useRef<number>(0);
   const [supabaseStudentCount, setSupabaseStudentCount] = useState<number | null>(null);
 
-  // Helper function to persist school state snapshot to Supabase
-  const saveSchoolDataToSupabase = async (schId: string, snapData: any) => {
+  const syncLocalStorageKeys = useCallback((schId: string, stateObj: AppData) => {
+    if (!schId || !stateObj) return;
+    try {
+      const { usalRecords: _omitUsal, ...lightState } = stateObj as any;
+      // Strip oversized base64 photos from localStorage copy to prevent QuotaExceededError from blocking saves
+      if (Array.isArray(lightState.students)) {
+        lightState.students = lightState.students.map((s: any) => {
+          if (s && typeof s.passportPhoto === 'string' && s.passportPhoto.length > 5000) {
+            const { passportPhoto: _p, ...rest } = s;
+            return rest;
+          }
+          return s;
+        });
+      }
+      const serialized = JSON.stringify(lightState);
+      localStorage.setItem(`haby_school_data_${schId}`, serialized);
+    } catch (e) {}
+    try {
+      if (Array.isArray(stateObj.timetableAssignments)) {
+        localStorage.setItem(`haby_timetable_assignments_${schId}`, JSON.stringify(stateObj.timetableAssignments));
+      }
+      if (Array.isArray(stateObj.periodSettings)) {
+        localStorage.setItem(`haby_period_settings_${schId}`, JSON.stringify(stateObj.periodSettings));
+      }
+      if (Array.isArray(stateObj.streamSettings)) {
+        localStorage.setItem(`haby_stream_settings_${schId}`, JSON.stringify(stateObj.streamSettings));
+      }
+      if (Array.isArray(stateObj.teacherAssignments)) {
+        localStorage.setItem(`haby_teacher_assignments_${schId}`, JSON.stringify(stateObj.teacherAssignments));
+      }
+    } catch (e) {}
+  }, []);
+
+  // Helper function to persist school state snapshot to Cloud SQL & Firestore
+  const saveSchoolDataToSupabase = async (schId: string, snapData: any, isUnload = false) => {
     if (!schId || !snapData) return;
     try {
       const { usalRecords: _omitUsal, ...restSnap } = snapData;
+      const nowIso = new Date().toISOString();
       const payload = {
         ...restSnap,
+        _explicitDelete: true,
+        _fullSnapshot: true,
+        _isUnload: isUnload,
         id: schId,
         school_id: schId,
-        school_info: snapData.schoolInfo || {},
-        timetable_assignments: snapData.timetableAssignments || [],
+        schoolInfo: snapData.schoolInfo || {},
         timetableAssignments: snapData.timetableAssignments || [],
-        period_settings: snapData.periodSettings || [],
         periodSettings: snapData.periodSettings || [],
-        stream_settings: snapData.streamSettings || [],
         streamSettings: snapData.streamSettings || [],
-        institutional_policy: snapData.institutionalPolicy || {},
+        institutionalPolicy: snapData.institutionalPolicy || {},
         sessions: snapData.sessions || [],
         supervisors: snapData.supervisors || [],
-        selected_invigilators: snapData.selectedInvigilators || [],
-        invigilation_assignments: snapData.invigilationAssignments || {},
-        daily_attendance: snapData.dailyAttendance || {},
+        selectedInvigilators: snapData.selectedInvigilators || [],
+        invigilationAssignments: snapData.invigilationAssignments || {},
         dailyAttendance: snapData.dailyAttendance || {},
-        period_attendance: snapData.periodAttendance || [],
         periodAttendance: snapData.periodAttendance || [],
-        teaching_logs: snapData.teachingLogs || [],
         teachingLogs: snapData.teachingLogs || [],
-        journal_records: snapData.journalRecords || {},
+        journalRecords: snapData.journalRecords || {},
         schemesOfWork: snapData.schemesOfWork || [],
-        schemes_of_work: snapData.schemesOfWork || [],
         lessonPlans: snapData.lessonPlans || [],
-        lesson_plans: snapData.lessonPlans || [],
         teacherEvaluations: snapData.teacherEvaluations || [],
-        teacher_evaluations: snapData.teacherEvaluations || [],
         savedTimetableRecords: snapData.savedTimetableRecords || [],
-        saved_timetable_records: snapData.savedTimetableRecords || [],
         savedInvigilationRecords: snapData.savedInvigilationRecords || [],
-        saved_invigilation_records: snapData.savedInvigilationRecords || [],
         gradeCutoffs: snapData.gradeCutoffs || {},
-        grade_cutoffs: snapData.gradeCutoffs || {},
         ledgerSubjectKeys: snapData.ledgerSubjectKeys || {},
-        ledger_subject_keys: snapData.ledgerSubjectKeys || {},
         subjectPeriodAllocations: snapData.subjectPeriodAllocations || [],
-        subject_period_allocations: snapData.subjectPeriodAllocations || [],
         teacherAssignments: snapData.teacherAssignments || [],
-        teacher_assignments: snapData.teacherAssignments || [],
         subjectPaperConfigs: snapData.subjectPaperConfigs || {},
-        subject_paper_configs: snapData.subjectPaperConfigs || {},
         bubbleSettings: snapData.bubbleSettings || {},
-        bubble_settings: snapData.bubbleSettings || {},
         students: snapData.students || [],
         teachers: snapData.teachers || [],
         exams: snapData.exams || [],
         examinationRecords: snapData.examinationRecords || [],
-        examination_records: snapData.examinationRecords || [],
         disciplineRecords: snapData.disciplineRecords || [],
-        discipline_records: snapData.disciplineRecords || [],
+        dutyRosterData: snapData.dutyRosterData || {},
         parents: snapData.parents || [],
-        academic_term_dates: snapData.academicTermDates || {},
+        academicTermDates: snapData.academicTermDates || {},
         communicationTemplates: snapData.communicationTemplates || [],
-        communication_templates: snapData.communicationTemplates || [],
         calendarEvents: snapData.calendarEvents || [],
-        calendar_events: snapData.calendarEvents || [],
-        updated_at: new Date().toISOString()
+        teacherAttendance: snapData.teacherAttendance || {},
+        staffPayroll: snapData.staffPayroll || {},
+        updatedAtMs: Date.now(),
+        updated_at: nowIso
       };
-      
-      // Persist snapshot to Cloud SQL school_data table with automatic relational sync
+
+      // Persist snapshot to Cloud SQL school_data table and Firestore real-time document
       await saveSchoolData(schId, payload);
+      hasUnsavedChangesRef.current = false;
     } catch (err) {
       console.warn("Error saving school snapshot:", err);
     }
   };
 
-  // Sync with Supabase & Real-Time Single Source of Truth
+  // Flush any pending snapshot save ONLY if remote data has loaded AND user actually made local changes
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      if (!hasLoadedRemoteRef.current || !hasUnsavedChangesRef.current) return;
+      const schId = userAccount?.schoolId || getCurrentSchoolId() || DEFAULT_PRIMARY_SCHOOL_ID;
+      if (schId && dataRef.current) {
+        saveSchoolDataToSupabase(schId, dataRef.current, true);
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [userAccount?.schoolId]);
+
+  // Sync with Cloud SQL & Real-Time Single Source of Truth
   useEffect(() => {
     if (!userAccount?.schoolId || userAccount.schoolId === 'PENDING') {
       setDataLoading(false);
@@ -284,7 +333,6 @@ export default function App() {
     }
 
     const schoolId = userAccount.schoolId;
-    console.log("Current school_id:", schoolId);
     const schoolKey = `haby_school_data_${schoolId}`;
 
     // Check subscription
@@ -313,16 +361,18 @@ export default function App() {
         setData(prev => {
           const parsedStudents = Array.isArray(parsed.students) ? parsed.students : [];
           const parsedTeachers = Array.isArray(parsed.teachers) ? parsed.teachers : [];
-          return {
+          const nextBoot: AppData = {
             ...prev,
             ...parsed,
-            students: parsedStudents.length > (prev.students?.length || 0) ? parsedStudents : prev.students,
-            teachers: parsedTeachers.length > (prev.teachers?.length || 0) ? parsedTeachers : prev.teachers,
+            students: parsedStudents.length > 0 ? parsedStudents : prev.students,
+            teachers: parsedTeachers.length > 0 ? parsedTeachers : prev.teachers,
             timetableAssignments: localTimetable ? JSON.parse(localTimetable) : (parsed.timetableAssignments || prev.timetableAssignments || []),
             periodSettings: localPeriods ? JSON.parse(localPeriods) : (parsed.periodSettings || prev.periodSettings || []),
             streamSettings: localStreams ? JSON.parse(localStreams) : (parsed.streamSettings || prev.streamSettings || []),
             teacherAssignments: localTeacherAssignments ? JSON.parse(localTeacherAssignments) : (parsed.teacherAssignments || prev.teacherAssignments || [])
           };
+          dataRef.current = nextBoot;
+          return nextBoot;
         });
       }
     } catch (e) {
@@ -330,242 +380,186 @@ export default function App() {
     }
 
     getCachedData(schoolKey).then(cached => {
+      if (hasLoadedRemoteRef.current || Date.now() - lastLocalMutationRef.current < 10000) return;
       if (cached && typeof cached === 'object') {
         setData(prev => {
           const cachedStudents = Array.isArray(cached.students) ? cached.students : [];
           const cachedTeachers = Array.isArray(cached.teachers) ? cached.teachers : [];
-          return {
+          const nextCached: AppData = {
             ...prev,
             ...cached,
-            students: cachedStudents.length > (prev.students?.length || 0) ? cachedStudents : prev.students,
-            teachers: cachedTeachers.length > (prev.teachers?.length || 0) ? cachedTeachers : prev.teachers,
-            timetableAssignments: cached.timetableAssignments && cached.timetableAssignments.length > 0 ? cached.timetableAssignments : prev.timetableAssignments,
+            students: cachedStudents.length > 0 ? cachedStudents : prev.students,
+            teachers: cachedTeachers.length > 0 ? cachedTeachers : prev.teachers,
+            timetableAssignments: Array.isArray(cached.timetableAssignments) ? cached.timetableAssignments : prev.timetableAssignments,
             periodSettings: cached.periodSettings && cached.periodSettings.length > 0 ? cached.periodSettings : prev.periodSettings,
             streamSettings: cached.streamSettings && cached.streamSettings.length > 0 ? cached.streamSettings : prev.streamSettings,
-            teacherAssignments: cached.teacherAssignments && cached.teacherAssignments.length > 0 ? cached.teacherAssignments : prev.teacherAssignments
+            teacherAssignments: Array.isArray(cached.teacherAssignments) ? cached.teacherAssignments : prev.teacherAssignments
           };
+          dataRef.current = nextCached;
+          return nextCached;
         });
       }
     }).catch(e => console.warn("Initial IDB cache load error:", e));
 
-    // 0. Primary Database Load: Pure Supabase Sync (Relational + Snapshot Engine)
-    const loadFromDatabase = async (isInitialBoot = false) => {
-      console.log("Loading unified single source of truth for school:", schoolId);
+    // 0. Primary Database Load: Fast Unified Snapshot Load (with Relational Fallback only if needed)
+    const loadFromDatabase = async (_isInitialBoot = false) => {
       const safetyTimer = setTimeout(() => {
         setDataLoading(false);
-      }, 3000);
+      }, 2500);
 
       try {
-        // Fetch in parallel from DB core tables and school_data snapshot
-        const [supabaseDataSnapshot, studRes, teachRes, examRes] = await Promise.all([
-          getSchoolData(schoolId).catch(() => null),
-          (async () => {
-            try {
-              const data = await getStudents(schoolId);
-              return { data, error: null };
-            } catch (err: any) {
-              return { data: null, error: err };
-            }
-          })(),
-          (async () => {
-            try {
-              const data = await getTeachers(schoolId);
-              return { data, error: null };
-            } catch (err: any) {
-              return { data: null, error: err };
-            }
-          })(),
-          (async () => {
-            try {
-              const data = await getExams(schoolId);
-              return { data, error: null };
-            } catch (err: any) {
-              return { data: null, error: err };
-            }
-          })(),
-          (async () => {
-            try {
-              const data = await getPastPapers(schoolId);
-              return { data, error: null };
-            } catch (err: any) {
-              return { data: null, error: err };
-            }
-          })(),
+        // Fetch unified school_data snapshot first (fast ~20ms from Cloud SQL)
+        const supabaseDataSnapshot = await getSchoolData(schoolId).catch(() => null);
+        const rawSchoolData = (supabaseDataSnapshot || {}) as Record<string, any>;
+        const hasValidSnapshot = Boolean(rawSchoolData && (rawSchoolData.schoolId || rawSchoolData.school_id || rawSchoolData.id));
+
+        const hasSnapStudents = Array.isArray(rawSchoolData.students) && rawSchoolData.students.length > 0;
+        const hasSnapTeachers = Array.isArray(rawSchoolData.teachers) && rawSchoolData.teachers.length > 0;
+        const hasSnapExams = Array.isArray(rawSchoolData.exams);
+
+        // Only query relational tables if school_data snapshot doesn't already contain them
+        const [studRes, teachRes, examRes] = await Promise.all([
+          !hasSnapStudents ? getStudents(schoolId).then(data => ({ data })).catch(() => ({ data: null })) : Promise.resolve({ data: null }),
+          !hasSnapTeachers ? getTeachers(schoolId).then(data => ({ data })).catch(() => ({ data: null })) : Promise.resolve({ data: null }),
+          !hasSnapExams ? getExams(schoolId).then(data => ({ data })).catch(() => ({ data: null })) : Promise.resolve({ data: null }),
         ]);
 
-        // Process Supabase core tables
         const supaStudents = (studRes?.data || []).map((s: any, idx: number) => fromSupabaseStudent(s, idx));
         const supaTeachers = (teachRes?.data || []).map((t: any, idx: number) => fromSupabaseTeacher(t, idx));
         const supaExams = (examRes?.data || []).map((e: any, idx: number) => fromSupabaseExam(e, idx));
-        const supaClasses = [];
-        const supaPeriods = [];
 
-        // Fetch users from Supabase users table
-        try {
-          const userMap = new Map<string, any>();
-
-          try {
-            const supaUsers = await getUsers(schoolId);
-            if (supaUsers) {
-              supaUsers.forEach((u: any) => userMap.set(u.id, u));
-            }
-          } catch (e1) {}
-
-          if (userMap.size > 0) {
-            setUsers(Array.from(userMap.values()) as UserAccount[]);
+        // Fetch users asynchronously without blocking main data render
+        getUsers(schoolId).then(supaUsers => {
+          if (Array.isArray(supaUsers) && supaUsers.length > 0) {
+            setUsers(supaUsers as UserAccount[]);
           }
-        } catch (uErr) {
-          console.warn("Could not load users from DB:", uErr);
+        }).catch(() => {});
+
+        // Ignore stale load if user just performed a local edit/deletion while request was in flight
+        if (Date.now() - lastLocalMutationRef.current < 4000) {
+          return;
         }
 
-        const rawSchoolData = (supabaseDataSnapshot || {}) as Record<string, any>;
         const remoteData = { ...rawSchoolData } as Partial<AppData>;
-        
+        hasLoadedRemoteRef.current = true;
+
         setData(prev => {
-          // Resolve students: prioritize rich school_data snapshot when it has >= relational rows, then relational rows
-          const snapStudents = Array.isArray(rawSchoolData.students)
-            ? rawSchoolData.students
-            : Array.isArray(remoteData.students)
-            ? remoteData.students
-            : [];
+          const snapStudents = Array.isArray(rawSchoolData.students) ? rawSchoolData.students : [];
           let resolvedStudents = prev.students;
-          if (snapStudents.length >= supaStudents.length && snapStudents.length > 0) {
+          if (snapStudents.length > 0) {
             resolvedStudents = snapStudents;
           } else if (supaStudents.length > 0) {
             resolvedStudents = supaStudents;
-          } else if (prev.students && prev.students.length > 0) {
-            resolvedStudents = prev.students;
           }
 
-          const snapTeachers = Array.isArray(rawSchoolData.teachers)
-            ? rawSchoolData.teachers
-            : Array.isArray(remoteData.teachers)
-            ? remoteData.teachers
-            : [];
+          const snapTeachers = Array.isArray(rawSchoolData.teachers) ? rawSchoolData.teachers : [];
           let resolvedTeachers = prev.teachers;
-          if (snapTeachers.length >= supaTeachers.length && snapTeachers.length > 0) {
+          if (snapTeachers.length > 0) {
             resolvedTeachers = snapTeachers;
           } else if (supaTeachers.length > 0) {
             resolvedTeachers = supaTeachers;
-          } else if (prev.teachers && prev.teachers.length > 0) {
-            resolvedTeachers = prev.teachers;
           }
 
           let resolvedExams = prev.exams;
-          if (supaExams.length > 0) {
-            resolvedExams = supaExams;
-          } else if (Array.isArray(rawSchoolData.exams) && rawSchoolData.exams.length > 0) {
+          if (Array.isArray(rawSchoolData.exams) && (rawSchoolData.exams.length > 0 || hasValidSnapshot)) {
             resolvedExams = rawSchoolData.exams;
-          } else if (Array.isArray(remoteData.exams) && remoteData.exams.length > 0) {
-            resolvedExams = remoteData.exams;
-          } else if (prev.exams && prev.exams.length > 0) {
-            resolvedExams = prev.exams;
+          } else if (supaExams.length > 0) {
+            resolvedExams = supaExams;
           }
 
-          const resolvedSchoolInfo = 
+          const resolvedSchoolInfo =
             (rawSchoolData.schoolInfo && Object.keys(rawSchoolData.schoolInfo).length > 0)
               ? rawSchoolData.schoolInfo
               : (rawSchoolData.school_info && Object.keys(rawSchoolData.school_info).length > 0)
                 ? rawSchoolData.school_info
                 : prev.schoolInfo;
 
-          // Build or merge streamSettings from Supabase classes if available
-          let resolvedStreamSettings = remoteData.streamSettings || prev.streamSettings || [];
-          if (supaClasses.length > 0) {
-            const existingClassNames = new Set(resolvedStreamSettings.map((s: any) => s.className));
-            const newStreamEntries = supaClasses
-              .filter((c: any) => !existingClassNames.has(c.name))
-              .map((c: any) => ({
-                id: Date.now() + Math.floor(Math.random() * 1000),
-                className: c.name,
-                level: c.level || 'CSEE',
-                streams: c.stream ? [c.stream] : ['STREAM A', 'STREAM B']
-              }));
-            if (newStreamEntries.length > 0) {
-              resolvedStreamSettings = [...resolvedStreamSettings, ...newStreamEntries];
-            }
-          }
+          const resolvedStreamSettings =
+            Array.isArray(rawSchoolData.streamSettings) && (rawSchoolData.streamSettings.length > 0 || hasValidSnapshot)
+              ? rawSchoolData.streamSettings
+              : Array.isArray(rawSchoolData.stream_settings) && (rawSchoolData.stream_settings.length > 0 || hasValidSnapshot)
+                ? rawSchoolData.stream_settings
+                : (prev.streamSettings || []);
 
-          // Use Supabase periods if present and periodSettings is empty
-          const resolvedPeriods = (supaPeriods.length > 0 && (!remoteData.periodSettings || remoteData.periodSettings.length === 0))
-            ? supaPeriods
-            : (rawSchoolData.periodSettings || rawSchoolData.period_settings || prev.periodSettings || []);
+          const resolvedPeriods =
+            Array.isArray(rawSchoolData.periodSettings) && (rawSchoolData.periodSettings.length > 0 || hasValidSnapshot)
+              ? rawSchoolData.periodSettings
+              : Array.isArray(rawSchoolData.period_settings) && (rawSchoolData.period_settings.length > 0 || hasValidSnapshot)
+                ? rawSchoolData.period_settings
+                : (prev.periodSettings || []);
 
-          // Safe resolution for Timetable & Invigilation (handles both camelCase and snake_case from Supabase)
-          const resolvedTimetableAssignments = 
-            (rawSchoolData.timetableAssignments && Array.isArray(rawSchoolData.timetableAssignments) && rawSchoolData.timetableAssignments.length > 0)
+          const resolvedTimetableAssignments =
+            Array.isArray(rawSchoolData.timetableAssignments) && (rawSchoolData.timetableAssignments.length > 0 || hasValidSnapshot)
               ? rawSchoolData.timetableAssignments
-              : (rawSchoolData.timetable_assignments && Array.isArray(rawSchoolData.timetable_assignments) && rawSchoolData.timetable_assignments.length > 0)
+              : Array.isArray(rawSchoolData.timetable_assignments) && (rawSchoolData.timetable_assignments.length > 0 || hasValidSnapshot)
                 ? rawSchoolData.timetable_assignments
-                : (prev.timetableAssignments && prev.timetableAssignments.length > 0)
-                  ? prev.timetableAssignments
-                  : [];
+                : (prev.timetableAssignments || []);
 
-          const resolvedSessions = 
-            (rawSchoolData.sessions && Array.isArray(rawSchoolData.sessions) && rawSchoolData.sessions.length > 0)
+          const resolvedSessions =
+            Array.isArray(rawSchoolData.sessions) && (rawSchoolData.sessions.length > 0 || hasValidSnapshot)
               ? rawSchoolData.sessions
-              : (prev.sessions && prev.sessions.length > 0 ? prev.sessions : []);
+              : (prev.sessions || []);
 
-          const resolvedSupervisors = 
-            (rawSchoolData.supervisors && Array.isArray(rawSchoolData.supervisors) && rawSchoolData.supervisors.length > 0)
+          const resolvedSupervisors =
+            Array.isArray(rawSchoolData.supervisors) && (rawSchoolData.supervisors.length > 0 || hasValidSnapshot)
               ? rawSchoolData.supervisors
-              : (prev.supervisors && prev.supervisors.length > 0 ? prev.supervisors : []);
+              : (prev.supervisors || []);
 
-          const resolvedSelectedInvigilators = 
-            (rawSchoolData.selectedInvigilators && Array.isArray(rawSchoolData.selectedInvigilators) && rawSchoolData.selectedInvigilators.length > 0)
+          const resolvedSelectedInvigilators =
+            Array.isArray(rawSchoolData.selectedInvigilators) && (rawSchoolData.selectedInvigilators.length > 0 || hasValidSnapshot)
               ? rawSchoolData.selectedInvigilators
-              : (rawSchoolData.selected_invigilators && Array.isArray(rawSchoolData.selected_invigilators) && rawSchoolData.selected_invigilators.length > 0)
+              : Array.isArray(rawSchoolData.selected_invigilators) && (rawSchoolData.selected_invigilators.length > 0 || hasValidSnapshot)
                 ? rawSchoolData.selected_invigilators
                 : (prev.selectedInvigilators || []);
 
-          const resolvedInvigilationAssignments = 
-            (rawSchoolData.invigilationAssignments && typeof rawSchoolData.invigilationAssignments === 'object' && Object.keys(rawSchoolData.invigilationAssignments).length > 0)
+          const resolvedInvigilationAssignments =
+            rawSchoolData.invigilationAssignments && typeof rawSchoolData.invigilationAssignments === 'object'
               ? rawSchoolData.invigilationAssignments
-              : (rawSchoolData.invigilation_assignments && typeof rawSchoolData.invigilation_assignments === 'object' && Object.keys(rawSchoolData.invigilation_assignments).length > 0)
+              : rawSchoolData.invigilation_assignments && typeof rawSchoolData.invigilation_assignments === 'object'
                 ? rawSchoolData.invigilation_assignments
                 : (prev.invigilationAssignments || {});
 
-          const resolvedSavedTimetableRecords = 
-            (rawSchoolData.savedTimetableRecords && Array.isArray(rawSchoolData.savedTimetableRecords) && rawSchoolData.savedTimetableRecords.length > 0)
+          const resolvedSavedTimetableRecords =
+            Array.isArray(rawSchoolData.savedTimetableRecords)
               ? rawSchoolData.savedTimetableRecords
-              : (rawSchoolData.saved_timetable_records && Array.isArray(rawSchoolData.saved_timetable_records) && rawSchoolData.saved_timetable_records.length > 0)
+              : Array.isArray(rawSchoolData.saved_timetable_records)
                 ? rawSchoolData.saved_timetable_records
                 : (prev.savedTimetableRecords || []);
 
-          const resolvedSavedInvigilationRecords = 
-            (rawSchoolData.savedInvigilationRecords && Array.isArray(rawSchoolData.savedInvigilationRecords) && rawSchoolData.savedInvigilationRecords.length > 0)
+          const resolvedSavedInvigilationRecords =
+            Array.isArray(rawSchoolData.savedInvigilationRecords)
               ? rawSchoolData.savedInvigilationRecords
-              : (rawSchoolData.saved_invigilation_records && Array.isArray(rawSchoolData.saved_invigilation_records) && rawSchoolData.saved_invigilation_records.length > 0)
+              : Array.isArray(rawSchoolData.saved_invigilation_records)
                 ? rawSchoolData.saved_invigilation_records
                 : (prev.savedInvigilationRecords || []);
 
-          const resolvedSubjectPeriodAllocations = 
-            (rawSchoolData.subjectPeriodAllocations && Array.isArray(rawSchoolData.subjectPeriodAllocations) && rawSchoolData.subjectPeriodAllocations.length > 0)
+          const resolvedSubjectPeriodAllocations =
+            Array.isArray(rawSchoolData.subjectPeriodAllocations) && (rawSchoolData.subjectPeriodAllocations.length > 0 || hasValidSnapshot)
               ? rawSchoolData.subjectPeriodAllocations
-              : (rawSchoolData.subject_period_allocations && Array.isArray(rawSchoolData.subject_period_allocations) && rawSchoolData.subject_period_allocations.length > 0)
+              : Array.isArray(rawSchoolData.subject_period_allocations) && (rawSchoolData.subject_period_allocations.length > 0 || hasValidSnapshot)
                 ? rawSchoolData.subject_period_allocations
                 : (prev.subjectPeriodAllocations || []);
 
-          const resolvedTeacherAssignments = 
-            (rawSchoolData.teacherAssignments && Array.isArray(rawSchoolData.teacherAssignments) && rawSchoolData.teacherAssignments.length > 0)
+          const resolvedTeacherAssignments =
+            Array.isArray(rawSchoolData.teacherAssignments) && (rawSchoolData.teacherAssignments.length > 0 || hasValidSnapshot)
               ? rawSchoolData.teacherAssignments
-              : (rawSchoolData.teacher_assignments && Array.isArray(rawSchoolData.teacher_assignments) && rawSchoolData.teacher_assignments.length > 0)
+              : Array.isArray(rawSchoolData.teacher_assignments) && (rawSchoolData.teacher_assignments.length > 0 || hasValidSnapshot)
                 ? rawSchoolData.teacher_assignments
                 : (prev.teacherAssignments || []);
 
-          const resolvedInstitutionalPolicy = 
+          const resolvedInstitutionalPolicy =
             rawSchoolData.institutionalPolicy || rawSchoolData.institutional_policy || prev.institutionalPolicy || {};
 
-          const resolvedJournalRecords = 
+          const resolvedJournalRecords =
             rawSchoolData.journalRecords || rawSchoolData.journal_records || prev.journalRecords || {};
 
-          const resolvedDailyAttendance = 
+          const resolvedDailyAttendance =
             rawSchoolData.dailyAttendance || rawSchoolData.daily_attendance || prev.dailyAttendance || {};
 
           const resolvedDisciplineRecords =
-            (Array.isArray(rawSchoolData.disciplineRecords) && rawSchoolData.disciplineRecords.length > 0)
+            Array.isArray(rawSchoolData.disciplineRecords) && (rawSchoolData.disciplineRecords.length > 0 || hasValidSnapshot)
               ? rawSchoolData.disciplineRecords
-              : (Array.isArray(rawSchoolData.discipline_records) && rawSchoolData.discipline_records.length > 0)
+              : Array.isArray(rawSchoolData.discipline_records) && (rawSchoolData.discipline_records.length > 0 || hasValidSnapshot)
                 ? rawSchoolData.discipline_records
                 : (prev.disciplineRecords || []);
 
@@ -575,6 +569,27 @@ export default function App() {
               : (rawSchoolData.duty_roster_data && typeof rawSchoolData.duty_roster_data === 'object' && Object.keys(rawSchoolData.duty_roster_data).length > 0)
                 ? rawSchoolData.duty_roster_data
                 : prev.dutyRosterData;
+
+          const resolvedSchemesOfWork =
+            Array.isArray(rawSchoolData.schemesOfWork)
+              ? rawSchoolData.schemesOfWork
+              : Array.isArray(rawSchoolData.schemes_of_work)
+                ? rawSchoolData.schemes_of_work
+                : (prev.schemesOfWork || []);
+
+          const resolvedLessonPlans =
+            Array.isArray(rawSchoolData.lessonPlans)
+              ? rawSchoolData.lessonPlans
+              : Array.isArray(rawSchoolData.lesson_plans)
+                ? rawSchoolData.lesson_plans
+                : (prev.lessonPlans || []);
+
+          const resolvedTeacherEvaluations =
+            Array.isArray(rawSchoolData.teacherEvaluations)
+              ? rawSchoolData.teacherEvaluations
+              : Array.isArray(rawSchoolData.teacher_evaluations)
+                ? rawSchoolData.teacher_evaluations
+                : (prev.teacherEvaluations || []);
 
           const updatedState: AppData = {
             ...prev,
@@ -599,20 +614,24 @@ export default function App() {
             dailyAttendance: resolvedDailyAttendance,
             disciplineRecords: resolvedDisciplineRecords,
             dutyRosterData: resolvedDutyRosterData,
+            schemesOfWork: resolvedSchemesOfWork,
+            lessonPlans: resolvedLessonPlans,
+            teacherEvaluations: resolvedTeacherEvaluations,
             parents: remoteData.parents || prev.parents,
-            examinationRecords: remoteData.examinationRecords || prev.examinationRecords,
+            examinationRecords: Array.isArray(rawSchoolData.examinationRecords)
+              ? rawSchoolData.examinationRecords
+              : Array.isArray(rawSchoolData.examination_records)
+              ? rawSchoolData.examination_records
+              : prev.examinationRecords,
           };
 
-          try {
-            localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(updatedState));
-            localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(updatedState));
-          } catch (e) {}
-
-          setCachedData(schoolKey, updatedState).catch(e => console.warn("IDB cache error:", e));
-          return {
-            ...prev,
-            ...updatedState
-          };
+          dataRef.current = updatedState;
+          if (localCacheTimerRef.current) clearTimeout(localCacheTimerRef.current);
+          localCacheTimerRef.current = setTimeout(() => {
+            syncLocalStorageKeys(schoolId, updatedState);
+            setCachedData(schoolKey, updatedState).catch(() => {});
+          }, 100);
+          return updatedState;
         });
 
         setIsCloudSynced(true);
@@ -625,145 +644,120 @@ export default function App() {
     };
 
     // Initial load
-    console.log("App init loadFromDatabase...");
     loadFromDatabase(true);
 
-    // Ensure relational tables are synchronized with school_data snapshot in Cloud SQL only when needed
-    // Removed automatic sync-all on every refresh to prevent duplication issues
+    // Real-time subscription to school_data in Firestore so Computer & Phone stay 100% in sync live
+    // without resurrecting deleted students, teachers, periods, or exams
+    const unsubSchoolData = subscribeSchoolData(schoolId, (firestoreSnap) => {
+      if (!firestoreSnap || typeof firestoreSnap !== 'object') return;
+      // Ignore echo of our own recent save or older snapshots
+      if (Date.now() - lastLocalMutationRef.current < 4500) return;
+      if (typeof firestoreSnap.updatedAtMs === 'number' && firestoreSnap.updatedAtMs <= lastLocalMutationRef.current) return;
+      hasLoadedRemoteRef.current = true;
 
-    // Real-time Firestore sync with the specific database instance
-    testFirestoreConnection();
-    const unsubStudents = subscribeToStudents(schoolId, (firestoreStudents) => {
-      if (!firestoreStudents || firestoreStudents.length === 0) return;
-      console.log(`[Firestore Live Sync] Received ${firestoreStudents.length} students from database`);
-      
       setData(prev => {
-        const existingList = Array.isArray(prev.students) ? prev.students : [];
-        const byDocId = new Map<string, Student>();
-        const byNumId = new Map<number, Student>();
-        const byName = new Map<string, Student>();
-        existingList.forEach(s => {
-          if ((s as any).firestoreDocId) byDocId.set(String((s as any).firestoreDocId), s);
-          if (typeof s.id === 'number') byNumId.set(s.id, s);
-          if (s.name) byName.set(`${s.name.trim().toLowerCase()}_${(s.className || '').trim().toLowerCase()}`, s);
-        });
+        // Guard against accidental 3-student demo seed while allowing intentional single/bulk deletions
+        let nextStudents = prev.students;
+        if (Array.isArray(firestoreSnap.students)) {
+          const isDemoWipe = prev.students.length > 15 && firestoreSnap.students.length <= 15 && firestoreSnap.students.length > 0;
+          if (!isDemoWipe && firestoreSnap.students.length > 0) {
+            nextStudents = firestoreSnap.students;
+          }
+        }
 
-        const updatedIds = new Set<number>();
-        const mappedFromFs: Student[] = firestoreStudents.map((fs, idx) => {
-          const fsAny = fs as any;
-          const tailNum = Number(String(fs.id).split('_').pop());
-          const safeNumId = typeof fsAny.numericId === 'number' ? fsAny.numericId : (!isNaN(tailNum) && tailNum > 0 ? tailNum : 2001 + idx);
-          const existing =
-            byDocId.get(String(fs.id)) ||
-            byNumId.get(safeNumId) ||
-            byName.get(`${(fs.name || '').trim().toLowerCase()}_${(fs.className || '').trim().toLowerCase()}`);
+        let nextTeachers = prev.teachers;
+        if (Array.isArray(firestoreSnap.teachers)) {
+          const isDemoTeacherWipe = prev.teachers.length > 10 && firestoreSnap.teachers.length <= 5 && firestoreSnap.teachers.length > 0;
+          if (!isDemoTeacherWipe && firestoreSnap.teachers.length > 0) {
+            nextTeachers = firestoreSnap.teachers;
+          }
+        }
 
-          const finalId = existing?.id ?? safeNumId;
-          updatedIds.add(finalId);
+        const nextTimetable = Array.isArray(firestoreSnap.timetableAssignments)
+          ? firestoreSnap.timetableAssignments
+          : prev.timetableAssignments;
+        const nextPeriods = Array.isArray(firestoreSnap.periodSettings) && firestoreSnap.periodSettings.length > 0
+          ? firestoreSnap.periodSettings
+          : prev.periodSettings;
+        const nextStreams = Array.isArray(firestoreSnap.streamSettings) && firestoreSnap.streamSettings.length > 0
+          ? firestoreSnap.streamSettings
+          : prev.streamSettings;
+        const nextAllocations = Array.isArray(firestoreSnap.subjectPeriodAllocations)
+          ? firestoreSnap.subjectPeriodAllocations
+          : prev.subjectPeriodAllocations;
+        const nextTeacherAssigns = Array.isArray(firestoreSnap.teacherAssignments)
+          ? firestoreSnap.teacherAssignments
+          : prev.teacherAssignments;
+        const nextSavedTimetables = Array.isArray(firestoreSnap.savedTimetableRecords)
+          ? firestoreSnap.savedTimetableRecords
+          : prev.savedTimetableRecords;
+        const nextSavedInvigilation = Array.isArray(firestoreSnap.savedInvigilationRecords)
+          ? firestoreSnap.savedInvigilationRecords
+          : prev.savedInvigilationRecords;
+        const nextExams = Array.isArray(firestoreSnap.exams)
+          ? firestoreSnap.exams
+          : prev.exams;
+        const nextExamRecords = Array.isArray(firestoreSnap.examinationRecords)
+          ? firestoreSnap.examinationRecords
+          : prev.examinationRecords;
+        const nextSchoolInfo = firestoreSnap.schoolInfo && Object.keys(firestoreSnap.schoolInfo).length > 0
+          ? firestoreSnap.schoolInfo
+          : prev.schoolInfo;
 
-          return {
-            ...(existing || {}),
-            id: finalId,
-            firestoreDocId: fs.id,
-            name: fs.name || existing?.name || 'Student',
-            className: fs.className || existing?.className || 'Form 1',
-            gender: (fs.gender as any) || existing?.gender || 'Male',
-            parentPhone: fs.parentPhone || existing?.parentPhone || '',
-            phone: fs.parentPhone || fsAny.phone || existing?.phone || '',
-            feeStatus: (fs.feeStatus as any) || (existing as any)?.feeStatus || 'PAID',
-            school_id: fs.schoolId || schoolId,
-            stream: fs.stream || existing?.stream || 'STREAM A',
-            dob: fs.dob || existing?.dob || '2010-01-01',
-            subjects: Array.isArray(fsAny.subjects) && fsAny.subjects.length > 0
-              ? fsAny.subjects
-              : (existing?.subjects || ['Basic Mathematics', 'English Language', 'Kiswahili', 'Biology', 'Chemistry', 'Physics', 'Geography', 'History', 'Civics']),
-            regNo: fsAny.regNo || existing?.regNo || `S.0123/${String(idx + 1).padStart(4, '0')}/2026`,
-            marks: fsAny.marks || existing?.marks || {},
-            total: fsAny.total ?? existing?.total,
-            average: fsAny.average ?? existing?.average,
-            grade: fsAny.grade || existing?.grade,
-            division: fsAny.division || existing?.division,
-            points: fsAny.points ?? existing?.points,
-            remark: fsAny.remark || existing?.remark,
-            position: fsAny.position ?? existing?.position
-          };
-        });
+        const nextState: AppData = {
+          ...prev,
+          schoolInfo: nextSchoolInfo,
+          students: nextStudents,
+          teachers: nextTeachers,
+          timetableAssignments: nextTimetable,
+          periodSettings: nextPeriods,
+          streamSettings: nextStreams,
+          subjectPeriodAllocations: nextAllocations,
+          teacherAssignments: nextTeacherAssigns,
+          savedTimetableRecords: nextSavedTimetables,
+          savedInvigilationRecords: nextSavedInvigilation,
+          exams: nextExams,
+          examinationRecords: nextExamRecords,
+          institutionalPolicy: firestoreSnap.institutionalPolicy || prev.institutionalPolicy,
+          journalRecords: firestoreSnap.journalRecords || prev.journalRecords,
+          dailyAttendance: firestoreSnap.dailyAttendance || prev.dailyAttendance,
+          sessions: Array.isArray(firestoreSnap.sessions) ? firestoreSnap.sessions : prev.sessions,
+          supervisors: Array.isArray(firestoreSnap.supervisors) ? firestoreSnap.supervisors : prev.supervisors,
+          selectedInvigilators: Array.isArray(firestoreSnap.selectedInvigilators) ? firestoreSnap.selectedInvigilators : prev.selectedInvigilators,
+          invigilationAssignments: firestoreSnap.invigilationAssignments || prev.invigilationAssignments,
+          schemesOfWork: Array.isArray(firestoreSnap.schemesOfWork) ? firestoreSnap.schemesOfWork : prev.schemesOfWork,
+          lessonPlans: Array.isArray(firestoreSnap.lessonPlans) ? firestoreSnap.lessonPlans : prev.lessonPlans,
+          teacherEvaluations: Array.isArray(firestoreSnap.teacherEvaluations) ? firestoreSnap.teacherEvaluations : prev.teacherEvaluations,
+          disciplineRecords: Array.isArray(firestoreSnap.disciplineRecords) ? firestoreSnap.disciplineRecords : prev.disciplineRecords,
+          dutyRosterData: firestoreSnap.dutyRosterData || prev.dutyRosterData,
+        };
 
-        // Retain existing students not yet present in Firestore so partial Firestore state never drops SQL roster
-        const remaining = existingList.filter(s => !updatedIds.has(s.id));
-        const merged = [...mappedFromFs, ...remaining];
-
-        const nextState = { ...prev, students: merged };
-        try {
-          localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextState));
-          localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextState));
-        } catch (e) {}
+        dataRef.current = nextState;
+        if (localCacheTimerRef.current) clearTimeout(localCacheTimerRef.current);
+        localCacheTimerRef.current = setTimeout(() => {
+          syncLocalStorageKeys(schoolId, nextState);
+          setCachedData(schoolKey, nextState).catch(() => {});
+        }, 120);
         return nextState;
       });
+      setIsCloudSynced(true);
     });
 
-    const unsubTeachers = subscribeToTeachers(schoolId, (firestoreTeachers) => {
-      if (!firestoreTeachers || firestoreTeachers.length === 0) return;
-      console.log(`[Firestore Live Sync] Received ${firestoreTeachers.length} teachers from database`);
-      
-      setData(prev => {
-        const existingList = Array.isArray(prev.teachers) ? prev.teachers : [];
-        const byDocId = new Map<string, Teacher>();
-        const byNumId = new Map<number, Teacher>();
-        const byName = new Map<string, Teacher>();
-        existingList.forEach(t => {
-          if ((t as any).firestoreDocId) byDocId.set(String((t as any).firestoreDocId), t);
-          if (typeof t.id === 'number') byNumId.set(t.id, t);
-          if (t.name) byName.set(t.name.trim().toLowerCase(), t);
-        });
-
-        const updatedIds = new Set<number>();
-        const mappedFromFs: Teacher[] = firestoreTeachers.map((ft, idx) => {
-          const ftAny = ft as any;
-          const tailNum = Number(String(ft.id).split('_').pop());
-          const safeNumId = typeof ftAny.numericId === 'number' ? ftAny.numericId : (!isNaN(tailNum) && tailNum > 0 ? tailNum : 1001 + idx);
-          const existing =
-            byDocId.get(String(ft.id)) ||
-            byNumId.get(safeNumId) ||
-            byName.get((ft.name || '').trim().toLowerCase());
-
-          const finalId = existing?.id ?? safeNumId;
-          updatedIds.add(finalId);
-
-          return {
-            ...(existing || {}),
-            id: finalId,
-            firestoreDocId: ft.id,
-            name: ft.name || existing?.name || 'Teacher',
-            gender: ftAny.gender || existing?.gender || 'Male',
-            schoolRole: ftAny.schoolRole || existing?.schoolRole || 'Subject Teacher',
-            phone: ft.phone || existing?.phone || '',
-            email: ft.email || existing?.email || '',
-            subjects: Array.isArray(ftAny.subjects) && ftAny.subjects.length > 0
-              ? ftAny.subjects
-              : (ft.subject ? [ft.subject] : (existing?.subjects || ['Basic Mathematics'])),
-            initial: (ft.name ? computeTeacherInitial(ft.name) : '') || ftAny.initial || existing?.initial || 'TR',
-            excludeInvigilation: ftAny.excludeInvigilation ?? existing?.excludeInvigilation ?? false
-          };
-        });
-
-        const remaining = existingList.filter(t => !updatedIds.has(t.id));
-        const merged = [...mappedFromFs, ...remaining];
-
-        const nextState = { ...prev, teachers: merged };
-        try {
-          localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, JSON.stringify(nextState));
-          localStorage.setItem(`haby_school_data_${schoolId}`, JSON.stringify(nextState));
-        } catch (e) {}
-        return nextState;
-      });
-    });
+    // Re-sync when user switches back to tab / unlocks phone
+    const handleVisibilityOrFocus = () => {
+      if (document.visibilityState === 'visible' && Date.now() - lastLocalMutationRef.current > 8000 && !hasUnsavedChangesRef.current) {
+        loadFromDatabase(false);
+      }
+    };
+    window.addEventListener('focus', handleVisibilityOrFocus);
+    document.addEventListener('visibilitychange', handleVisibilityOrFocus);
 
     return () => {
-      unsubStudents();
-      unsubTeachers();
+      unsubSchoolData();
+      window.removeEventListener('focus', handleVisibilityOrFocus);
+      document.removeEventListener('visibilitychange', handleVisibilityOrFocus);
     };
-  }, [userAccount]);
+  }, [userAccount, syncLocalStorageKeys]);
 
   const handleForceRefreshSync = async () => {
     if (!userAccount?.schoolId) return;
@@ -771,27 +765,28 @@ export default function App() {
 
     const schoolId = userAccount.schoolId;
     try {
-      console.log(`Syncing school data for school: ${schoolId}`);
       const schoolDataSnap = await getSchoolData(schoolId).catch(() => null);
       const remoteData = (schoolDataSnap || {}) as Partial<AppData>;
-      setData(prev => ({
-        ...prev,
-        ...remoteData
-      }));
-      setSyncToast(`Cloud Sync Active: Successfully synchronized data from Firestore.`);
+      setData(prev => {
+        const next = { ...prev, ...remoteData };
+        dataRef.current = next;
+        return next;
+      });
+      setSyncToast(`Cloud Sync Active: Successfully synchronized data from Database.`);
       setTimeout(() => setSyncToast(null), 5000);
-
       setIsCloudSynced(true);
-      alert(`Orodha imesawazishwa na Firestore kikamilifu! Shule imesasishwa kutoka wingu.`);
     } catch (err: any) {
       console.error("Force sync error:", err);
-      alert("Hitilafu wakati wa kusawazisha na Wingu: " + (err.message || err));
+      setSyncToast("Hitilafu wakati wa kusawazisha na Database: " + (err.message || err));
+      setTimeout(() => setSyncToast(null), 5000);
     } finally {
       setIsSyncing(false);
     }
   };
 
   const updateRemoteData = useCallback(async (updates: Partial<AppData>) => {
+    lastLocalMutationRef.current = Date.now();
+    hasUnsavedChangesRef.current = true;
     setSaveStatus('saving');
     const schoolId = userAccount?.schoolId || getCurrentSchoolId() || DEFAULT_PRIMARY_SCHOOL_ID;
     const schoolKey = `haby_school_data_${schoolId}`;
@@ -801,120 +796,55 @@ export default function App() {
       ...updates
     };
     dataRef.current = nextData;
+    // Update React UI immediately (< 1ms) without blocking main thread
     setData(nextData);
 
-    // Persist lightweight snapshot to localStorage and full data to IndexedDB
-    try {
-      const { usalRecords: _omitUsal, ...lightSnapshot } = nextData as any;
-      const serialized = JSON.stringify(lightSnapshot);
-      localStorage.setItem(`haby_school_data_snapshot_${schoolId}`, serialized);
-      localStorage.setItem(`haby_school_data_${schoolId}`, serialized);
-      if (nextData.timetableAssignments) {
-        localStorage.setItem(`haby_timetable_assignments_${schoolId}`, JSON.stringify(nextData.timetableAssignments));
-      }
-      if (nextData.periodSettings) {
-        localStorage.setItem(`haby_period_settings_${schoolId}`, JSON.stringify(nextData.periodSettings));
-      }
-      if (nextData.streamSettings) {
-        localStorage.setItem(`haby_stream_settings_${schoolId}`, JSON.stringify(nextData.streamSettings));
-      }
-      if (nextData.teacherAssignments) {
-        localStorage.setItem(`haby_teacher_assignments_${schoolId}`, JSON.stringify(nextData.teacherAssignments));
-      }
-    } catch (e) {}
-    setCachedData(schoolKey, nextData).catch(e => console.warn("Could not save to IndexedDB:", e));
+    // 1. Defer heavy JSON.stringify / IndexedDB write off the synchronous click thread (80ms)
+    if (localCacheTimerRef.current) clearTimeout(localCacheTimerRef.current);
+    localCacheTimerRef.current = setTimeout(() => {
+      syncLocalStorageKeys(schoolId, dataRef.current);
+      setCachedData(schoolKey, dataRef.current).catch(() => {});
+    }, 80);
 
-    // If periodSettings or streamSettings are directly modified, push snapshot immediately
-    if (updates.periodSettings !== undefined || updates.streamSettings !== undefined || updates.timetableAssignments !== undefined) {
-      saveSchoolDataToSupabase(schoolId, nextData).catch(e => console.warn("Direct snapshot sync error:", e));
-    }
-
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    debounceTimer.current = setTimeout(async () => {
-      
-      // 1. Relational Table Updates (Targeted mutations) with Offline Support
-      if (updates.students && Array.isArray(updates.students)) {
-        // Guard: Never overwrite cloud data with 0 if it had data before
-        if (updates.students.length > 0) {
-          const chunk = updates.students.map(s => toSupabaseStudent(s, schoolId));
-          await upsertRecord('students', chunk, 'id');
-        }
-      }
-
-      if (updates.teachers && Array.isArray(updates.teachers)) {
-        if (updates.teachers.length > 0) {
-          const chunk = updates.teachers.map(t => toSupabaseTeacher(t, schoolId));
-          await upsertRecord('teachers', chunk, 'id');
-        }
-      }
-
-      if (updates.exams && Array.isArray(updates.exams)) {
-        const chunk = updates.exams.map(e => toSupabaseExam(e, schoolId));
-        await upsertRecord('exams', chunk, 'id');
-      }
-
-      if (updates.streamSettings && Array.isArray(updates.streamSettings)) {
-        for (const s of updates.streamSettings) {
-          if (s.className?.trim()) {
-            try {
-              await supabase.from('classes').upsert({
-                name: s.className.trim(),
-                level: s.level || 'CSEE',
-                capacity: 45
-              }, { onConflict: 'name' });
-            } catch (e) {
-              console.warn("Class upsert notice:", e);
-            }
-          }
-        }
-      }
-
-        if (updates.periodSettings && Array.isArray(updates.periodSettings)) {
-          for (const p of updates.periodSettings) {
-            if (p.name && p.start && p.end) {
-              try {
-                await supabase.from('periods').upsert({
-                  name: p.name,
-                  start_time: p.start,
-                  end_time: p.end,
-                  is_break: Boolean(p.isBreak)
-                }, { onConflict: 'name' });
-              } catch (e) {}
-            }
-          }
-        }
-
-        if (updates.examinationRecords && Array.isArray(updates.examinationRecords)) {
-          const chunk = updates.examinationRecords.map(r => ({ ...r, school_id: schoolId }));
-          await upsertRecord('exam_records', chunk, 'id');
-        }
-
-        if (updates.activityLogs && Array.isArray(updates.activityLogs)) {
-          const chunk = updates.activityLogs.map(l => toSupabaseActivityLog(l, schoolId));
-          await insertRecord('activity_logs', chunk);
-        }
-
-        if (updates.disciplineRecords && Array.isArray(updates.disciplineRecords)) {
-          const chunk = updates.disciplineRecords.map(d => toSupabaseDiscipline(d, schoolId));
-          await upsertRecord('discipline_records', chunk, 'id');
-        }
-
-        if (updates.parents && Array.isArray(updates.parents)) {
-          const chunk = updates.parents.map(p => toSupabaseParent(p, schoolId));
-          await upsertRecord('parents', chunk, 'id');
-        }
-
-        if (updates.timetableAssignments && Array.isArray(updates.timetableAssignments)) {
-          saveTimetableAssignments(schoolId, updates.timetableAssignments, { replace: true }).catch(e => console.warn("Timetable sync error:", e));
-        }
-
-        // 2. Snapshot Update (Metadata & Settings - Reduced payload)
-        saveSchoolDataToSupabase(schoolId, nextData).catch(e => console.warn("Supabase school_data sync error:", e));
-        
+    // 2. Coalesced Cloud SQL + Firestore Snapshot Sync (150ms)
+    // Note: POST /api/db/school-data also schedules background relational table sync + row pruning automatically
+    if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = setTimeout(async () => {
+      try {
+        await saveSchoolDataToSupabase(schoolId, dataRef.current);
         setSaveStatus('saved');
         setIsCloudSynced(true);
-      }, 500);
-  }, [userAccount]);
+      } catch (e) {
+        console.warn("Direct snapshot sync error:", e);
+      }
+    }, 150);
+
+    // 3. Lightweight targeted background sync for timetable / logs if modified
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    debounceTimer.current = setTimeout(async () => {
+      const tasks: Promise<any>[] = [];
+
+      if (updates.activityLogs && Array.isArray(updates.activityLogs) && updates.activityLogs.length > 0) {
+        const chunk = updates.activityLogs.slice(0, 10).map(l => toSupabaseActivityLog(l, schoolId));
+        tasks.push(insertRecord('activity_logs', chunk).catch(() => {}));
+      }
+
+      if (updates.timetableAssignments && Array.isArray(updates.timetableAssignments)) {
+        tasks.push(
+          saveTimetableAssignments(schoolId, updates.timetableAssignments, {
+            replace: true,
+            periodSettings: nextData.periodSettings
+          }).catch(() => {})
+        );
+      }
+
+      if (tasks.length > 0) {
+        await Promise.allSettled(tasks);
+      }
+      setSaveStatus('saved');
+      setIsCloudSynced(true);
+    }, 400);
+  }, [userAccount, syncLocalStorageKeys]);
 
   // Auto-ensure USAL records exist in memory for all registered exams without blocking initial load
   useEffect(() => {
@@ -930,8 +860,9 @@ export default function App() {
     }
   }, [data.exams, data.students?.length, data.teachers?.length]);
 
-  // Auto-upgrade school name for Super Admin to 'HabyEduPro3A'
+  // Auto-upgrade school name for Super Admin to 'HabyEduPro3A' ONLY after remote data has finished loading
   useEffect(() => {
+    if (!hasLoadedRemoteRef.current) return;
     if (userAccount?.email === 'habibuakida@gmail.com' || userAccount?.isSuperAdmin) {
       if (data.schoolInfo && (
         data.schoolInfo.name === 'KIOMONI SECONDARY SCHOOL' ||
@@ -948,7 +879,7 @@ export default function App() {
         updateRemoteData({ schoolInfo: updatedSchoolInfo });
       }
     }
-  }, [userAccount, data.schoolInfo?.name]);
+  }, [userAccount, data.schoolInfo?.name, updateRemoteData]);
 
   // Release calculated results to Examination Records
   const handleReleaseResultsToExaminationRecords = useCallback(async (
@@ -1011,6 +942,81 @@ export default function App() {
     const currentLogs = data.activityLogs || [];
     return [newEntry, ...currentLogs].slice(0, 300);
   }, [userAccount, data.activityLogs]);
+
+  // Automated Daily Backup Background Scheduler (Checks every 15 seconds)
+  const autoBackupRunningRef = useRef<boolean>(false);
+  useEffect(() => {
+    const schoolId = userAccount?.schoolId || getCurrentSchoolId() || DEFAULT_PRIMARY_SCHOOL_ID;
+    if (!schoolId || schoolId === 'PENDING') return;
+
+    const checkAndRunDailyBackup = async () => {
+      if (autoBackupRunningRef.current) return;
+      try {
+        const cfg = await loadAutoBackupConfig(schoolId);
+        if (!cfg.enabled) return;
+
+        const now = new Date();
+        const todayKey = getLocalDateKey(now);
+        const currentHHMM = getLocalTimeHHMM(now);
+        const targetHHMM = (cfg.scheduledTime || '17:00').slice(0, 5);
+
+        if (currentHHMM < targetHHMM) return;
+
+        const needsJson =
+          (cfg.backupMode === 'json_download' || cfg.backupMode === 'both') &&
+          cfg.lastJsonDownloadDate !== todayKey;
+        const needsSupabase =
+          (cfg.backupMode === 'supabase_snapshot' || cfg.backupMode === 'both') &&
+          cfg.lastSupabaseSnapshotDate !== todayKey;
+
+        if (!needsJson && !needsSupabase) return;
+
+        autoBackupRunningRef.current = true;
+        const executedParts: string[] = [];
+        const configUpdates: Record<string, any> = {
+          lastBackupDate: todayKey,
+          lastBackupTimestamp: now.toISOString(),
+          lastBackupStatus: 'success',
+        };
+
+        if (needsJson) {
+          const jsonRes = triggerJsonDownloadBackup(schoolId, dataRef.current, 'scheduled');
+          configUpdates.lastJsonDownloadDate = todayKey;
+          executedParts.push(`JSON (${jsonRes.filename})`);
+        }
+
+        if (needsSupabase) {
+          const snapRes = await triggerSupabaseStorageSnapshot(schoolId, dataRef.current, 'scheduled');
+          configUpdates.lastSupabaseSnapshotDate = todayKey;
+          executedParts.push(`Supabase Snapshot (${snapRes.filename})`);
+        }
+
+        configUpdates.lastBackupMessage = `Auto Daily Backup (${executedParts.join(' & ')})`;
+        await saveAutoBackupConfig(schoolId, configUpdates);
+
+        window.dispatchEvent(new CustomEvent('haby-auto-backup-completed', { detail: configUpdates }));
+        setSyncToast(`Hifadhi ya Kila Siku (Auto Daily Backup) imekamilika: ${executedParts.join(' + ')}`);
+        setTimeout(() => setSyncToast(null), 6000);
+      } catch (err) {
+        console.warn('[AutoDailyBackup] Check warning:', err);
+      } finally {
+        autoBackupRunningRef.current = false;
+      }
+    };
+
+    const initialTimer = setTimeout(checkAndRunDailyBackup, 4000);
+    const interval = setInterval(checkAndRunDailyBackup, 15000);
+    const handleConfigChange = () => {
+      checkAndRunDailyBackup();
+    };
+    window.addEventListener('haby-auto-backup-config-updated', handleConfigChange);
+
+    return () => {
+      clearTimeout(initialTimer);
+      clearInterval(interval);
+      window.removeEventListener('haby-auto-backup-config-updated', handleConfigChange);
+    };
+  }, [userAccount?.schoolId]);
 
   // Public & QR Scan Verification Views (accessible with or without login)
   if (verifyStudentRegNo) {
@@ -1076,9 +1082,10 @@ export default function App() {
   }
 
   // Auth Guard
-  // Parent Portal Bypass for login
-  const isParentPortalHash = window.location.hash === '#parentportal' || window.location.pathname === '/parent/login';
-  const hasParentSession = !!sessionStorage.getItem('haby_parent_session');
+  // Parent Portal Bypass for login and direct /parent path
+  const isParentPath = typeof window !== 'undefined' && window.location.pathname.startsWith('/parent');
+  const isParentPortalHash = isParentPath || window.location.hash === '#parentportal' || window.location.pathname === '/parent/login';
+  const hasParentSession = typeof window !== 'undefined' && !!sessionStorage.getItem('haby_parent_session');
 
   if (isParentPortalHash || (hasParentSession && activeView === 'parentportal')) {
     return (
@@ -1088,8 +1095,14 @@ export default function App() {
           examinationRecords={data.examinationRecords}
           schoolInfo={data.schoolInfo}
           onBackToMain={() => {
-            window.location.hash = '';
-            window.location.reload();
+            if (typeof window !== 'undefined') {
+              if (window.location.pathname.startsWith('/parent')) {
+                window.location.pathname = '/';
+              } else {
+                window.location.hash = '';
+                window.location.reload();
+              }
+            }
           }}
         />
       </ConfirmDeleteProvider>
@@ -1101,7 +1114,7 @@ export default function App() {
       <div className="min-h-screen bg-[#0f2948] text-white flex flex-col items-center justify-center font-sans">
         <div className="w-12 h-12 border-4 border-white/20 border-t-sky-400 rounded-full animate-spin mb-4" />
         <h2 className="text-xl font-black tracking-wider">HABY EDU PRO</h2>
-        <p className="text-xs text-blue-200 mt-1">Inapakia mfumo wa shule...</p>
+        <p className="text-xs text-blue-200 mt-1">Loading school system...</p>
       </div>
     );
   }
@@ -1114,9 +1127,9 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#0f2948] flex items-center justify-center p-6 text-center">
         <div className="max-w-md bg-white p-8 rounded-2xl shadow-xl border border-slate-200">
-          <h1 className="text-xl font-bold mb-2 text-slate-900">Akaunti Inasubiri Uidhinishaji</h1>
-          <p className="text-slate-600 mb-4 text-sm">Akaunti yako ({userAccount.email}) inasubiri kuunganishwa na shule. Tafadhali wasiliana na msimamizi wa shule yako.</p>
-          <button onClick={() => window.location.reload()} className="px-5 py-2.5 bg-[#1f4d8b] text-white rounded-xl font-bold cursor-pointer">Angalia Hali Tena</button>
+          <h1 className="text-xl font-bold mb-2 text-slate-900">Account Pending Approval</h1>
+          <p className="text-slate-600 mb-4 text-sm">Your account ({userAccount.email}) is pending connection to a school. Please contact your school administrator.</p>
+          <button onClick={() => window.location.reload()} className="px-5 py-2.5 bg-[#1f4d8b] text-white rounded-xl font-bold cursor-pointer">Check Status Again</button>
         </div>
       </div>
     );
@@ -1127,7 +1140,7 @@ export default function App() {
     return (
       <div className="min-h-screen bg-[#0f2948] text-white flex flex-col items-center justify-center">
         <div className="w-12 h-12 border-4 border-white/20 border-t-sky-400 rounded-full animate-spin mb-4" />
-        <h2 className="text-lg font-bold">Inapakia Data za Shule...</h2>
+        <h2 className="text-lg font-bold">Loading School Data...</h2>
       </div>
     );
   }
@@ -1143,7 +1156,7 @@ export default function App() {
   };
 
   const handleAddStudent = async (student: Student) => {
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     const docId = student.firestoreDocId || (typeof student.id === 'string' && (student.id as string).startsWith('std_') ? (student.id as string) : `std_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
     const validId = typeof student.id === 'number' && !isNaN(student.id) ? student.id : (Number(docId.replace(/\D/g, '')) || Date.now());
 
@@ -1154,70 +1167,54 @@ export default function App() {
       school_id: schoolId
     } as any;
 
-    let matchedClassId: string | undefined = undefined;
-    try {
-      const { data: cls } = await supabase.from('classes').select('id').eq('name', studentWithId.className).maybeSingle();
-      if (cls?.id) matchedClassId = cls.id;
-    } catch (e) {}
-
-    try {
-      await saveStudentToFirestore({
-        id: docId,
-        numericId: validId,
-        regNo: studentWithId.regNo,
-        name: studentWithId.name,
-        className: studentWithId.className,
-        gender: studentWithId.gender || '',
-        parentPhone: studentWithId.parentPhone || studentWithId.phone || '',
-        phone: studentWithId.phone || studentWithId.parentPhone || '',
-        feeStatus: ((studentWithId as any).feeStatus === 'PAID' ? 'PAID' : 'UNPAID'),
-        schoolId: schoolId,
-        stream: studentWithId.stream || '',
-        dob: studentWithId.dob || '2010-01-01',
-        subjects: studentWithId.subjects || [],
-        marks: studentWithId.marks || {},
-        total: studentWithId.total,
-        average: studentWithId.average,
-        grade: studentWithId.grade,
-        division: studentWithId.division,
-        points: studentWithId.points,
-        remark: studentWithId.remark,
-        position: studentWithId.position
-      });
-    } catch (fsErr) {
-      console.warn("Firestore save student error:", fsErr);
-    }
-
-    try {
-      const dbRow = toSupabaseStudent(studentWithId, schoolId, matchedClassId);
-      await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
-    } catch (e) {
-      console.warn("Error upserting student in Supabase:", e);
-    }
     const activityLogs = logActivity(
       'STUDENT_ADDED',
       'students',
       'Student Enrolled',
       `Enrolled ${studentWithId.name} (${studentWithId.regNo || 'No Reg'}) in Form ${studentWithId.className}`
     );
-    updateRemoteData({ students: [...data.students, studentWithId], activityLogs });
+    const currentStudents = Array.isArray(dataRef.current.students) ? dataRef.current.students : [];
+    updateRemoteData({ students: [...currentStudents, studentWithId], activityLogs });
+
+    (async () => {
+      try {
+        const dbRow = toSupabaseStudent(studentWithId, schoolId);
+        await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
+      } catch (e) {
+        console.warn("Error upserting student in Supabase:", e);
+      }
+      try {
+        await saveStudentToFirestore({
+          id: docId,
+          numericId: validId,
+          regNo: studentWithId.regNo,
+          name: studentWithId.name,
+          className: studentWithId.className,
+          gender: studentWithId.gender || '',
+          parentPhone: studentWithId.parentPhone || studentWithId.phone || '',
+          phone: studentWithId.phone || studentWithId.parentPhone || '',
+          feeStatus: ((studentWithId as any).feeStatus === 'PAID' ? 'PAID' : 'UNPAID'),
+          schoolId: schoolId,
+          stream: studentWithId.stream || '',
+          dob: studentWithId.dob || '2010-01-01',
+          subjects: studentWithId.subjects || [],
+          marks: studentWithId.marks || {},
+          total: studentWithId.total,
+          average: studentWithId.average,
+          grade: studentWithId.grade,
+          division: studentWithId.division,
+          points: studentWithId.points,
+          remark: studentWithId.remark,
+          position: studentWithId.position
+        });
+      } catch (fsErr) {
+        console.warn("Firestore save student error:", fsErr);
+      }
+    })();
   };
 
   const handleBulkAddStudents = async (newStudents: Student[]) => {
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleBulkAddStudents):", schoolId);
-
-    // Fetch classes map to associate class_id foreign key
-    const classIdMap: Record<string, string> = {};
-    try {
-      const { data: classesData } = await supabase.from('classes').select('id, name');
-      if (classesData) {
-        classesData.forEach((c: any) => {
-          if (c.name) classIdMap[c.name.trim()] = c.id;
-        });
-      }
-    } catch (e) {}
-
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     const baseId = Date.now();
     const processedStudents = newStudents.map((s, idx) => {
       const numId = typeof s.id === 'number' && s.id > 0 ? s.id : (baseId + idx);
@@ -1230,57 +1227,57 @@ export default function App() {
       };
     });
 
-    try {
-      const rowsToPush = processedStudents.map(s => {
-        const cId = s.className ? classIdMap[s.className.trim()] : undefined;
-        return toSupabaseStudent(s, schoolId, cId);
-      });
-      const chunkSize = 100;
-      for (let i = 0; i < rowsToPush.length; i += chunkSize) {
-        const chunk = rowsToPush.slice(i, i + chunkSize);
-        await supabase.from('students').upsert(chunk, { onConflict: 'id' });
-      }
-      // Also sync to Firestore in background
-      Promise.all(
-        processedStudents.map(s =>
-          saveStudentToFirestore({
-            id: (s as any).firestoreDocId,
-            numericId: s.id,
-            regNo: s.regNo,
-            name: s.name,
-            className: s.className || 'Form 1',
-            gender: s.gender || 'Male',
-            parentPhone: s.parentPhone || s.phone || '',
-            phone: s.phone || s.parentPhone || '',
-            feeStatus: (s.feeStatus as any) || 'PAID',
-            schoolId,
-            stream: s.stream || 'STREAM A',
-            dob: s.dob || '2010-01-01',
-            subjects: s.subjects || [],
-            marks: s.marks || {},
-            total: s.total,
-            average: s.average,
-            grade: s.grade,
-            division: s.division,
-            points: s.points,
-            remark: s.remark,
-            position: s.position
-          })
-        )
-      ).catch(() => {});
-    } catch (e) {
-      console.warn("Error bulk upserting students in Supabase:", e);
-    }
     const activityLogs = logActivity(
       'STUDENTS_BULK_UPDATE',
       'students',
       'Students Bulk Enrolled',
       `Imported ${newStudents.length} students via CSV`
     );
+    const currentStudents = Array.isArray(dataRef.current.students) ? dataRef.current.students : [];
     updateRemoteData({
-      students: [...data.students, ...processedStudents],
+      students: [...currentStudents, ...processedStudents],
       activityLogs
     });
+
+    (async () => {
+      try {
+        const rowsToPush = processedStudents.map(s => toSupabaseStudent(s, schoolId));
+        const chunkSize = 100;
+        for (let i = 0; i < rowsToPush.length; i += chunkSize) {
+          const chunk = rowsToPush.slice(i, i + chunkSize);
+          await supabase.from('students').upsert(chunk, { onConflict: 'id' });
+        }
+        Promise.all(
+          processedStudents.map(s =>
+            saveStudentToFirestore({
+              id: (s as any).firestoreDocId,
+              numericId: s.id,
+              regNo: s.regNo,
+              name: s.name,
+              className: s.className || 'Form 1',
+              gender: s.gender || 'Male',
+              parentPhone: s.parentPhone || s.phone || '',
+              phone: s.phone || s.parentPhone || '',
+              feeStatus: (s.feeStatus as any) || 'PAID',
+              schoolId,
+              stream: s.stream || 'STREAM A',
+              dob: s.dob || '2010-01-01',
+              subjects: s.subjects || [],
+              marks: s.marks || {},
+              total: s.total,
+              average: s.average,
+              grade: s.grade,
+              division: s.division,
+              points: s.points,
+              remark: s.remark,
+              position: s.position
+            })
+          )
+        ).catch(() => {});
+      } catch (e) {
+        console.warn("Error bulk upserting students in Supabase:", e);
+      }
+    })();
   };
 
   const handleUpdateUsers = async (newUsers: UserAccount[]) => {
@@ -1300,88 +1297,83 @@ export default function App() {
   };
 
   const handleUpdateStudent = async (student: Student) => {
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleUpdateStudent):", schoolId);
-    
-    const fsDocId = (student as any).firestoreDocId || String(student.id);
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
+    const dbRow = toSupabaseStudent(student, schoolId);
+    const fsDocId = (student as any).firestoreDocId || dbRow.id || String(student.id);
 
-    // Update directly in Firestore
-    try {
-      await saveStudentToFirestore({
-        id: fsDocId,
-        numericId: student.id,
-        regNo: student.regNo,
-        name: student.name,
-        className: student.className,
-        gender: student.gender || '',
-        parentPhone: student.parentPhone || student.phone || '',
-        phone: student.phone || student.parentPhone || '',
-        feeStatus: ((student as any).feeStatus === 'PAID' ? 'PAID' : 'UNPAID'),
-        schoolId: schoolId,
-        stream: student.stream || '',
-        dob: student.dob || '2010-01-01',
-        subjects: student.subjects || [],
-        marks: student.marks || {},
-        total: student.total,
-        average: student.average,
-        grade: student.grade,
-        division: student.division,
-        points: student.points,
-        remark: student.remark,
-        position: student.position
-      });
-    } catch (fsErr) {
-      console.warn("Firestore update student error:", fsErr);
-    }
-
-    try {
-      const dbRow = toSupabaseStudent(student, schoolId);
-      await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
-    } catch (e) {
-      console.warn("Error updating student doc in Supabase:", e);
-    }
     const activityLogs = logActivity(
       'STUDENT_UPDATED',
       'students',
       'Student Record Edited',
       `Updated academic record/marks for ${student.name} (${student.regNo})`
     );
+    const currentStudents = Array.isArray(dataRef.current.students) ? dataRef.current.students : [];
     updateRemoteData({
-      students: data.students.map(s => (s.id === student.id || (s as any).firestoreDocId === fsDocId ? { ...s, ...student, firestoreDocId: fsDocId } : s)),
+      students: currentStudents.map(s =>
+        s.id === student.id || (s as any).firestoreDocId === fsDocId
+          ? {
+              ...s,
+              ...student,
+              passportPhoto: student.passportPhoto,
+              subjects: Array.isArray(student.subjects) ? student.subjects : [],
+              firestoreDocId: fsDocId
+            }
+          : s
+      ),
       activityLogs
     });
+
+    (async () => {
+      try {
+        await supabase.from('students').upsert(dbRow, { onConflict: 'id' });
+      } catch (e) {
+        console.warn("Error updating student doc in Supabase:", e);
+      }
+      try {
+        await saveStudentToFirestore({
+          id: fsDocId,
+          numericId: student.id,
+          regNo: student.regNo,
+          name: student.name,
+          className: student.className,
+          level: student.level || 'CSEE',
+          combination: student.combination || '',
+          gender: student.gender || '',
+          parentName: student.parentName || '',
+          parentPhone: student.parentPhone || student.phone || '',
+          phone: student.phone || student.parentPhone || '',
+          passportPhoto: student.passportPhoto || '',
+          feeStatus: ((student as any).feeStatus === 'PAID' ? 'PAID' : 'UNPAID'),
+          schoolId: schoolId,
+          stream: student.stream || '',
+          dob: student.dob || '2010-01-01',
+          subjects: student.subjects || [],
+          marks: student.marks || {},
+          total: student.total,
+          average: student.average,
+          grade: student.grade,
+          division: student.division,
+          points: student.points,
+          remark: student.remark,
+          position: student.position
+        } as any);
+      } catch (fsErr) {
+        console.warn("Firestore update student error:", fsErr);
+      }
+    })();
   };
 
   const handleDeleteStudent = async (id: number | string) => {
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleDeleteStudent):", schoolId);
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     const targetStrId = String(id);
-    const numericId = Number(id);
 
-    const target = data.students.find(s => String(s.id) === targetStrId || (s as any).firestoreDocId === targetStrId);
+    const currentStudents = Array.isArray(dataRef.current.students) ? dataRef.current.students : [];
+    const target = currentStudents.find(s => String(s.id) === targetStrId || (s as any).firestoreDocId === targetStrId);
     const fsDocId = (target as any)?.firestoreDocId || targetStrId;
 
-    const newStudents = data.students.filter(s => String(s.id) !== targetStrId && (s as any).firestoreDocId !== targetStrId && (s as any).firestoreDocId !== fsDocId);
-
-    // Delete directly from Firestore
-    try {
-      await deleteStudentFromFirestore(fsDocId);
-    } catch (fsErr) {
-      console.warn("Firestore delete student error:", fsErr);
-    }
-
-    try {
-      await deleteRecord('students', id);
-      if (!isNaN(numericId)) {
-        await deleteRecord('students', numericId);
-      }
-      await deleteRecord('students', targetStrId);
-      if (fsDocId !== targetStrId) {
-        await deleteRecord('students', fsDocId);
-      }
-    } catch (e) {
-      console.warn("Error deleting student doc in Supabase:", e);
-    }
+    const newStudents = currentStudents.filter(
+      s => String(s.id) !== targetStrId && (s as any).firestoreDocId !== targetStrId && (s as any).firestoreDocId !== fsDocId
+    );
 
     const activityLogs = logActivity(
       'STUDENT_DELETED',
@@ -1393,29 +1385,37 @@ export default function App() {
       students: newStudents,
       activityLogs
     });
+
+    (async () => {
+      try {
+        if (target) {
+          const dbRow = toSupabaseStudent(target, schoolId);
+          await deleteRecord('students', dbRow.id);
+        }
+        await deleteRecord('students', targetStrId);
+        if (fsDocId !== targetStrId) {
+          await deleteRecord('students', fsDocId);
+        }
+      } catch (e) {
+        console.warn("Error deleting student doc in Supabase:", e);
+      }
+      try {
+        await deleteStudentFromFirestore(fsDocId);
+      } catch (fsErr) {
+        console.warn("Firestore delete student error:", fsErr);
+      }
+    })();
   };
 
   const handleBulkDeleteStudents = async (ids: (number | string)[]) => {
     if (!ids || ids.length === 0) return;
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleBulkDeleteStudents):", schoolId);
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     const idStrings = ids.map(id => String(id));
     const idSet = new Set(idStrings);
 
-    // Delete from Firestore
-    ids.forEach(id => {
-      const target = data.students.find(s => String(s.id) === String(id) || (s as any).firestoreDocId === String(id));
-      const fsDocId = (target as any)?.firestoreDocId || String(id);
-      deleteStudentFromFirestore(fsDocId).catch(e => console.warn("Firestore bulk delete error:", e));
-    });
-
-    const newStudents = data.students.filter(s => !idSet.has(String(s.id)) && !idSet.has((s as any).firestoreDocId || ''));
-
-    try {
-      await supabase.from('students').delete().in('id', ids);
-    } catch (e) {
-      console.warn("Error bulk deleting students in Supabase:", e);
-    }
+    const currentStudents = Array.isArray(dataRef.current.students) ? dataRef.current.students : [];
+    const targetsToDelete = currentStudents.filter(s => idSet.has(String(s.id)) || idSet.has((s as any).firestoreDocId || ''));
+    const newStudents = currentStudents.filter(s => !idSet.has(String(s.id)) && !idSet.has((s as any).firestoreDocId || ''));
 
     const activityLogs = logActivity(
       'STUDENT_DELETED',
@@ -1427,12 +1427,25 @@ export default function App() {
       students: newStudents,
       activityLogs
     });
+
+    (async () => {
+      try {
+        const dbUuids = targetsToDelete.map(s => toSupabaseStudent(s, schoolId).id);
+        if (dbUuids.length > 0) {
+          await supabase.from('students').delete().in('id', dbUuids);
+        }
+      } catch (e) {
+        console.warn("Error bulk deleting students in Supabase:", e);
+      }
+      targetsToDelete.forEach(target => {
+        const fsDocId = (target as any)?.firestoreDocId || String(target.id);
+        deleteStudentFromFirestore(fsDocId).catch(() => {});
+      });
+    })();
   };
 
   const handleAddTeacher = async (teacher: Teacher) => {
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleAddTeacher):", schoolId);
-    
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     const docId = teacher.firestoreDocId || (typeof teacher.id === 'string' && (teacher.id as string).startsWith('tch_') ? (teacher.id as string) : `tch_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`);
     const validId = typeof teacher.id === 'number' && !isNaN(teacher.id) ? teacher.id : (Number(docId.replace(/\D/g, '')) || Date.now());
     const teacherWithId: Teacher = {
@@ -1441,73 +1454,55 @@ export default function App() {
       firestoreDocId: docId
     } as any;
 
-    try {
-      await saveTeacherToFirestore({
-        id: docId,
-        numericId: validId,
-        name: teacherWithId.name,
-        gender: teacherWithId.gender || 'Male',
-        schoolRole: teacherWithId.schoolRole || 'Subject Teacher',
-        phone: teacherWithId.phone || '',
-        email: teacherWithId.email || '',
-        subject: teacherWithId.subjects?.[0] || '',
-        subjects: teacherWithId.subjects || [],
-        initial: teacherWithId.initial || '',
-        excludeInvigilation: teacherWithId.excludeInvigilation ?? false,
-        schoolId: schoolId
-      });
-    } catch (fsErr) {
-      console.warn("Firestore save teacher error:", fsErr);
-    }
-
-    try {
-      const dbRow = toSupabaseTeacher(teacherWithId, schoolId);
-      await supabase.from('teachers').upsert(dbRow, { onConflict: 'id' });
-    } catch (e) {
-      console.warn("Error inserting teacher doc in Supabase:", e);
-    }
     const activityLogs = logActivity(
       'TEACHER_ADDED',
       'teachers',
       'Staff Member Added',
-      `Registered teacher ${teacher.name} (${teacher.subjects.join(', ')})`
+      `Registered teacher ${teacher.name} (${(teacher.subjects || []).join(', ')})`
     );
+    const currentTeachers = Array.isArray(dataRef.current.teachers) ? dataRef.current.teachers : [];
+    const currentSelInvig = Array.isArray(dataRef.current.selectedInvigilators) ? dataRef.current.selectedInvigilators : [];
     updateRemoteData({
-      teachers: [...data.teachers, teacherWithId],
-      selectedInvigilators: teacher.excludeInvigilation ? data.selectedInvigilators : [...data.selectedInvigilators, teacher.id],
+      teachers: [...currentTeachers, teacherWithId],
+      selectedInvigilators: teacher.excludeInvigilation ? currentSelInvig : [...currentSelInvig, teacherWithId.id],
       activityLogs
     });
+
+    (async () => {
+      try {
+        const dbRow = toSupabaseTeacher(teacherWithId, schoolId);
+        await supabase.from('teachers').upsert(dbRow, { onConflict: 'id' });
+      } catch (e) {
+        console.warn("Error inserting teacher doc in Supabase:", e);
+      }
+      try {
+        await saveTeacherToFirestore({
+          id: docId,
+          numericId: validId,
+          name: teacherWithId.name,
+          gender: teacherWithId.gender || 'Male',
+          schoolRole: teacherWithId.schoolRole || 'Subject Teacher',
+          phone: teacherWithId.phone || '',
+          email: teacherWithId.email || '',
+          subject: teacherWithId.subjects?.[0] || '',
+          subjects: teacherWithId.subjects || [],
+          teachingStreams: teacherWithId.teachingStreams || [],
+          passportPhoto: teacherWithId.passportPhoto || '',
+          color: teacherWithId.color || '#1d4ed8',
+          maxPeriodsPerWeek: teacherWithId.maxPeriodsPerWeek || 20,
+          initial: teacherWithId.initial || '',
+          excludeInvigilation: teacherWithId.excludeInvigilation ?? false,
+          schoolId: schoolId
+        } as any);
+      } catch (fsErr) {
+        console.warn("Firestore save teacher error:", fsErr);
+      }
+    })();
   };
 
   const handleBulkAddTeachers = async (newTeachers: Teacher[]) => {
     if (!newTeachers || newTeachers.length === 0) return;
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleBulkAddTeachers):", schoolId);
-    
-    for (const t of newTeachers) {
-      const docId = t.firestoreDocId || `tch_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-      saveTeacherToFirestore({
-        id: docId,
-        numericId: t.id,
-        name: t.name,
-        gender: t.gender || 'Male',
-        schoolRole: t.schoolRole || 'Subject Teacher',
-        phone: t.phone || '',
-        email: t.email || '',
-        subject: t.subjects?.[0] || '',
-        subjects: t.subjects || [],
-        initial: t.initial || '',
-        excludeInvigilation: t.excludeInvigilation ?? false,
-        schoolId: schoolId
-      }).catch(e => console.warn("Firestore bulk teacher save error:", e));
-    }
-
-    try {
-      const rows = newTeachers.map(t => toSupabaseTeacher(t, schoolId));
-      await supabase.from('teachers').upsert(rows, { onConflict: 'id' });
-    } catch (e) {
-      console.warn("Error inserting bulk teachers in Supabase:", e);
-    }
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     const activityLogs = logActivity(
       'TEACHER_BULK_ADDED',
       'teachers',
@@ -1515,86 +1510,129 @@ export default function App() {
       `Registered ${newTeachers.length} staff members in bulk`
     );
     const newInvigIds = newTeachers.filter(t => !t.excludeInvigilation).map(t => t.id);
+    const currentTeachers = Array.isArray(dataRef.current.teachers) ? dataRef.current.teachers : [];
+    const currentSelInvig = Array.isArray(dataRef.current.selectedInvigilators) ? dataRef.current.selectedInvigilators : [];
     updateRemoteData({
-      teachers: [...data.teachers, ...newTeachers],
-      selectedInvigilators: [...data.selectedInvigilators, ...newInvigIds],
+      teachers: [...currentTeachers, ...newTeachers],
+      selectedInvigilators: [...currentSelInvig, ...newInvigIds],
       activityLogs
     });
+
+    (async () => {
+      try {
+        const rows = newTeachers.map(t => toSupabaseTeacher(t, schoolId));
+        await supabase.from('teachers').upsert(rows, { onConflict: 'id' });
+      } catch (e) {
+        console.warn("Error inserting bulk teachers in Supabase:", e);
+      }
+      for (const t of newTeachers) {
+        const docId = t.firestoreDocId || `tch_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        saveTeacherToFirestore({
+          id: docId,
+          numericId: t.id,
+          name: t.name,
+          gender: t.gender || 'Male',
+          schoolRole: t.schoolRole || 'Subject Teacher',
+          phone: t.phone || '',
+          email: t.email || '',
+          subject: t.subjects?.[0] || '',
+          subjects: t.subjects || [],
+          teachingStreams: t.teachingStreams || [],
+          passportPhoto: t.passportPhoto || '',
+          color: t.color || '#1d4ed8',
+          maxPeriodsPerWeek: t.maxPeriodsPerWeek || 20,
+          initial: t.initial || '',
+          excludeInvigilation: t.excludeInvigilation ?? false,
+          schoolId: schoolId
+        } as any).catch(() => {});
+      }
+    })();
   };
 
   const handleUpdateTeacher = async (teacher: Teacher) => {
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleUpdateTeacher):", schoolId);
-    const fsDocId = (teacher as any).firestoreDocId || String(teacher.id);
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
+    const dbRow = toSupabaseTeacher(teacher, schoolId);
+    const fsDocId = (teacher as any).firestoreDocId || dbRow.id || String(teacher.id);
 
-    try {
-      await saveTeacherToFirestore({
-        id: fsDocId,
-        numericId: teacher.id,
-        name: teacher.name,
-        gender: teacher.gender || 'Male',
-        schoolRole: teacher.schoolRole || 'Subject Teacher',
-        phone: teacher.phone || '',
-        email: teacher.email || '',
-        subject: teacher.subjects?.[0] || '',
-        subjects: teacher.subjects || [],
-        initial: teacher.initial || '',
-        excludeInvigilation: teacher.excludeInvigilation ?? false,
-        schoolId: schoolId
-      });
-    } catch (fsErr) {
-      console.warn("Firestore update teacher error:", fsErr);
-    }
-
-    try {
-      const dbRow = toSupabaseTeacher(teacher, schoolId);
-      await supabase.from('teachers').upsert(dbRow, { onConflict: 'id' });
-    } catch (e) {
-      console.warn("Error updating teacher doc in Supabase:", e);
-    }
     const activityLogs = logActivity(
       'TEACHER_UPDATED',
       'teachers',
       'Staff Profile Modified',
       `Updated details for teacher ${teacher.name}`
     );
+    const currentTeachers = Array.isArray(dataRef.current.teachers) ? dataRef.current.teachers : [];
+    const currentTeacherAssignments = Array.isArray(dataRef.current.teacherAssignments) ? dataRef.current.teacherAssignments : [];
+    const updatedTeacherAssignments = currentTeacherAssignments.map(ta => {
+      if (ta && Number(ta.teacherId) === Number(teacher.id)) {
+        return {
+          ...ta,
+          teacherName: teacher.name
+        };
+      }
+      return ta;
+    });
+
     updateRemoteData({
-      teachers: data.teachers.map(t => (t.id === teacher.id || (t as any).firestoreDocId === fsDocId ? { ...t, ...teacher, firestoreDocId: fsDocId } : t)),
+      teachers: currentTeachers.map(t =>
+        t.id === teacher.id || (t as any).firestoreDocId === fsDocId
+          ? {
+              ...t,
+              ...teacher,
+              passportPhoto: teacher.passportPhoto,
+              subjects: Array.isArray(teacher.subjects) ? teacher.subjects : [],
+              teachingStreams: Array.isArray(teacher.teachingStreams) ? teacher.teachingStreams : [],
+              firestoreDocId: fsDocId
+            }
+          : t
+      ),
+      teacherAssignments: updatedTeacherAssignments,
       activityLogs
     });
+
+    (async () => {
+      try {
+        await supabase.from('teachers').upsert(dbRow, { onConflict: 'id' });
+      } catch (e) {
+        console.warn("Error updating teacher doc in Supabase:", e);
+      }
+      try {
+        await saveTeacherToFirestore({
+          id: fsDocId,
+          numericId: teacher.id,
+          name: teacher.name,
+          gender: teacher.gender || 'Male',
+          schoolRole: teacher.schoolRole || 'Subject Teacher',
+          phone: teacher.phone || '',
+          email: teacher.email || '',
+          subject: teacher.subjects?.[0] || '',
+          subjects: teacher.subjects || [],
+          teachingStreams: teacher.teachingStreams || [],
+          passportPhoto: teacher.passportPhoto || '',
+          color: teacher.color || '#1d4ed8',
+          maxPeriodsPerWeek: teacher.maxPeriodsPerWeek || 20,
+          initial: teacher.initial || '',
+          excludeInvigilation: teacher.excludeInvigilation ?? false,
+          schoolId: schoolId
+        } as any);
+      } catch (fsErr) {
+        console.warn("Firestore update teacher error:", fsErr);
+      }
+    })();
   };
 
   const handleDeleteTeacher = async (id: number | string) => {
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleDeleteTeacher):", schoolId);
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     const targetStrId = String(id);
-    const numericId = Number(id);
 
-    const target = data.teachers.find(t => String(t.id) === targetStrId || (t as any).firestoreDocId === targetStrId);
+    const currentTeachers = Array.isArray(dataRef.current.teachers) ? dataRef.current.teachers : [];
+    const target = currentTeachers.find(t => String(t.id) === targetStrId || (t as any).firestoreDocId === targetStrId);
     const fsDocId = (target as any)?.firestoreDocId || targetStrId;
 
-    const newTeachers = data.teachers.filter(t => String(t.id) !== targetStrId && (t as any).firestoreDocId !== targetStrId && (t as any).firestoreDocId !== fsDocId);
+    const newTeachers = currentTeachers.filter(
+      t => String(t.id) !== targetStrId && (t as any).firestoreDocId !== targetStrId && (t as any).firestoreDocId !== fsDocId
+    );
 
-    try {
-      await deleteTeacherFromFirestore(fsDocId);
-    } catch (fsErr) {
-      console.warn("Firestore delete teacher error:", fsErr);
-    }
-
-    try {
-      await deleteRecord('teachers', id);
-      if (!isNaN(numericId)) {
-        await deleteRecord('teachers', numericId);
-      }
-      await deleteRecord('teachers', targetStrId);
-      if (fsDocId !== targetStrId) {
-        await deleteRecord('teachers', fsDocId);
-      }
-    } catch (e) {
-      console.warn("Error deleting teacher doc in Supabase:", e);
-    }
-
-    const newInvigAssignments = { ...data.invigilationAssignments };
+    const newInvigAssignments = { ...(dataRef.current.invigilationAssignments || {}) };
     Object.keys(newInvigAssignments).forEach(key => {
       if (newInvigAssignments[key] === id || String(newInvigAssignments[key]) === targetStrId) {
         delete newInvigAssignments[key];
@@ -1610,30 +1648,45 @@ export default function App() {
 
     updateRemoteData({
       teachers: newTeachers,
-      selectedInvigilators: data.selectedInvigilators.filter(tid => String(tid) !== targetStrId),
-      timetableAssignments: data.timetableAssignments.map(a => (String(a.teacherId) === targetStrId ? { ...a, teacherId: undefined } : a)),
+      selectedInvigilators: (dataRef.current.selectedInvigilators || []).filter(tid => String(tid) !== targetStrId),
+      timetableAssignments: (dataRef.current.timetableAssignments || []).map(a => (String(a.teacherId) === targetStrId ? { ...a, teacherId: undefined } : a)),
       invigilationAssignments: newInvigAssignments,
       activityLogs
     });
+
+    (async () => {
+      try {
+        if (target) {
+          const dbRow = toSupabaseTeacher(target, schoolId);
+          await deleteRecord('teachers', dbRow.id);
+        }
+        await deleteRecord('teachers', targetStrId);
+        if (fsDocId !== targetStrId) {
+          await deleteRecord('teachers', fsDocId);
+        }
+      } catch (e) {
+        console.warn("Error deleting teacher doc in Supabase:", e);
+      }
+      try {
+        await deleteTeacherFromFirestore(fsDocId);
+      } catch (fsErr) {
+        console.warn("Firestore delete teacher error:", fsErr);
+      }
+    })();
   };
 
   const handleBulkDeleteTeachers = async (ids: (number | string)[]) => {
     if (!ids || ids.length === 0) return;
-    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || 'DEMO_SCHOOL';
-    console.log("Current school_id (handleBulkDeleteTeachers):", schoolId);
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
     const idStrings = ids.map(id => String(id));
     const idSet = new Set(idStrings);
     const count = ids.length;
 
-    const newTeachers = data.teachers.filter(t => !idSet.has(String(t.id)));
+    const currentTeachers = Array.isArray(dataRef.current.teachers) ? dataRef.current.teachers : [];
+    const targetsToDelete = currentTeachers.filter(t => idSet.has(String(t.id)) || idSet.has((t as any).firestoreDocId || ''));
+    const newTeachers = currentTeachers.filter(t => !idSet.has(String(t.id)) && !idSet.has((t as any).firestoreDocId || ''));
 
-    try {
-      await supabase.from('teachers').delete().in('id', ids).eq('school_id', schoolId);
-    } catch (e) {
-      console.warn("Error bulk deleting teachers in Supabase:", e);
-    }
-
-    const newInvigAssignments = { ...data.invigilationAssignments };
+    const newInvigAssignments = { ...(dataRef.current.invigilationAssignments || {}) };
     Object.keys(newInvigAssignments).forEach(key => {
       if (idSet.has(String(newInvigAssignments[key]))) {
         delete newInvigAssignments[key];
@@ -1649,15 +1702,30 @@ export default function App() {
 
     updateRemoteData({
       teachers: newTeachers,
-      selectedInvigilators: data.selectedInvigilators.filter(tid => !idSet.has(String(tid))),
-      timetableAssignments: data.timetableAssignments.map(a => (a.teacherId && idSet.has(String(a.teacherId)) ? { ...a, teacherId: undefined } : a)),
+      selectedInvigilators: (dataRef.current.selectedInvigilators || []).filter(tid => !idSet.has(String(tid))),
+      timetableAssignments: (dataRef.current.timetableAssignments || []).map(a => (a.teacherId && idSet.has(String(a.teacherId)) ? { ...a, teacherId: undefined } : a)),
       invigilationAssignments: newInvigAssignments,
       activityLogs
     });
+
+    (async () => {
+      try {
+        const dbUuids = targetsToDelete.map(t => toSupabaseTeacher(t, schoolId).id);
+        if (dbUuids.length > 0) {
+          await supabase.from('teachers').delete().in('id', dbUuids);
+        }
+      } catch (e) {
+        console.warn("Error bulk deleting teachers in Supabase:", e);
+      }
+      targetsToDelete.forEach(target => {
+        const fsDocId = (target as any)?.firestoreDocId || String(target.id);
+        deleteTeacherFromFirestore(fsDocId).catch(() => {});
+      });
+    })();
   };
 
   const handleSaveEvaluation = (evaluation: TeacherEvaluation) => {
-    const current = data.teacherEvaluations || [];
+    const current = dataRef.current.teacherEvaluations || [];
     const updated = [evaluation, ...current.filter(e => e.id !== evaluation.id)];
     const activityLogs = logActivity(
       'TEACHER_UPDATED',
@@ -1669,7 +1737,7 @@ export default function App() {
   };
 
   const handleDeleteEvaluation = (id: string) => {
-    const current = data.teacherEvaluations || [];
+    const current = dataRef.current.teacherEvaluations || [];
     const updated = current.filter(e => e.id !== id);
     const activityLogs = logActivity(
       'TEACHER_UPDATED',
@@ -1681,6 +1749,8 @@ export default function App() {
   };
 
   const handleAddExam = (exam: Exam, session: InvigilationSession) => {
+    const currentExams = dataRef.current.exams || [];
+    const currentSessions = dataRef.current.sessions || [];
     const activityLogs = logActivity(
       'EXAM_ADDED',
       'exams',
@@ -1688,19 +1758,19 @@ export default function App() {
       `Scheduled ${exam.name} for ${exam.className} on ${exam.date}`
     );
     // Auto-create USAL for each subject of registered exam
-    const newUsals = generateUsalRecordsForExam(exam, data.students, data.teachers, data.usalRecords || []);
-    const updatedUsals = [...(data.usalRecords || []), ...newUsals];
+    const newUsals = generateUsalRecordsForExam(exam, dataRef.current.students, dataRef.current.teachers, dataRef.current.usalRecords || []);
+    const updatedUsals = [...(dataRef.current.usalRecords || []), ...newUsals];
 
     updateRemoteData({
-      exams: [...data.exams, exam],
-      sessions: [...data.sessions, session],
+      exams: [...currentExams, exam],
+      sessions: [...currentSessions, session],
       usalRecords: updatedUsals,
       activityLogs
     });
   };
 
   const handleSaveUsalRecord = (record: UsalRecord) => {
-    const current = data.usalRecords || [];
+    const current = dataRef.current.usalRecords || [];
     const exists = current.some(r => r.id === record.id);
     const updated = exists ? current.map(r => r.id === record.id ? record : r) : [...current, record];
     const activityLogs = logActivity(
@@ -1713,7 +1783,9 @@ export default function App() {
   };
 
   const handleDeleteExam = (id: number) => {
-    const target = data.exams.find(e => e.id === id);
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
+    const currentExams = dataRef.current.exams || [];
+    const target = currentExams.find(e => e.id === id);
     const activityLogs = logActivity(
       'EXAM_DELETED',
       'exams',
@@ -1721,12 +1793,17 @@ export default function App() {
       `Removed exam ${target?.name || `ID #${id}`}`
     );
     updateRemoteData({
-      exams: data.exams.filter(e => e.id !== id),
+      exams: currentExams.filter(e => e.id !== id),
       activityLogs
     });
+    if (target) {
+      const dbRow = toSupabaseExam(target, schoolId);
+      deleteRecord('exams', dbRow.id).catch(() => {});
+    }
   };
 
   const handleUpdateExam = (exam: Exam) => {
+    const currentExams = dataRef.current.exams || [];
     const activityLogs = logActivity(
       'EXAM_UPDATED',
       'exams',
@@ -1734,7 +1811,7 @@ export default function App() {
       `Updated examination ${exam.name} status to ${exam.status || 'Active'}`
     );
     updateRemoteData({
-      exams: data.exams.map(e => e.id === exam.id ? exam : e),
+      exams: currentExams.map(e => e.id === exam.id ? exam : e),
       activityLogs
     });
   };
@@ -1829,13 +1906,36 @@ export default function App() {
   };
 
   const handleExportJsonBackup = () => {
-    const dataStr = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(data, null, 2));
-    const a = document.createElement('a');
-    a.setAttribute('href', dataStr);
-    a.setAttribute('download', `haby_edu_pro_backup_${new Date().toISOString().slice(0, 10)}.json`);
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
+    const schoolId = userAccount?.schoolId || getCurrentSchoolId() || DEFAULT_PRIMARY_SCHOOL_ID;
+    const res = triggerJsonDownloadBackup(schoolId, dataRef.current, 'manual');
+    const todayKey = getLocalDateKey();
+    saveAutoBackupConfig(schoolId, {
+      lastBackupDate: todayKey,
+      lastJsonDownloadDate: todayKey,
+      lastBackupTimestamp: new Date().toISOString(),
+      lastBackupStatus: 'success',
+      lastBackupMessage: `Manual JSON export (${res.filename})`,
+    }).catch(() => {});
+  };
+
+  const handleRestoreSchoolSnapshot = (restoredData: any, sourceLabel = 'Snapshot') => {
+    if (!restoredData || typeof restoredData !== 'object') return;
+    const activityLogs = logActivity(
+      'BACKUP_RESTORE',
+      'settings',
+      'Database Restored from Backup Snapshot',
+      `Restored full school database from ${sourceLabel}`
+    );
+    const restored = {
+      ...dataRef.current,
+      ...restoredData,
+      activityLogs,
+    };
+    setData(restored);
+    dataRef.current = restored;
+    updateRemoteData(restored);
+    setSyncToast(`Data za shule zimerejeshwa kikamilifu kutoka ${sourceLabel}!`);
+    setTimeout(() => setSyncToast(null), 5000);
   };
 
   const handleImportJsonBackup = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1847,21 +1947,13 @@ export default function App() {
       try {
         const parsed = JSON.parse(event.target?.result as string);
         if (parsed && typeof parsed === 'object') {
-          const activityLogs = logActivity(
-            'BACKUP_RESTORE',
-            'settings',
-            'Database Restored from File',
-            'Imported full school database from external JSON backup'
-          );
-          const restored = { ...parsed, activityLogs };
-          setData(restored);
-          updateRemoteData(restored);
-          alert('School database restored successfully from JSON backup!');
-        } else {
-          alert('Invalid backup file format.');
+          const clean = { ...parsed };
+          delete clean._backupMeta;
+          delete clean._snapshotMeta;
+          handleRestoreSchoolSnapshot(clean, `JSON File (${file.name})`);
         }
       } catch (err) {
-        alert('Failed to read JSON backup file: ' + err);
+        console.error('Failed to read JSON backup file:', err);
       }
     };
     reader.readAsText(file);
@@ -1881,6 +1973,7 @@ export default function App() {
         activeView={activeView}
         schoolInfo={data.schoolInfo}
         saveStatus={saveStatus}
+        isSyncing={isSyncing}
         onSelectView={view => setActiveView(view)}
         currentUser={userAccount}
         onLogout={async () => {
@@ -1967,6 +2060,7 @@ export default function App() {
               teachers={data.teachers}
               exams={data.exams}
               sessions={data.sessions}
+              invigilationAssignments={data.invigilationAssignments || {}}
               timetableAssignments={data.timetableAssignments || []}
               periodSettings={data.periodSettings || []}
               streamSettings={data.streamSettings || []}
@@ -2074,6 +2168,12 @@ export default function App() {
               streamSettings={data.streamSettings || []}
               currentUser={userAccount}
               dailyAttendance={data.dailyAttendance || {}}
+              timetableAssignments={data.timetableAssignments || []}
+              periodSettings={data.periodSettings || []}
+              sessions={data.sessions || []}
+              invigilationAssignments={data.invigilationAssignments || {}}
+              supervisors={data.supervisors || []}
+              onUpdateTeacher={handleUpdateTeacher}
               onSaveDailyAttendance={(date, rollCallRecords) => {
                 const currentDaily = data.dailyAttendance || {};
                 const updatedDaily = {
@@ -2297,6 +2397,66 @@ export default function App() {
             />
           )}
 
+          {activeView === 'teacher-attendance' && (
+            <TeacherAttendanceView
+              teachers={data.teachers || []}
+              schoolInfo={data.schoolInfo}
+              currentUser={userAccount}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              teacherAttendance={data.teacherAttendance || {}}
+              onSaveTeacherAttendance={(date, _recordsForDate, fullUpdatedMap) => {
+                const activityLogs = logActivity(
+                  'TEACHER_UPDATED',
+                  'teachers',
+                  'Teacher Daily Attendance Saved',
+                  `Saved daily staff attendance records for ${date} to teacher_attendance`
+                );
+                updateRemoteData({ teacherAttendance: fullUpdatedMap, activityLogs });
+              }}
+              onNavigateToPayroll={() => setActiveView('staff-payroll')}
+            />
+          )}
+
+          {activeView === 'biometric-report' && (
+            <BiometricReportView
+              teachers={data.teachers || []}
+              schoolInfo={data.schoolInfo}
+              currentUser={userAccount}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+            />
+          )}
+
+          {activeView === 'student-progress' && (
+            <StudentProgressTrackerView
+              students={data.students || []}
+              exams={data.exams || []}
+              examinationRecords={data.examinationRecords || []}
+              schoolInfo={data.schoolInfo}
+              currentUser={userAccount}
+            />
+          )}
+
+          {activeView === 'staff-payroll' && (
+            <StaffPayrollManagement
+              teachers={data.teachers || []}
+              schoolInfo={data.schoolInfo}
+              currentUser={userAccount}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              teacherAttendance={data.teacherAttendance || {}}
+              staffPayroll={data.staffPayroll}
+              onSaveStaffPayroll={staffPayroll => {
+                const activityLogs = logActivity(
+                  'TEACHER_UPDATED',
+                  'teachers',
+                  'Staff Payroll Updated',
+                  'Calculated and saved monthly staff payroll records'
+                );
+                updateRemoteData({ staffPayroll, activityLogs });
+              }}
+              onNavigateToTeacherAttendance={() => setActiveView('teacher-attendance')}
+            />
+          )}
+
           {activeView === 'discipline' && (
             <DisciplineView
               records={data.disciplineRecords || []}
@@ -2396,9 +2556,20 @@ export default function App() {
 
           {activeView === 'nectaregs' && (
             <NectaRegistrationView
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
               schoolInfo={data.schoolInfo}
               students={data.students}
               currentUser={userAccount}
+              onUpdateStudents={handleUpdateStudents}
+              onSaveSchoolInfo={schoolInfo => {
+                const activityLogs = logActivity(
+                  'SCHOOL_INFO_UPDATE',
+                  'settings',
+                  'NECTA Registration Numbers & Studio Updated',
+                  `Saved NECTA index number settings for ${schoolInfo.name}`
+                );
+                updateRemoteData({ schoolInfo, activityLogs });
+              }}
             />
           )}
 
@@ -2408,6 +2579,7 @@ export default function App() {
               teachers={data.teachers}
               schoolInfo={data.schoolInfo}
               students={data.students}
+              periodSettings={data.periodSettings}
               onAddActivityLog={log => {
                 const activityLogs = logActivity(
                   log.action,
@@ -2481,6 +2653,9 @@ export default function App() {
               teacherAssignments={data.teacherAssignments || []}
               journalRecords={data.journalRecords || {}}
               savedTimetableRecords={data.savedTimetableRecords || []}
+              sessions={data.sessions || []}
+              invigilationAssignments={data.invigilationAssignments || {}}
+              supervisors={data.supervisors || []}
               onUpdateSavedTimetableRecords={records => updateRemoteData({ savedTimetableRecords: records })}
               initialTab="journal"
               onUpdateAssignments={assignments => {
@@ -2533,6 +2708,9 @@ export default function App() {
               teacherAssignments={data.teacherAssignments || []}
               journalRecords={data.journalRecords || {}}
               savedTimetableRecords={data.savedTimetableRecords || []}
+              sessions={data.sessions || []}
+              invigilationAssignments={data.invigilationAssignments || {}}
+              supervisors={data.supervisors || []}
               onUpdateSavedTimetableRecords={records => updateRemoteData({ savedTimetableRecords: records })}
               onUpdateAssignments={assignments => {
                 const activityLogs = logActivity(
@@ -2614,6 +2792,7 @@ export default function App() {
               timetableReleased={data.timetableReleased}
               schoolInfo={data.schoolInfo}
               dayThemes={data.dayThemes}
+              currentUser={userAccount}
               onUpdateSessions={sessions => updateRemoteData({ sessions })}
               onUpdateSupervisors={supervisors => updateRemoteData({ supervisors })}
               onUpdateSelectedInvigilators={selectedInvigilators => updateRemoteData({ selectedInvigilators })}
@@ -2629,6 +2808,20 @@ export default function App() {
               onUpdateSavedInvigilationRecords={savedInvigilationRecords => updateRemoteData({ savedInvigilationRecords })}
               onToggleRelease={() => updateRemoteData({ timetableReleased: !data.timetableReleased })}
               onNavigateToSittingPlan={() => setActiveView('sittingplan')}
+              onNavigateToCalendar={() => setActiveView('invigilation-calendar')}
+            />
+          )}
+
+          {activeView === 'invigilation-calendar' && (
+            <InvigilationCalendarView
+              sessions={data.sessions || []}
+              teachers={data.teachers || []}
+              supervisors={data.supervisors || []}
+              invigilationAssignments={data.invigilationAssignments || {}}
+              schoolInfo={data.schoolInfo}
+              currentUser={userAccount}
+              onNavigateToInvigilation={() => setActiveView('invigilation')}
+              onBackToDashboard={() => setActiveView('dashboard')}
             />
           )}
 
@@ -2654,6 +2847,19 @@ export default function App() {
               examinationRecords={data.examinationRecords}
               schoolInfo={data.schoolInfo}
               onBackToMain={() => setActiveView('dashboard')} 
+            />
+          )}
+
+          {activeView === 'officialletters' && (
+            <OfficialLettersView
+              students={data.students || []}
+              teachers={data.teachers || []}
+              schoolInfo={data.schoolInfo}
+              streamSettings={data.streamSettings || []}
+              communicationTemplates={data.communicationTemplates || []}
+              onUpdateCommunicationTemplates={templates => {
+                updateRemoteData({ communicationTemplates: templates });
+              }}
             />
           )}
 
@@ -2734,6 +2940,8 @@ export default function App() {
               onUpdateCalendarEvents={events => {
                 updateRemoteData({ calendarEvents: events });
               }}
+              schoolData={data}
+              onRestoreData={handleRestoreSchoolSnapshot}
             />
           )}
         </main>

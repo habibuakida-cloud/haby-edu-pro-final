@@ -100,6 +100,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
   const [formEnd, setFormEnd] = useState<string>('08:40');
   const [formClassName, setFormClassName] = useState<string>('All Classes');
   const [formStreamName, setFormStreamName] = useState<string>('All Streams');
+  const [formIsBreak, setFormIsBreak] = useState<boolean>(false);
   const [editingPeriodId, setEditingPeriodId] = useState<number | null>(null);
 
   // Inline Table Edit State (Allows editing directly inside the row)
@@ -281,6 +282,7 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
     setFormEnd(p.end);
     setFormClassName(p.className || 'All Classes');
     setFormStreamName(p.streamName || 'All Streams');
+    setFormIsBreak(!!p.isBreak);
     setInlineEditingId(null);
   };
 
@@ -434,7 +436,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
             start: formStart,
             end: formEnd,
             className: formClassName,
-            streamName: formStreamName
+            streamName: formStreamName,
+            isBreak: formIsBreak
           };
         }
         return p;
@@ -458,7 +461,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
               ...updated[duplicateIndex],
               start: formStart,
               end: formEnd,
-              streamName: formStreamName
+              streamName: formStreamName,
+              isBreak: formIsBreak
             };
             onUpdatePeriodSettings(updated);
           } else {
@@ -469,7 +473,8 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
               start: formStart,
               end: formEnd,
               className: formClassName,
-              streamName: formStreamName
+              streamName: formStreamName,
+              isBreak: formIsBreak
             });
           }
       });
@@ -615,7 +620,11 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
             start: sp.start,
             end: sp.end,
             className: sp.className,
-            streamName: sp.streamName
+            streamName: sp.streamName,
+            isBreak: sp.isBreak,
+            isLocked: sp.isLocked,
+            locked: sp.locked,
+            activityType: sp.activityType
           });
           addedCount++;
         });
@@ -638,7 +647,11 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
               start: sp.start,
               end: sp.end,
               className: sp.className,
-              streamName: sp.streamName
+              streamName: sp.streamName,
+              isBreak: sp.isBreak,
+              isLocked: sp.isLocked,
+              locked: sp.locked,
+              activityType: sp.activityType
             });
             addedCount++;
           }
@@ -1008,6 +1021,19 @@ export const PeriodSettingsManager: React.FC<PeriodSettingsManagerProps> = ({
                 <option key={st} value={st}>{st === 'All Streams' ? 'All Streams (General)' : st}</option>
               ))}
             </select>
+          </div>
+
+          <div className="flex items-center gap-2 mt-5">
+            <input
+              type="checkbox"
+              id="isBreak"
+              checked={formIsBreak}
+              onChange={e => setFormIsBreak(e.target.checked)}
+              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+            />
+            <label htmlFor="isBreak" className="text-xs font-bold text-slate-700 cursor-pointer">
+              This is a BREAK period (No lessons allowed)
+            </label>
           </div>
 
           <div>

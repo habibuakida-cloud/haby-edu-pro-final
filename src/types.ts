@@ -114,6 +114,8 @@ export interface Teacher {
   passportPhoto?: string; // base64 / URL for teacher passport size photo
   teachingStreams?: string[]; // e.g. ["Form 1 - STREAM A", "Form 2 - STREAM B"]
   maxPeriodsPerWeek?: number; // target periods per week (each period = 40 mins)
+  fingerprintEnrolled?: boolean; // Admin controlled fingerprint biometric enrollment
+  fingerprintId?: string; // Biometric fingerprint identifier
 }
 
 export interface Exam {
@@ -205,6 +207,8 @@ export interface TimetableAssignment {
   isManual?: boolean;
   isLocked?: boolean;
   allocationMode?: 'manual' | 'auto';
+  isParallelElective?: boolean;
+  parallelElectiveTrack?: string;
 }
 
 export interface InvigilationSession {
@@ -398,6 +402,7 @@ export interface UserAccount {
   id: string;
   email: string;
   fullName: string;
+  name?: string;
   role: UserRole;
   schoolId: string;
   school_id?: string;
@@ -519,7 +524,9 @@ export type ActivityAction =
   | 'DISCIPLINE_RECORD_DELETED'
   | 'USER_ROLE_UPDATE'
   | 'SYSTEM_RESET'
-  | 'BACKUP_RESTORE';
+  | 'BACKUP_RESTORE'
+  | 'BACKUP_EXPORT'
+  | 'BACKUP_SNAPSHOT';
 
 export type ActivityCategory = 'timetable' | 'teachers' | 'students' | 'exams' | 'invigilation' | 'settings' | 'discipline' | 'results' | 'security';
 
@@ -607,6 +614,7 @@ export interface InstitutionalPolicy {
     noTeacherTwoClassesSameTime: boolean;
     noClassTwoTeachersSameTime: boolean;
     noSameSubjectTwiceSameDay: boolean;
+    allowParallelElectiveSubjects?: boolean;
   };
 }
 
@@ -704,6 +712,8 @@ export interface AppData {
   communicationTemplates?: CommunicationTemplate[];
   calendarEvents?: CalendarEvent[];
   pastPapers?: PastPaper[];
+  teacherAttendance?: Record<string, Record<number, TeacherAttendanceEntry>>;
+  staffPayroll?: StaffPayrollData;
 }
 
 export interface CalendarEvent {
@@ -912,3 +922,90 @@ export interface PastPaper {
   markingSchemeUrl?: string;
   createdAt?: string;
 }
+
+export type TeacherAttendanceStatus = 'PRESENT' | 'ABSENT' | 'LATE' | 'EXCUSED';
+
+export interface TeacherAttendanceEntry {
+  id?: string;
+  teacherId: number;
+  teacherName: string;
+  schoolRole?: string;
+  date: string;
+  dayOfWeek?: string;
+  status: TeacherAttendanceStatus;
+  checkInTime: string;
+  checkOutTime: string;
+  remarks?: string;
+  markedBy?: string;
+  updatedAt?: string;
+}
+
+export interface TeacherSalaryConfig {
+  teacherId: number;
+  basicSalary: number;
+  housingAllowance: number;
+  transportAllowance: number;
+  responsibilityAllowance: number;
+  defaultBonus: number;
+  loanAdvanceDeduction: number;
+  customTaxRate?: number; // optional custom % override
+  bankName: string;
+  bankAccount: string;
+  tinNumber?: string;
+  nssfNumber?: string;
+  paymentMethod: 'Bank Transfer' | 'Mobile Money' | 'Cash';
+}
+
+export interface StaffPayrollRecord {
+  id: string;
+  schoolId: string;
+  teacherId: number;
+  teacherName: string;
+  schoolRole: string;
+  monthYear: string; // YYYY-MM
+  basicSalary: number;
+  housingAllowance: number;
+  transportAllowance: number;
+  responsibilityAllowance: number;
+  bonusAmount: number;
+  bonusReason: string;
+  workingDays: number;
+  daysPresent: number;
+  daysLate: number;
+  daysExcused: number;
+  daysAbsent: number;
+  attendanceDeduction: number;
+  taxDeduction: number;
+  nssfDeduction: number;
+  healthInsurance: number;
+  loanAdvanceDeduction: number;
+  grossSalary: number;
+  totalDeductions: number;
+  netSalary: number;
+  paymentStatus: 'PAID' | 'PENDING' | 'PROCESSING';
+  paymentMethod: 'Bank Transfer' | 'Mobile Money' | 'Cash';
+  bankName: string;
+  bankAccount: string;
+  paidAt?: string;
+  updatedAt?: string;
+}
+
+export interface StaffPayrollSettings {
+  standardWorkingDays: number;
+  absencePenaltyMode: 'PRORATED_BASIC' | 'FIXED_PER_DAY' | 'NONE';
+  fixedAbsencePenaltyPerDay: number;
+  latePenaltyPerDay: number;
+  perfectAttendanceBonus: number;
+  taxCalculationMode: 'TRA_BRACKETS' | 'FLAT_RATE';
+  flatTaxRatePercent: number;
+  nssfRatePercent: number;
+  nhifRatePercent: number;
+  currency: string;
+}
+
+export interface StaffPayrollData {
+  settings?: StaffPayrollSettings;
+  configs?: Record<number, TeacherSalaryConfig>;
+  records?: Record<string, Record<number, StaffPayrollRecord>>; // monthYear -> teacherId -> record
+}
+

@@ -26,8 +26,25 @@ import {
   Pause,
   RotateCcw,
   Eye,
-  Database
+  Database,
+  Check,
+  X,
+  XCircle,
+  UserCheck,
+  UserX,
+  QrCode,
+  Scan,
+  Camera,
+  Tag,
+  Volume2,
+  Search,
+  CheckCheck,
+  EyeOff,
+  Share2,
+  MessageCircle
 } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
+import { Html5Qrcode } from 'html5-qrcode';
 import { useReactToPrint } from 'react-to-print';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -253,6 +270,143 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     return Math.min(Math.max(0, idx), maxIdx);
   });
 
+  // Core data overrides moved to top
+  const [seatOverrides, setSeatOverrides] = useState(() =>
+    initialSaved?.seatOverrides && typeof initialSaved.seatOverrides === 'object'
+      ? initialSaved.seatOverrides
+      : {}
+  );
+  const [attendanceState, setAttendanceState] = useState(() =>
+    initialSaved?.attendanceState && typeof initialSaved.attendanceState === 'object'
+      ? initialSaved.attendanceState
+      : {}
+  );
+
+  // Moved compute functions and memos to top to satisfy TDZ
+  const generateRoomGrid = (room, roomIdx = 0) => {
+    const {
+      numColumns = 4,
+      columnSeats = [6, 6, 6, 6],
+      doorEntrance = 'Left Side',
+      startingSeat = '0001',
+      fillPattern = 'snake'
+    } = room;
+
+    const startNum = parseInt(startingSeat, 10) || 1;
+    let currentNumber = startNum;
+    const maxRows = Math.max(...columnSeats, room.numRows || 1, 1);
+    const grid = Array.from({ length: maxRows }, () => Array(numColumns).fill(null));
+
+    const colOrder = [];
+    if (doorEntrance === 'Left Side') {
+      for (let c = 0; c < numColumns; c++) colOrder.push(c);
+    } else {
+      for (let c = numColumns - 1; c >= 0; c--) colOrder.push(c);
+    }
+
+    const colDirections = Array(numColumns).fill('down');
+    const snakeSequence = [];
+
+    colOrder.forEach((colIdx, orderIdx) => {
+      const seatsInCol = columnSeats[colIdx] ?? 0;
+      const isEvenOrder = orderIdx % 2 === 0;
+      const isBottomToTop = fillPattern === 'snake' && !isEvenOrder;
+      colDirections[colIdx] = isBottomToTop ? 'up' : 'down';
+
+      const rowOrder = [];
+      if (isBottomToTop) {
+        for (let r = maxRows - 1; r >= 0; r--) rowOrder.push(r);
+      } else {
+        for (let r = 0; r < maxRows; r++) rowOrder.push(r);
+      }
+
+      rowOrder.forEach((r) => {
+        const overrideKey = `${roomIdx}-${r}-${colIdx}`;
+        const overrideVal = seatOverrides[overrideKey];
+        const isDeleted = overrideVal === 'DELETED';
+        const isForceActive = overrideVal === 'ACTIVE';
+        const hasCustomNumber =
+          overrideVal !== undefined &&
+          overrideVal !== 'DELETED' &&
+          overrideVal !== 'ACTIVE';
+        const isWithinCol = r < seatsInCol;
+
+        if (isDeleted) {
+          grid[r][colIdx] = {
+            isDeleted: true,
+            seatNo: '',
+            colIndex: colIdx,
+            rowIndex: r
+          };
+        } else if (isWithinCol || isForceActive || hasCustomNumber) {
+          let seatNo = format4Digits(currentNumber);
+          if (overrideVal === 'EMPTY_SEAT') {
+            seatNo = '';
+          } else if (hasCustomNumber && overrideVal !== '') {
+            seatNo = overrideVal;
+          }
+
+          const stepOrder = snakeSequence.length + 1;
+          grid[r][colIdx] = {
+            isDeleted: false,
+            seatNo,
+            stepOrder,
+            colIndex: colIdx,
+            rowIndex: r
+          };
+
+          snakeSequence.push({
+            rowIndex: r,
+            colIndex: colIdx,
+            seatNo,
+            stepOrder,
+            direction: colDirections[colIdx]
+          });
+
+          currentNumber++;
+        } else {
+          grid[r][colIdx] = {
+            isDeleted: true,
+            seatNo: '',
+            colIndex: colIdx,
+            rowIndex: r
+          };
+        }
+      });
+    });
+
+    const activeSeatsCount = snakeSequence.length;
+    const endSeatNum = startNum + activeSeatsCount - 1;
+
+    return {
+      grid,
+      maxRows,
+      colDirections,
+      snakeSequence,
+      totalSeats: activeSeatsCount,
+      startSeatFormatted: format4Digits(startNum),
+      endSeatFormatted: format4Digits(Math.max(startNum, endSeatNum))
+    };
+  };
+
+  const computedRooms = useMemo(() => {
+    return rooms.map((room, roomIdx) => {
+      const result = generateRoomGrid(room, roomIdx);
+      return {
+        ...room,
+        roomIdx,
+        ...result
+      };
+    });
+  }, [rooms, seatOverrides]);
+
+  const activeComputedRoom = computedRooms[activeRoomIndex] || computedRooms[0];
+  const totalConfiguredStudents = useMemo(
+    () => computedRooms.reduce((sum, r) => sum + r.totalSeats, 0),
+    [computedRooms]
+  );
+
+
   // BATCH / AUTOMATIC MULTI-ROOM GENERATOR STATE
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [batchCandidateCount, setBatchCandidateCount] = useState(() => initialSaved?.batchCandidateCount ?? 300);
@@ -260,6 +414,31 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
   const [batchColsPerRoom, setBatchColsPerRoom] = useState(() => initialSaved?.batchColsPerRoom ?? 4);
   const [batchPattern, setBatchPattern] = useState(() => initialSaved?.batchPattern || 'snake');
   const [batchStartNumber, setBatchStartNumber] = useState(() => initialSaved?.batchStartNumber || '0001');
+
+  // WhatsApp Sharing State & Handler
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [whatsAppPhone, setWhatsAppPhone] = useState('');
+  const [whatsAppMsg, setWhatsAppMsg] = useState('');
+
+  // Update WhatsApp message when exam details or rooms change
+  useEffect(() => {
+    const totalStudents = computedRooms?.reduce((sum, r) => sum + (r.totalSeats || 0), 0) || 0;
+    setWhatsAppMsg(
+      `*EXAMINATION SITTING PLAN — ${schoolName}*\nExam: ${examType} (${subject} - ${codeNo})\nDate: ${examDate}\nTotal Rooms: ${rooms.length}\nTotal Students: ${totalStudents}\n\nPlease download and print the official examination sitting plan PDF from the school portal.`
+    );
+  }, [schoolName, examType, subject, codeNo, examDate, rooms.length, computedRooms]);
+
+  const handleSendWhatsApp = () => {
+    const text = encodeURIComponent(whatsAppMsg);
+    const cleanPhone = whatsAppPhone.replace(/[^0-9]/g, '');
+    const url = cleanPhone
+      ? `https://api.whatsapp.com/send?phone=${cleanPhone}&text=${text}`
+      : `https://wa.me/?text=${text}`;
+    window.open(url, '_blank');
+    setShowWhatsAppModal(false);
+    setSavedSuccessMsg('WhatsApp sharing opened successfully!');
+    setTimeout(() => setSavedSuccessMsg(null), 3500);
+  };
 
   // MANUAL LIST MODAL
   const [showManualModal, setShowManualModal] = useState(false);
@@ -299,14 +478,341 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     setTimeout(() => setSavedSuccessMsg(null), 3500);
   };
 
-  // CUSTOM SEAT OVERRIDES & MOVABLE/SWAPPABLE DESKS STATE
-  const [seatOverrides, setSeatOverrides] = useState(() =>
-    initialSaved?.seatOverrides && typeof initialSaved.seatOverrides === 'object'
-      ? initialSaved.seatOverrides
-      : {}
-  );
+  // CUSTOM SEAT OVERRIDES & MOVABLE/SWAPPABLE DESKS STATE (Moved to top)
+  // ATTENDANCE & EXAM COMPLETION STATE (Moved to top)
+
   const [selectedDeskForMove, setSelectedDeskForMove] = useState(null); // { roomIdx, rowIdx, colIdx, seatNo }
   const [draggedDesk, setDraggedDesk] = useState(null); // { roomIdx, rowIdx, colIdx, seatNo }
+
+  // DESK QR CODES & INVIGILATOR ATTENDANCE SCANNER STATE
+  const [showDeskQRCodes, setShowDeskQRCodes] = useState(() => initialSaved?.showDeskQRCodes ?? true);
+  const [showQRScannerModal, setShowQRScannerModal] = useState(false);
+  const [showDeskSlipsModal, setShowDeskSlipsModal] = useState(false);
+  const [deskSlipsScope, setDeskSlipsScope] = useState('current'); // 'current' | 'all'
+  const [selectedStudentForQRDetail, setSelectedStudentForQRDetail] = useState(null);
+  const [autoMarkPresent, setAutoMarkPresent] = useState(true);
+  const [scanHistory, setScanHistory] = useState([]);
+  const [lastScannedDesk, setLastScannedDesk] = useState(null);
+  const [scanBannerMessage, setScanBannerMessage] = useState(null);
+  const [cameraError, setCameraError] = useState(null);
+  const [manualScanInput, setManualScanInput] = useState('');
+  const [scannerActive, setScannerActive] = useState(false);
+  const html5QrCodeRef = useRef(null);
+  const deskSlipsContainerRef = useRef(null);
+
+  // Dynamic QR code size based on rows and columns in the room
+  const getDynamicQRSize = (maxRows, numCols = 4) => {
+    if (maxRows <= 5 && numCols <= 4) return 26;
+    if (maxRows <= 6 && numCols <= 5) return 24;
+    if (maxRows <= 7) return 22;
+    if (maxRows <= 8) return 20;
+    return 18;
+  };
+
+  // Play subtle audio beep on successful QR scan
+  const playScanFeedback = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        if (AudioContext) {
+          const ctx = new AudioContext();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.12, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
+          osc.start(ctx.currentTime);
+          osc.stop(ctx.currentTime + 0.15);
+        }
+        if (typeof navigator !== 'undefined' && navigator.vibrate) {
+          navigator.vibrate(80);
+        }
+      }
+    } catch (e) {}
+  };
+
+  // Handle QR code decode from camera or manual entry
+  const handleScannedQRCode = (rawText) => {
+    if (!rawText) return;
+    playScanFeedback();
+
+    let targetSeatNo = '';
+    let targetDeskKey = null;
+
+    try {
+      const parsed = JSON.parse(rawText);
+      if (parsed && typeof parsed === 'object') {
+        targetSeatNo = String(parsed.seat || parsed.seatNo || '').trim();
+        targetDeskKey = parsed.key || parsed.deskKey || null;
+      }
+    } catch (e) {
+      targetSeatNo = String(rawText).trim();
+    }
+
+    let foundDesk = null;
+    if (targetDeskKey) {
+      const parts = targetDeskKey.split('-');
+      if (parts.length === 3) {
+        const rIdx = parseInt(parts[0], 10);
+        const row = parseInt(parts[1], 10);
+        const col = parseInt(parts[2], 10);
+        const rm = computedRooms[rIdx];
+        const seat = rm?.grid?.[row]?.[col];
+        if (seat && !seat.isDeleted) {
+          foundDesk = {
+            seatNo: seat.seatNo,
+            stepOrder: seat.stepOrder,
+            roomIdx: rIdx,
+            roomName: rm.name,
+            rowIdx: row,
+            colIdx: col,
+            deskKey: targetDeskKey,
+            roomNumber: rIdx + 1,
+            totalRooms: rooms.length
+          };
+        }
+      }
+    }
+
+    if (!foundDesk && targetSeatNo) {
+      const cleanTarget = targetSeatNo.toLowerCase();
+      for (let rIdx = 0; rIdx < computedRooms.length; rIdx++) {
+        const rm = computedRooms[rIdx];
+        for (let r = 0; r < (rm.grid || []).length; r++) {
+          for (let c = 0; c < (rm.grid[r] || []).length; c++) {
+            const seat = rm.grid[r][c];
+            if (seat && !seat.isDeleted) {
+              const curSeatStr = String(seat.seatNo || '').trim().toLowerCase();
+              if (curSeatStr === cleanTarget || curSeatStr.endsWith(cleanTarget) || cleanTarget.endsWith(curSeatStr)) {
+                foundDesk = {
+                  seatNo: seat.seatNo,
+                  stepOrder: seat.stepOrder,
+                  roomIdx: rIdx,
+                  roomName: rm.name,
+                  rowIdx: r,
+                  colIdx: c,
+                  deskKey: `${rIdx}-${r}-${c}`,
+                  roomNumber: rIdx + 1,
+                  totalRooms: rooms.length
+                };
+                break;
+              }
+            }
+          }
+          if (foundDesk) break;
+        }
+        if (foundDesk) break;
+      }
+    }
+
+    if (foundDesk) {
+      const curStatus = attendanceState[foundDesk.deskKey];
+      setLastScannedDesk(foundDesk);
+
+      if (autoMarkPresent) {
+        setAttendanceState(prev => ({
+          ...prev,
+          [foundDesk.deskKey]: 'PRESENT'
+        }));
+        setScanBannerMessage({
+          type: 'success',
+          text: `Mtahiniwa [${foundDesk.seatNo}] (ROOM ${foundDesk.roomNumber} OUT OF ${foundDesk.totalRooms}) amethibitishwa: WALIOFANYA (✓)!`
+        });
+      } else {
+        setScanBannerMessage({
+          type: 'info',
+          text: `Mtahiniwa [${foundDesk.seatNo}] amepatikana katika ROOM ${foundDesk.roomNumber} OUT OF ${foundDesk.totalRooms} (R${foundDesk.rowIdx + 1}C${foundDesk.colIdx + 1}). Hali: ${
+            curStatus === 'PRESENT' ? 'Waliofanya ✓' : curStatus === 'ABSENT' ? 'Wasiofanya ✗' : 'Haijawekwa'
+          }`
+        });
+      }
+
+      setScanHistory(prev => [
+        {
+          id: `${Date.now()}-${Math.random()}`,
+          seatNo: foundDesk.seatNo,
+          roomName: foundDesk.roomName,
+          roomNumber: foundDesk.roomNumber,
+          pos: `R${foundDesk.rowIdx + 1}C${foundDesk.colIdx + 1}`,
+          status: autoMarkPresent ? 'PRESENT' : curStatus || 'UNMARKED',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        },
+        ...prev.slice(0, 9)
+      ]);
+    } else {
+      setScanBannerMessage({
+        type: 'warning',
+        text: `Namba ya mtahiniwa "${targetSeatNo || rawText}" haikupatikana kwenye vyumba vilivyopo.`
+      });
+    }
+  };
+
+  // Scanner camera controller using Html5Qrcode
+  useEffect(() => {
+    if (!showQRScannerModal) {
+      if (html5QrCodeRef.current) {
+        try {
+          if (html5QrCodeRef.current.isScanning) {
+            html5QrCodeRef.current.stop().then(() => {
+              html5QrCodeRef.current?.clear();
+              html5QrCodeRef.current = null;
+            }).catch(() => {
+              html5QrCodeRef.current = null;
+            });
+          } else {
+            html5QrCodeRef.current.clear();
+            html5QrCodeRef.current = null;
+          }
+        } catch (e) {
+          html5QrCodeRef.current = null;
+        }
+      }
+      setScannerActive(false);
+      setCameraError(null);
+      return;
+    }
+
+    let isMounted = true;
+    const elementId = 'haby-exam-qr-reader';
+
+    const startScanner = async () => {
+      await new Promise(r => setTimeout(r, 250));
+      if (!isMounted) return;
+
+      const container = document.getElementById(elementId);
+      if (!container) return;
+
+      try {
+        const qrScanner = new Html5Qrcode(elementId);
+        html5QrCodeRef.current = qrScanner;
+
+        await qrScanner.start(
+          { facingMode: 'environment' },
+          {
+            fps: 10,
+            qrbox: { width: 220, height: 220 },
+            aspectRatio: 1.0
+          },
+          (decodedText) => {
+            if (isMounted) {
+              handleScannedQRCode(decodedText);
+            }
+          },
+          () => {}
+        );
+        if (isMounted) {
+          setScannerActive(true);
+          setCameraError(null);
+        }
+      } catch (err) {
+        if (isMounted) {
+          console.warn('Camera start failed:', err);
+          setCameraError(
+            err?.message?.includes('Permission')
+              ? 'Ruhusa ya Kamera imekataliwa. Tafadhali ruhusu kamera kwenye kivinjari au tumia utafutaji wa namba hapa chini.'
+              : 'Kamera haikuweza kuwashwa. Unaweza kuandika namba ya mtahiniwa moja kwa moja kuhakiki mahudhurio.'
+          );
+          setScannerActive(false);
+        }
+      }
+    };
+
+    startScanner();
+
+    return () => {
+      isMounted = false;
+      if (html5QrCodeRef.current) {
+        try {
+          if (html5QrCodeRef.current.isScanning) {
+            html5QrCodeRef.current.stop().then(() => {
+              html5QrCodeRef.current?.clear();
+              html5QrCodeRef.current = null;
+            }).catch(() => {
+              html5QrCodeRef.current = null;
+            });
+          } else {
+            html5QrCodeRef.current.clear();
+            html5QrCodeRef.current = null;
+          }
+        } catch (e) {
+          html5QrCodeRef.current = null;
+        }
+      }
+    };
+  }, [showQRScannerModal]);
+
+  // Toggle student attendance status for a desk (Waliofanya ✓ vs Wasiofanya ✗)
+  const handleToggleAttendance = (roomIdx, rowIdx, colIdx, statusToSet, e) => {
+    if (e) e.stopPropagation();
+    const targetKey = `${roomIdx}-${rowIdx}-${colIdx}`;
+    setAttendanceState(prev => {
+      const next = { ...prev };
+      if (next[targetKey] === statusToSet) {
+        delete next[targetKey];
+      } else {
+        next[targetKey] = statusToSet;
+      }
+      return next;
+    });
+  };
+
+  // Bulk mark all students in a room as Waliofanya (PRESENT) or clear
+  const handleMarkAllRoomAttendance = (roomIdx, statusToSet) => {
+    const rm = computedRooms[roomIdx];
+    if (!rm) return;
+    setAttendanceState(prev => {
+      const next = { ...prev };
+      (rm.grid || []).forEach((rowArr, r) => {
+        rowArr.forEach((seat, c) => {
+          if (seat && !seat.isDeleted) {
+            const key = `${roomIdx}-${r}-${c}`;
+            if (statusToSet === null) {
+              delete next[key];
+            } else {
+              next[key] = statusToSet;
+            }
+          }
+        });
+      });
+      return next;
+    });
+    setSavedSuccessMsg(
+      statusToSet === 'PRESENT'
+        ? `All candidates of ${rm.name} marked Present (✓)!`
+        : statusToSet === 'ABSENT'
+        ? `All candidates of ${rm.name} marked Absent (✗)!`
+        : `Attendance marks for ${rm.name} cleared.`
+    );
+    setTimeout(() => setSavedSuccessMsg(null), 3000);
+  };
+
+  // Calculate attendance summary (Waliofanya na Wasiofanya) for any room
+  const getRoomAttendanceSummary = (rm, rIdx) => {
+    const actualIdx = rm.roomIdx ?? rIdx;
+    let present = 0;
+    let absent = 0;
+    let total = 0;
+    (rm.grid || []).forEach((rowArr, r) => {
+      rowArr.forEach((seat, c) => {
+        if (seat && !seat.isDeleted) {
+          total++;
+          const key = `${actualIdx}-${r}-${c}`;
+          const st = attendanceState[key];
+          if (st === 'PRESENT') present++;
+          else if (st === 'ABSENT') absent++;
+        }
+      });
+    });
+    return {
+      total,
+      present,
+      absent,
+      unmarked: Math.max(0, total - present - absent)
+    };
+  };
 
   // Clear hardcoded number overrides in a room while keeping DELETED and ACTIVE desk positions intact
   // so Snake Pattern / Straight Pattern / Starting Seat / Door Entrance always re-flow numbers cleanly
@@ -455,6 +961,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
   const [errorMessage, setErrorMessage] = useState(null);
   const [isExportingImage, setIsExportingImage] = useState(false);
   const [isExportingPDF, setIsExportingPDF] = useState(false);
+  const [pdfProgressText, setPdfProgressText] = useState(null);
   const [isExportingSVG, setIsExportingSVG] = useState(false);
 
   useEffect(() => {
@@ -669,7 +1176,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     };
     setRooms(prev => [...prev, newRoom]);
     setActiveRoomIndex(rooms.length);
-    setSavedSuccessMsg(`Chumba kipya ${newRoom.name} kimeongezwa!`);
+    setSavedSuccessMsg(`New room ${newRoom.name} added successfully!`);
     setTimeout(() => setSavedSuccessMsg(null), 3000);
   };
 
@@ -686,14 +1193,14 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     };
     setRooms(prev => [...prev, clonedRoom]);
     setActiveRoomIndex(rooms.length);
-    setSavedSuccessMsg(`Chumba kimewezeshwa kwa namba zinazofuata (${format4Digits(startNum)})!`);
+    setSavedSuccessMsg(`Room initialized with continuing numbers starting from ${format4Digits(startNum)}!`);
     setTimeout(() => setSavedSuccessMsg(null), 3000);
   };
 
   // Remove a room
   const handleDeleteRoom = (index) => {
     if (rooms.length <= 1) {
-      setErrorMessage('Huwezi kufuta chumba cha mwisho. Angalau chumba kimoja kinahitajika.');
+      setErrorMessage('Cannot delete the last room. At least one room is required.');
       setTimeout(() => setErrorMessage(null), 3500);
       return;
     }
@@ -742,7 +1249,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     setActiveRoomIndex(0);
     setShowBatchModal(false);
     setSavedSuccessMsg(
-      `Vyumba ${roomCount} vimetengenezwa kiotomatiki kwa wanafunzi ${totalCand} (${perRoom} kwa chumba, ${
+      `Successfully generated ${roomCount} rooms automatically for ${totalCand} candidates (${perRoom} per room, ${
         batchPattern === 'snake' ? 'Snake Pattern' : 'Straight Pattern'
       })!`
     );
@@ -753,132 +1260,8 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
    * GRID GENERATOR FOR A GIVEN ROOM
    * Generates 2D array [row][col] with candidates in Snake or Straight sequence
    */
-  const generateRoomGrid = (room, roomIdx = 0) => {
-    const {
-      numColumns = 4,
-      columnSeats = [6, 6, 6, 6],
-      doorEntrance = 'Left Side',
-      startingSeat = '0001',
-      fillPattern = 'snake'
-    } = room;
+  // compute functions and memos removed from here (moved to top)
 
-    const startNum = parseInt(startingSeat, 10) || 1;
-    let currentNumber = startNum;
-    const maxRows = Math.max(...columnSeats, room.numRows || 1, 1);
-    const grid = Array.from({ length: maxRows }, () => Array(numColumns).fill(null));
-
-    // Determine processing sequence based on door location
-    const colOrder = [];
-    if (doorEntrance === 'Left Side') {
-      for (let c = 0; c < numColumns; c++) colOrder.push(c);
-    } else {
-      for (let c = numColumns - 1; c >= 0; c--) colOrder.push(c);
-    }
-
-    // Track column direction for visual header display ('down' = top-to-bottom, 'up' = bottom-to-top)
-    const colDirections = Array(numColumns).fill('down');
-    const snakeSequence = [];
-
-    colOrder.forEach((colIdx, orderIdx) => {
-      const seatsInCol = columnSeats[colIdx] ?? 0;
-      const isEvenOrder = orderIdx % 2 === 0;
-      const isBottomToTop = fillPattern === 'snake' && !isEvenOrder;
-      colDirections[colIdx] = isBottomToTop ? 'up' : 'down';
-
-      // Build row traversal order to honor snake pattern vs straight top-to-bottom
-      const rowOrder = [];
-      if (isBottomToTop) {
-        for (let r = maxRows - 1; r >= 0; r--) rowOrder.push(r);
-      } else {
-        for (let r = 0; r < maxRows; r++) rowOrder.push(r);
-      }
-
-      rowOrder.forEach((r) => {
-        const overrideKey = `${roomIdx}-${r}-${colIdx}`;
-        const overrideVal = seatOverrides[overrideKey];
-        const isDeleted = overrideVal === 'DELETED';
-        const isForceActive = overrideVal === 'ACTIVE';
-        const hasCustomNumber =
-          overrideVal !== undefined &&
-          overrideVal !== 'DELETED' &&
-          overrideVal !== 'ACTIVE';
-        const isWithinCol = r < seatsInCol;
-
-        if (isDeleted) {
-          grid[r][colIdx] = {
-            isDeleted: true,
-            seatNo: '',
-            colIndex: colIdx,
-            rowIndex: r
-          };
-        } else if (isWithinCol || isForceActive || hasCustomNumber) {
-          let seatNo = format4Digits(currentNumber);
-          if (overrideVal === 'EMPTY_SEAT') {
-            seatNo = '';
-          } else if (hasCustomNumber && overrideVal !== '') {
-            seatNo = overrideVal;
-          }
-
-          const stepOrder = snakeSequence.length + 1;
-          grid[r][colIdx] = {
-            isDeleted: false,
-            seatNo,
-            stepOrder,
-            colIndex: colIdx,
-            rowIndex: r
-          };
-
-          snakeSequence.push({
-            rowIndex: r,
-            colIndex: colIdx,
-            seatNo,
-            stepOrder,
-            direction: colDirections[colIdx]
-          });
-
-          currentNumber++;
-        } else {
-          grid[r][colIdx] = {
-            isDeleted: true,
-            seatNo: '',
-            colIndex: colIdx,
-            rowIndex: r
-          };
-        }
-      });
-    });
-
-    const activeSeatsCount = snakeSequence.length;
-    const endSeatNum = startNum + activeSeatsCount - 1;
-
-    return {
-      grid,
-      maxRows,
-      colDirections,
-      snakeSequence,
-      totalSeats: activeSeatsCount,
-      startSeatFormatted: format4Digits(startNum),
-      endSeatFormatted: format4Digits(Math.max(startNum, endSeatNum))
-    };
-  };
-
-  // Compute all grids
-  const computedRooms = useMemo(() => {
-    return rooms.map((room, roomIdx) => {
-      const result = generateRoomGrid(room, roomIdx);
-      return {
-        ...room,
-        roomIdx,
-        ...result
-      };
-    });
-  }, [rooms, seatOverrides]);
-
-  const activeComputedRoom = computedRooms[activeRoomIndex] || computedRooms[0];
-  const totalConfiguredStudents = useMemo(
-    () => computedRooms.reduce((sum, r) => sum + r.totalSeats, 0),
-    [computedRooms]
-  );
 
   // SNAKE PATTERN VISUAL CANVAS PREVIEW & SIMULATION MODE STATE
   const [showPreviewCanvas, setShowPreviewCanvas] = useState(true);
@@ -893,7 +1276,6 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     if (!isSimulating) {
       setSimulationStep(activeComputedRoom?.totalSeats || 0);
     }
-    setIsCommittedToDb(false);
   }, [activeComputedRoom?.totalSeats, activeRoomIndex, rooms, seatOverrides, isSimulating]);
 
   // Step-by-step Snake animation timer
@@ -961,9 +1343,9 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(
-      `FRONT OF ROOM — ${activeComputedRoom.name} (${
+      `FRONT OF ROOM — ROOM ${activeRoomIndex + 1} OUT OF ${rooms.length} (${activeComputedRoom.name}) — ${
         activeComputedRoom.fillPattern === 'snake' ? 'SNAKE PATTERN ↓↑' : 'STRAIGHT PATTERN ↓↓'
-      })`,
+      }`,
       logicalWidth / 2,
       26
     );
@@ -1181,6 +1563,10 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     totalConfiguredStudents
   ]);
 
+  const hadInitialLocalStateRef = useRef(Boolean(initialSaved));
+  const isHydrationCompleteRef = useRef(Boolean(initialSaved));
+  const isFirstAutoSaveRenderRef = useRef(true);
+
   // Persist state to Database (`sitting_plans` table) & LocalStorage
   const persistSittingPlanToDatabase = async (isManualAction = false) => {
     if (isManualAction) {
@@ -1191,6 +1577,8 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
       const fullSnapshot = {
         rooms,
         seatOverrides,
+        attendanceState,
+        showDeskQRCodes,
         activeRoomIndex,
         examType,
         schoolName,
@@ -1227,7 +1615,16 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
         theme: selectedThemeKey || 'royal',
         grid_layout: {
           roomIndex: idx,
-          roomConfig: rooms[idx] || r,
+          roomConfig: rooms[idx] || {
+            id: r.id,
+            name: r.name,
+            numRows: r.numRows || r.maxRows,
+            numColumns: r.numColumns,
+            columnSeats: r.columnSeats,
+            doorEntrance: r.doorEntrance,
+            startingSeat: r.startingSeat || r.startSeatFormatted,
+            fillPattern: r.fillPattern || 'snake'
+          },
           fullSnapshot: idx === 0 ? fullSnapshot : undefined,
           examType,
           schoolName,
@@ -1249,21 +1646,43 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
         updated_at: new Date().toISOString()
       }));
 
-      await supabase.from('sitting_plans').upsert(recordsToUpsert);
+      const { data: upsertedRows } = await supabase.from('sitting_plans').upsert(recordsToUpsert);
+
+      // Clean up any stale rooms in sitting_plans if the user deleted rooms or reduced room count
+      try {
+        const { data: existingRows } = await supabase
+          .from('sitting_plans')
+          .select('id, room_name')
+          .eq('school_id', normalizedSchoolId);
+        if (Array.isArray(existingRows) && existingRows.length > recordsToUpsert.length) {
+          const activeRoomNames = new Set(recordsToUpsert.map(rec => String(rec.room_name).trim()));
+          const activeIds = new Set(
+            Array.isArray(upsertedRows) ? upsertedRows.map(row => row.id).filter(Boolean) : []
+          );
+          const staleIds = existingRows
+            .filter(row => !activeRoomNames.has(String(row.room_name || row.roomName || '').trim()) && !activeIds.has(row.id))
+            .map(row => row.id)
+            .filter(Boolean);
+          if (staleIds.length > 0) {
+            await supabase.from('sitting_plans').delete().in('id', staleIds);
+          }
+        }
+      } catch (_cleanupErr) {}
+
       setIsCommittedToDb(true);
 
       if (isManualAction) {
         setSavedSuccessMsg(
-          `Mpangilio wa vyumba ${computedRooms.length} (${totalConfiguredStudents} wanafunzi, ${
+          `Sitting plan for ${computedRooms.length} rooms (${totalConfiguredStudents} students, ${
             currentRoom?.fillPattern === 'snake' ? 'Snake Pattern' : 'Straight Pattern'
-          }) umehifadhiwa kikamilifu kwenye database!`
+          }) successfully saved to database!`
         );
         setTimeout(() => setSavedSuccessMsg(null), 4000);
       }
     } catch (err) {
       console.warn('Could not save sitting plan to database:', err);
       if (isManualAction) {
-        setErrorMessage('Hitilafu wakati wa kuhifadhi kwenye database. Tafadhali jaribu tena.');
+        setErrorMessage('Error saving to database. Please try again.');
         setTimeout(() => setErrorMessage(null), 4000);
       }
     } finally {
@@ -1275,7 +1694,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
 
   const handleSaveToDatabase = () => persistSittingPlanToDatabase(true);
 
-  // Hydrate from Cloud SQL `sitting_plans` table on mount if localStorage had no saved state
+  // Hydrate from Cloud SQL `sitting_plans` table on mount
   const hasHydratedFromDbRef = useRef(false);
   useEffect(() => {
     if (hasHydratedFromDbRef.current) return;
@@ -1288,24 +1707,33 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
           .select('*')
           .eq('school_id', normalizedSchoolId);
 
-        if (error || !Array.isArray(rows) || rows.length === 0) return;
+        if (error || !Array.isArray(rows) || rows.length === 0) {
+          isHydrationCompleteRef.current = true;
+          return;
+        }
 
-        // Look for a row carrying fullSnapshot in grid_layout / gridLayout
+        // Look for the most recent row carrying fullSnapshot in grid_layout / gridLayout
         let snapshotFromDb = null;
         for (const row of rows) {
           const gl = row.grid_layout || row.gridLayout || {};
           if (gl && gl.fullSnapshot && Array.isArray(gl.fullSnapshot.rooms) && gl.fullSnapshot.rooms.length > 0) {
-            snapshotFromDb = gl.fullSnapshot;
-            break;
+            if (!snapshotFromDb || (gl.fullSnapshot.updatedAt || '') > (snapshotFromDb.updatedAt || '')) {
+              snapshotFromDb = gl.fullSnapshot;
+            }
           }
         }
 
-        // If no local state was present, or if DB has rooms and local only had default single 24-seat room
-        const localNow = loadSavedSittingPlanState(normalizedSchoolId);
-        if (!localNow && snapshotFromDb) {
+        const shouldApplyDbSnapshot =
+          snapshotFromDb &&
+          (!hadInitialLocalStateRef.current ||
+            (snapshotFromDb.updatedAt && initialSaved?.updatedAt && snapshotFromDb.updatedAt > initialSaved.updatedAt));
+
+        if (shouldApplyDbSnapshot) {
           sittingPlanMemoryCache.set(normalizedSchoolId, snapshotFromDb);
           try {
-            localStorage.setItem(`haby_sitting_plan_state_${normalizedSchoolId}`, JSON.stringify(snapshotFromDb));
+            const serialized = JSON.stringify(snapshotFromDb);
+            localStorage.setItem(`haby_sitting_plan_state_${normalizedSchoolId}`, serialized);
+            localStorage.setItem(`haby_sitting_plan_state_${schoolId}`, serialized);
           } catch (e) {}
 
           if (Array.isArray(snapshotFromDb.rooms) && snapshotFromDb.rooms.length > 0) {
@@ -1313,6 +1741,14 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
           }
           if (snapshotFromDb.seatOverrides && typeof snapshotFromDb.seatOverrides === 'object') {
             setSeatOverrides(snapshotFromDb.seatOverrides);
+          }
+          if (snapshotFromDb.attendanceState && typeof snapshotFromDb.attendanceState === 'object') {
+            setAttendanceState(snapshotFromDb.attendanceState);
+          }
+          if (typeof snapshotFromDb.activeRoomIndex === 'number') {
+            setActiveRoomIndex(
+              Math.min(Math.max(0, snapshotFromDb.activeRoomIndex), Math.max(0, (snapshotFromDb.rooms?.length || 1) - 1))
+            );
           }
           if (snapshotFromDb.examType) setExamType(snapshotFromDb.examType);
           if (snapshotFromDb.schoolName) setSchoolName(snapshotFromDb.schoolName);
@@ -1329,7 +1765,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
           if (snapshotFromDb.batchPattern) setBatchPattern(snapshotFromDb.batchPattern);
           if (snapshotFromDb.batchStartNumber) setBatchStartNumber(snapshotFromDb.batchStartNumber);
           setIsCommittedToDb(true);
-        } else if (!localNow && rows.length > 0) {
+        } else if (!hadInitialLocalStateRef.current && rows.length > 0) {
           // Reconstruct rooms from individual sitting_plans rows if fullSnapshot wasn't attached
           const sortedRows = [...rows].sort((a, b) => {
             const ia = a.grid_layout?.roomIndex ?? a.gridLayout?.roomIndex ?? 0;
@@ -1361,16 +1797,30 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
         }
       } catch (e) {
         console.warn('SittingPlan DB hydration notice:', e);
+      } finally {
+        isHydrationCompleteRef.current = true;
       }
     })();
   }, [normalizedSchoolId]);
 
-  // Auto-save every Sitting Plan change to localStorage immediately + debounce sync to Cloud SQL Database
+  // Auto-save every Sitting Plan change to localStorage immediately + fast 300ms sync to Cloud SQL Database
   const autoSaveTimerRef = useRef(null);
   useEffect(() => {
+    if (isFirstAutoSaveRenderRef.current) {
+      isFirstAutoSaveRenderRef.current = false;
+      if (!hadInitialLocalStateRef.current) {
+        return undefined;
+      }
+    }
+    if (!isHydrationCompleteRef.current) {
+      return undefined;
+    }
+
     const fullSnapshot = {
       rooms,
       seatOverrides,
+      attendanceState,
+      showDeskQRCodes,
       activeRoomIndex,
       examType,
       schoolName,
@@ -1401,7 +1851,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
       persistSittingPlanToDatabase(false);
-    }, 900);
+    }, 300);
 
     return () => {
       if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
@@ -1409,6 +1859,8 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
   }, [
     rooms,
     seatOverrides,
+    attendanceState,
+    showDeskQRCodes,
     activeRoomIndex,
     examType,
     schoolName,
@@ -1427,7 +1879,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     normalizedSchoolId
   ]);
 
-  // NATIVE REACT-TO-PRINT TRIGGER
+  // NATIVE REACT-TO-PRINT TRIGGER FOR SITTING PLAN
   const reactToPrintTrigger = useReactToPrint({
     contentRef: planContainerRef,
     documentTitle: `NECTA_SITTING_PLAN_${examType}_${(currentRoom?.name || 'ROOM').replace(/\s+/g, '_')}`,
@@ -1445,6 +1897,49 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
       }
     `
   });
+
+  // NATIVE REACT-TO-PRINT TRIGGER FOR DESK QR SLIPS
+  const reactToPrintSlipsTrigger = useReactToPrint({
+    contentRef: deskSlipsContainerRef,
+    documentTitle: `DESK_QR_SLIPS_${examType}_${(schoolName || 'SCHOOL').replace(/\s+/g, '_')}`,
+    pageStyle: `
+      @page {
+        size: A4 portrait !important;
+        margin: 6mm 8mm !important;
+      }
+      @media print {
+        body {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          color-adjust: exact !important;
+        }
+        .desk-slips-page {
+          page-break-after: always !important;
+          break-after: page !important;
+          page-break-inside: avoid !important;
+          break-inside: avoid !important;
+        }
+        .desk-slips-page:last-of-type {
+          page-break-after: auto !important;
+          break-after: auto !important;
+        }
+      }
+    `
+  });
+
+  const handlePrintDeskSlips = () => {
+    setTimeout(() => {
+      try {
+        if (reactToPrintSlipsTrigger) {
+          reactToPrintSlipsTrigger();
+        } else {
+          window.print();
+        }
+      } catch {
+        window.print();
+      }
+    }, 120);
+  };
 
   const handlePrintCurrentRoom = () => {
     setPrintScope('current');
@@ -1494,6 +1989,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
   // Export as high-resolution A4 Portrait PDF (supports current room or all visible rooms)
   const handleExportPDF = async () => {
     setIsExportingPDF(true);
+    setPdfProgressText('Inaandaa ukurasa wa PDF...');
     setErrorMessage(null);
     try {
       const pdf = new jsPDF({
@@ -1510,6 +2006,11 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
 
       const pagesCount = roomsToRender.length;
       for (let i = 0; i < pagesCount; i++) {
+        setPdfProgressText(
+          pagesCount > 1
+            ? `Processing room ${i + 1} of ${pagesCount}...`
+            : 'Processing room image...'
+        );
         const targetElement = document.getElementById(`room-portrait-page-${i}`);
         if (!targetElement) continue;
         if (i > 0) pdf.addPage('a4', 'portrait');
@@ -1525,19 +2026,21 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
         pdf.addImage(imgData, 'PNG', marginMm, marginMm, printableW, printableH, undefined, 'FAST');
       }
 
+      setPdfProgressText('Finalizing and downloading...');
       const fileName =
         pagesCount > 1
           ? `SITTING_PLAN_${examType}_ALL_${pagesCount}_ROOMS.pdf`
           : `SITTING_PLAN_${examType}_${(currentRoom?.name || 'ROOM').replace(/\s+/g, '_')}.pdf`;
       pdf.save(fileName);
-      setSavedSuccessMsg(`PDF ya ubora wa juu (${fileName}) imepakuliwa kwa ufanisi kwa ajili ya ku-print!`);
+      setSavedSuccessMsg(`High-resolution PDF (${fileName}) downloaded successfully for printing!`);
       setTimeout(() => setSavedSuccessMsg(null), 3500);
     } catch (err) {
       console.error('Export PDF error:', err);
-      setErrorMessage('Hitilafu wakati wa kutengeneza PDF. Tafadhali jaribu tena.');
+      setErrorMessage('Error generating PDF. Please try again.');
       setTimeout(() => setErrorMessage(null), 4000);
     } finally {
       setIsExportingPDF(false);
+      setPdfProgressText(null);
     }
   };
 
@@ -1644,7 +2147,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
 
   <!-- Metadata Grid -->
   <text x="${padX}" y="118" fill="#475569" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="700">SCHOOL:</text>
-  <text x="${padX + 95}" y="118" fill="#0f172a" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="900">${escapeXml(schoolName.toUpperCase())}</text>
+  <text x="${padX + 95}" y="118" fill="#0f172a" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="900">${escapeXml((schoolName || '').toUpperCase())}</text>
 
   <text x="${padX}" y="136" fill="#475569" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="700">SUBJECT:</text>
   <text x="${padX + 95}" y="136" fill="#0f172a" font-family="Inter, Arial, sans-serif" font-size="11" font-weight="900">${escapeXml(`${subject} (${codeNo})`)}</text>
@@ -1716,11 +2219,11 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      setSavedSuccessMsg(`Picha ya Vector SVG (${fileName}) imepakuliwa kwa ufanisi kwa ajili ya ku-print!`);
+      setSavedSuccessMsg(`Vector SVG image (${fileName}) downloaded successfully for printing!`);
       setTimeout(() => setSavedSuccessMsg(null), 3500);
     } catch (err) {
       console.error('Export SVG error:', err);
-      setErrorMessage('Hitilafu wakati wa kutoa SVG. Tafadhali jaribu tena.');
+      setErrorMessage('Error exporting SVG. Please try again.');
       setTimeout(() => setErrorMessage(null), 4000);
     } finally {
       setIsExportingSVG(false);
@@ -1744,11 +2247,11 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
       link.download = `SITTING_PLAN_${examType}_${(currentRoom?.name || 'ROOM').replace(/\s+/g, '_')}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
-      setSavedSuccessMsg('Picha ya ubora wa juu (PNG) imepakuliwa kwa ufanisi!');
+      setSavedSuccessMsg('High-resolution PNG image downloaded successfully!');
       setTimeout(() => setSavedSuccessMsg(null), 3000);
     } catch (err) {
       console.error('Export image error:', err);
-      setErrorMessage('Hitilafu wakati wa kutoa picha. Tafadhali jaribu tena au tumia Print.');
+      setErrorMessage('Error exporting image. Please try again or use Print.');
       setTimeout(() => setErrorMessage(null), 4000);
     } finally {
       setIsExportingImage(false);
@@ -1891,7 +2394,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
               </span>
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Mpangilio rasmi wa mitihani ya NECTA kwa ukurasa 1 wa Portrait kwa kila chumba, rangi nzuri za chumba na madawati.
+              Official Examination Seating Plan layout with 1 A4 Portrait page per room, professional room themes and desks.
             </p>
           </div>
 
@@ -1904,7 +2407,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                 className="px-3.5 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition active:scale-95"
               >
                 <ArrowLeft className="w-4 h-4" />
-                <span>Rudi / Back</span>
+                <span>Back</span>
               </button>
             )}
 
@@ -1919,7 +2422,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
               }`}
             >
               <Eye className="w-4 h-4" />
-              <span>{showPreviewCanvas ? 'Ficha Preview Canvas' : 'Preview Snake Pattern (Canvas)'}</span>
+              <span>{showPreviewCanvas ? 'Hide Canvas Preview' : 'Preview Snake Pattern (Canvas)'}</span>
             </button>
 
             {/* Commit & Save Configuration to Database */}
@@ -1932,16 +2435,53 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                   ? 'bg-teal-700 text-white border-teal-800'
                   : 'bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700'
               }`}
-              title="Thibitisha na hifadhi mpangilio huu wa vyumba kwenye Database"
+              title="Confirm and save this room layout to database"
             >
               <Database className="w-4 h-4" />
               <span>
                 {isSavingToDb
-                  ? 'Inahifadhi...'
+                  ? 'Saving...'
                   : isCommittedToDb
-                  ? 'Imehifadhiwa Database ✓'
-                  : 'Hifadhi Kwenye Database'}
+                  ? 'Committed to Database ✓'
+                  : 'Save to Database'}
               </span>
+            </button>
+
+            {/* Invigilator QR Scanner for Quick Verification */}
+            <button
+              type="button"
+              onClick={() => setShowQRScannerModal(true)}
+              className="px-4 py-2 bg-gradient-to-r from-purple-700 via-indigo-700 to-blue-700 hover:from-purple-800 hover:to-blue-800 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-md transition active:scale-95 ring-2 ring-purple-300"
+              title="Open camera scanner to scan desk QR codes and verify attendance (Present ✓ / Absent ✗)"
+            >
+              <Scan className="w-4 h-4 text-purple-200" />
+              <span>Scan QR / Verify Attendance</span>
+            </button>
+
+            {/* Toggle Desk QR Codes Visibility on Screen & Print */}
+            <button
+              type="button"
+              onClick={() => setShowDeskQRCodes(prev => !prev)}
+              className={`px-3.5 py-2 rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer border transition active:scale-95 ${
+                showDeskQRCodes
+                  ? 'bg-purple-100 hover:bg-purple-200 text-purple-900 border-purple-300'
+                  : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-300'
+              }`}
+              title="Toggle QR code printing on desk boxes"
+            >
+              <QrCode className="w-4 h-4 text-purple-700" />
+              <span>{showDeskQRCodes ? 'Desk QR: Yes ✓' : 'Desk QR: No'}</span>
+            </button>
+
+            {/* Printable Individual Desk Slips / Tags with QR Code */}
+            <button
+              type="button"
+              onClick={() => setShowDeskSlipsModal(true)}
+              className="px-3.5 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition active:scale-95"
+              title="Generate and print desk labels / cards with QR code for each student (Desk Labels)"
+            >
+              <Tag className="w-4 h-4 text-indigo-600" />
+              <span>Desk Slips (QR Labels)</span>
             </button>
 
             {/* Manual Candidate Numbers Input Button */}
@@ -1951,7 +2491,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
               className="px-3.5 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer transition active:scale-95"
             >
               <Edit3 className="w-4 h-4 text-amber-600" />
-              <span>Weka Namba Manual (List)</span>
+              <span>Manual Numbers (List)</span>
             </button>
 
             {/* Print Current Room in A4 Portrait */}
@@ -1984,10 +2524,24 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
               onClick={handleExportPDF}
               disabled={isExportingPDF}
               className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95"
-              title="Pakua mpangilio wa madawati kama High-Resolution PDF kwa ajili ya ku-print"
+              title="Download seating plan as High-Resolution PDF for printing"
             >
               <FileText className="w-4 h-4" />
-              <span>{isExportingPDF ? 'Inatengeneza PDF...' : 'Export High-Res PDF'}</span>
+              <span>{isExportingPDF ? (pdfProgressText || 'Generating PDF...') : 'Export High-Res PDF'}</span>
+            </button>
+
+            {/* Send via WhatsApp Button */}
+            <button
+              type="button"
+              onClick={() => {
+                handleExportPDF();
+                setShowWhatsAppModal(true);
+              }}
+              className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95"
+              title="Download PDF and share sitting plan details via WhatsApp"
+            >
+              <Share2 className="w-4 h-4" />
+              <span>Send via WhatsApp</span>
             </button>
 
             {/* Export Crisp Vector SVG Image for Printing */}
@@ -2078,29 +2632,29 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
               <Layers className="w-5 h-5 text-indigo-700 shrink-0" />
               <div>
                 <h3 className="font-black text-indigo-950 text-xs sm:text-sm uppercase tracking-wide">
-                  Automatic Sitting Plan Generator (Weka Idadi ya Wanafunzi Wote &amp; Kila Chumba)
+                  Automatic Sitting Plan Generator (Total Students &amp; Per Room)
                 </h3>
                 <p className="text-[11px] text-slate-600 font-medium">
-                  Ingiza jumla ya wanafunzi (mfano: 300) na idadi ya wanafunzi kwa kila chumba (mfano: 25 au 30) kutengeneza vyumba vyote kiotomatiki.
+                  Enter total students (e.g. 300) and number of students per room (e.g. 25 or 30) to generate all rooms automatically.
                 </p>
               </div>
             </div>
             <div className="px-3 py-1 bg-white/90 border border-indigo-200 rounded-lg text-xs font-black text-indigo-900 shrink-0">
-              Muhtasari: Wanafunzi {Math.max(1, parseInt(batchCandidateCount, 10) || 1)} &rarr; Vyumba{' '}
+              Summary: Students {Math.max(1, parseInt(batchCandidateCount, 10) || 1)} &rarr; Rooms{' '}
               <span className="text-emerald-700 underline">
                 {Math.ceil(
                   Math.max(1, parseInt(batchCandidateCount, 10) || 1) /
                     Math.max(1, parseInt(batchSeatsPerRoom, 10) || 25)
                 )}
               </span>{' '}
-              ({Math.max(1, parseInt(batchSeatsPerRoom, 10) || 25)} kwa chumba)
+              ({Math.max(1, parseInt(batchSeatsPerRoom, 10) || 25)} per room)
             </div>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 text-xs items-end">
             <div>
               <label className="block font-black text-slate-800 mb-1">
-                1. Jumla ya Wanafunzi Wote
+                1. Total Students
               </label>
               <input
                 type="number"
@@ -2108,14 +2662,14 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                 max="5000"
                 value={batchCandidateCount}
                 onChange={(e) => setBatchCandidateCount(e.target.value)}
-                placeholder="Mfano: 300"
+                placeholder="Example: 300"
                 className="w-full p-2 border-2 border-indigo-300 rounded-lg font-black text-sm text-indigo-950 bg-white focus:ring-2 focus:ring-indigo-500"
               />
             </div>
 
             <div>
               <label className="block font-black text-slate-800 mb-1">
-                2. Wanafunzi Kila Chumba
+                2. Students Per Room
               </label>
               <input
                 type="number"
@@ -2123,14 +2677,14 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                 max="120"
                 value={batchSeatsPerRoom}
                 onChange={(e) => setBatchSeatsPerRoom(e.target.value)}
-                placeholder="Mfano: 25"
+                placeholder="Example: 25"
                 className="w-full p-2 border-2 border-indigo-300 rounded-lg font-black text-sm text-indigo-950 bg-white focus:ring-2 focus:ring-indigo-500"
               />
             </div>
 
             <div>
               <label className="block font-black text-slate-800 mb-1">
-                3. Columns kwa Chumba
+                3. Columns Per Room
               </label>
               <input
                 type="number"
@@ -2144,7 +2698,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
 
             <div>
               <label className="block font-black text-slate-800 mb-1">
-                4. Namba ya Kuanzia
+                4. Starting Number
               </label>
               <input
                 type="text"
@@ -2158,7 +2712,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
 
             <div>
               <label className="block font-black text-slate-800 mb-1">
-                5. Mpangilio (Pattern)
+                5. Sitting Pattern
               </label>
               <select
                 value={batchPattern}
@@ -2169,8 +2723,8 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                 }}
                 className="w-full p-2 border border-slate-300 rounded-lg font-black text-xs text-slate-900 bg-white cursor-pointer focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="snake">Snake Pattern (Zunguka ↓↑)</option>
-                <option value="topToBottom">Straight (Juu-Chini ↓↓)</option>
+                <option value="snake">Snake Pattern (Zigzag ↓↑)</option>
+                <option value="topToBottom">Straight (Top-Down ↓↓)</option>
               </select>
             </div>
 
@@ -2236,6 +2790,9 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
           <div className="flex items-center gap-2 overflow-x-auto pb-1">
             {computedRooms.map((rm, idx) => {
               const isActive = idx === activeRoomIndex;
+              const roomNumber = idx + 1;
+              const roomTitleOutOf = `Room ${roomNumber} out of ${rooms.length}`;
+              const roomSummary = getRoomAttendanceSummary(rm, idx);
               return (
                 <div
                   key={rm.id || idx}
@@ -2247,12 +2804,25 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                   onClick={() => setActiveRoomIndex(idx)}
                 >
                   <Armchair className={`w-3.5 h-3.5 ${isActive ? 'text-white' : 'text-blue-600'}`} />
-                  <span>{rm.name}</span>
+                  <span className="font-black tracking-tight">{roomTitleOutOf}</span>
+                  <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                    isActive ? 'bg-blue-700 text-blue-100' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    {rm.name}
+                  </span>
                   <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
                     isActive ? 'bg-blue-800 text-blue-100' : 'bg-slate-200 text-slate-700'
                   }`}>
-                    {rm.startSeatFormatted} - {rm.endSeatFormatted} ({rm.totalSeats} seats)
+                    {rm.totalSeats} seats
                   </span>
+                  {/* Quick Attendance Pill on Room Tab */}
+                  {(roomSummary.present > 0 || roomSummary.absent > 0) && (
+                    <span className={`text-[9px] px-1 py-0.5 rounded font-mono font-black ${
+                      isActive ? 'bg-blue-900 text-emerald-300' : 'bg-emerald-100 text-emerald-900'
+                    }`}>
+                      ✓{roomSummary.present} ✗{roomSummary.absent}
+                    </span>
+                  )}
 
                   {rooms.length > 1 && (
                     <button
@@ -2304,7 +2874,12 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
 
           {/* Room Number Name */}
           <div>
-            <label className="block font-bold text-slate-700 mb-1">Room Name / Label</label>
+            <div className="flex items-center justify-between mb-1">
+              <label className="block font-bold text-slate-700">Room Name / Label</label>
+              <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 border border-blue-200 text-[10px] font-black">
+                Room {activeRoomIndex + 1} out of {rooms.length}
+              </span>
+            </div>
             <input
               type="text"
               value={currentRoom.name}
@@ -2425,7 +3000,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
             <div className="flex items-center gap-2">
               <Sliders className="w-4 h-4 text-blue-600" />
               <span className="font-black text-slate-800 text-xs">
-                {currentRoom.name} Layout ({currentRoom.numColumns} Columns, {activeComputedRoom.totalSeats} Total Candidates)
+                Room {activeRoomIndex + 1} out of {rooms.length} ({currentRoom.name}) Layout ({currentRoom.numColumns} Columns, {activeComputedRoom.totalSeats} Total Candidates)
               </span>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -2599,11 +3174,11 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                     Snake Pattern Visual Canvas Simulator &amp; Preview Mode
                   </span>
                   <span className="text-[11px] text-slate-300 font-semibold">
-                    · Chumba: {activeComputedRoom.name} ({activeComputedRoom.totalSeats} Desks) · Jumla Wanafunzi Wote: {totalConfiguredStudents}
+                    · Room: Room {activeRoomIndex + 1} out of {rooms.length} ({activeComputedRoom.name}) · {activeComputedRoom.totalSeats} Desks · Total Students: {totalConfiguredStudents}
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400">
-                  Hakiki mzunguko wa <strong>Snake Pattern (↓ Juu-Chini / ↑ Chini-Juu)</strong> kwenye Canvas kulingana na idadi ya meza na wanafunzi kabla ya kuhifadhi mpangilio wa mwisho kwenye Database.
+                  Preview the Snake Pattern (↓ Top-Down / ↑ Bottom-Top) on Canvas based on desks and students count before committing final seating plan to Database.
                 </p>
               </div>
 
@@ -2868,7 +3443,13 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
         className="space-y-8"
       >
         {roomsToRender.map((room, roomIdx) => {
+          const actualRoomIdx = room.roomIdx ?? roomIdx;
+          const roomNumber = actualRoomIdx + 1;
+          const totalRoomsCount = rooms.length;
+          const roomOrdinalLabel = `Room ${roomNumber} out of ${totalRoomsCount}`;
+          const roomTitleWithOutOf = `ROOM ${roomNumber} OUT OF ${totalRoomsCount}`;
           const rowHeightClass = getDynamicRowHeight(room.maxRows);
+          const roomAttendance = getRoomAttendanceSummary(room, roomIdx);
 
           return (
             <div
@@ -2900,9 +3481,13 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                 <h1 className="text-base sm:text-lg font-black uppercase tracking-wider text-slate-900 leading-tight">
                   NATIONAL EXAMINATIONS COUNCIL OF TANZANIA (NECTA)
                 </h1>
-                <div className="flex items-center justify-center gap-2 pt-0.5">
-                  <span className={`inline-block px-3 py-0.5 rounded text-xs font-black uppercase tracking-wider ${theme.headerBadgeBg}`}>
-                    {examType} EXAMINATION SITTING PLAN — {new Date().getFullYear()}
+                <div className="flex items-center justify-center gap-2 pt-0.5 flex-wrap">
+                  <span className={`inline-flex items-center gap-1.5 px-3 py-0.5 rounded text-xs font-black uppercase tracking-wider ${theme.headerBadgeBg}`}>
+                    <span>{examType} EXAMINATION SITTING PLAN</span>
+                    <span>—</span>
+                    <span className="bg-white/20 px-1.5 py-0.2 rounded font-black">{roomOrdinalLabel}</span>
+                    <span>—</span>
+                    <span>{new Date().getFullYear()}</span>
                   </span>
                   <span className="text-xs font-black px-2.5 py-0.5 bg-white border border-slate-300 rounded text-slate-800">
                     PORTRAIT A4
@@ -2923,9 +3508,14 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                   </div>
                   <div className="flex items-center">
                     <span className="font-bold w-28 uppercase text-slate-600">Room No:</span>
-                    <span className="font-black text-xs px-2 py-0.5 rounded bg-blue-100 text-blue-950 border border-blue-300 inline-block uppercase">
-                      {room.name}
-                    </span>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-black text-xs px-2.5 py-0.5 rounded bg-blue-600 text-white font-sans shadow-2xs">
+                        {roomOrdinalLabel}
+                      </span>
+                      <span className="font-black text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-950 border border-blue-300 uppercase">
+                        {room.name}
+                      </span>
+                    </div>
                   </div>
                 </div>
 
@@ -2949,13 +3539,81 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                 </div>
               </div>
 
+              {/* ROOM ATTENDANCE SUMMARY (WALIOFANYA vs WASIOFANYA MTENGENEZAJI) */}
+              <div className="bg-white/95 border-2 border-slate-300 rounded-lg p-2.5 my-1.5 text-xs flex flex-wrap items-center justify-between gap-2 shadow-2xs">
+                <div className="flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <div>
+                    <span className="font-black text-slate-900 uppercase tracking-wide text-[11px] block sm:inline">
+                      MUHTASARI WA CHUMBA ({(roomOrdinalLabel || '').toUpperCase()} · {room?.name || ''}):
+                    </span>
+                    <span className="text-[10px] text-slate-500 font-medium sm:ml-1">
+                      Waliofanya na Wasiofanya Mtihani
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap font-mono">
+                  {/* Waliofanya Summary Box */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 border border-emerald-300 rounded-md text-emerald-900 font-black text-xs">
+                    <span className="text-emerald-700">Waliofanya (✓):</span>
+                    <span className="text-sm font-black text-emerald-800 bg-white px-2 py-0.2 rounded border border-emerald-200">
+                      {roomAttendance.present}
+                    </span>
+                  </div>
+
+                  {/* Wasiofanya Summary Box */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-50 border border-rose-300 rounded-md text-rose-900 font-black text-xs">
+                    <span className="text-rose-700">Wasiofanya (✗):</span>
+                    <span className="text-sm font-black text-rose-800 bg-white px-2 py-0.2 rounded border border-rose-200">
+                      {roomAttendance.absent}
+                    </span>
+                  </div>
+
+                  {/* Total Candidates */}
+                  <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 border border-slate-300 rounded-md text-slate-800 font-bold text-xs">
+                    <span>Jumla:</span>
+                    <span className="text-sm font-black text-slate-900 bg-white px-2 py-0.2 rounded border border-slate-300">
+                      {roomAttendance.total}
+                    </span>
+                  </div>
+
+                  {roomAttendance.unmarked > 0 && (
+                    <div className="no-print flex items-center gap-1 px-2 py-1 bg-amber-50 border border-amber-200 rounded text-amber-800 text-[10px] font-bold">
+                      <span>Bado: {roomAttendance.unmarked}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Quick actions for invigilators on screen */}
+                <div className="no-print flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleMarkAllRoomAttendance(actualRoomIdx, 'PRESENT')}
+                    className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[10px] font-black cursor-pointer transition flex items-center gap-1 shadow-2xs"
+                    title="Weka wanafunzi wote wa chumba hiki kuwa Waliofanya mtihani (✓)"
+                  >
+                    <Check className="w-3 h-3" />
+                    <span>Weka Wote Waliofanya</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleMarkAllRoomAttendance(actualRoomIdx, null)}
+                    className="px-2 py-1 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded text-[10px] font-bold cursor-pointer transition"
+                    title="Futa alama zote za mahudhurio ya chumba hiki"
+                  >
+                    Futa Alama
+                  </button>
+                </div>
+              </div>
+
               {/* FRONT OF CLASS / BLACKBOARD BANNER */}
               <div className="space-y-1.5 pt-1.5">
                 <div 
                   className={`w-full py-1.5 px-3 rounded text-center font-black text-[11px] tracking-wider flex items-center justify-center gap-2 uppercase shadow-xs ${theme.blackboardBg}`}
                 >
                   <Armchair className="w-3.5 h-3.5 text-amber-300" />
-                  <span>FRONT OF ROOM — CHALKBOARD &amp; INVIGILATOR DESK</span>
+                  <span>FRONT OF ROOM — {(roomOrdinalLabel || '').toUpperCase()} ({room?.name || ''}) — CHALKBOARD &amp; INVIGILATOR DESK</span>
                   <Armchair className="w-3.5 h-3.5 text-amber-300" />
                 </div>
 
@@ -3093,6 +3751,11 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                               selectedDeskForMove.rowIdx === rowIdx && 
                               selectedDeskForMove.colIdx === colIdx;
 
+                            const deskKey = `${actualRoomIdx}-${rowIdx}-${colIdx}`;
+                            const attendanceStatus = attendanceState[deskKey]; // 'PRESENT' | 'ABSENT' | undefined
+                            const isAbsent = attendanceStatus === 'ABSENT';
+                            const isPresent = attendanceStatus === 'PRESENT';
+
                             const cellFontSizeClass = getDynamicNumberSize(room.maxRows, seat.seatNo, room.numColumns);
 
                             return (
@@ -3107,33 +3770,96 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                                     executeDeskMoveOrSwap(draggedDesk, actualRoomIdx, rowIdx, colIdx, seat);
                                   }
                                 }}
-                                title="Buruta (Drag) kuhamisha, bofya namba kuhariri, au tumia vitufe vya juu kuhamisha/kufuta"
+                                title="Buruta (Drag) kuhamisha, bofya namba kuhariri, bofya ✓/✗ kuweka mahudhurio ya mtihani"
                                 onClick={() => handleDeskClick(actualRoomIdx, rowIdx, colIdx, seat)}
-                                className={`desk-box-card ${rowHeightClass} ${theme.boxBodyBg} border-2 ${
+                                className={`desk-box-card ${rowHeightClass} ${
+                                  isAbsent ? 'bg-rose-50/80 border-rose-500' : isPresent ? 'bg-emerald-50/40 border-emerald-500' : theme.boxBodyBg
+                                } border-2 ${
                                   isSelectedForMove ? 'border-amber-500 ring-4 ring-amber-300 animate-pulse' : theme.boxBorder
                                 } rounded-md flex flex-col justify-between p-1 shadow-2xs transition group relative cursor-grab active:cursor-grabbing hover:ring-2 hover:ring-blue-500`}
                                 style={{
-                                  borderColor: isSelectedForMove ? '#f59e0b' : theme.boxBorderInline
+                                  borderColor: isSelectedForMove
+                                    ? '#f59e0b'
+                                    : isAbsent
+                                    ? '#e11d48'
+                                    : isPresent
+                                    ? '#10b981'
+                                    : theme.boxBorderInline
                                 }}
                               >
-                                {/* Desk Top Strip (Row/Col Tag + Attendance Checkbox + Action Buttons) */}
+                                {/* Desk Top Strip (Row/Col Tag + Waliofanya ✓ / Wasiofanya ✗ + Action Buttons) */}
                                 <div 
-                                  className={`flex items-center justify-between px-1.5 py-0.5 rounded-xs text-[8px] font-black uppercase tracking-wider shrink-0 ${theme.boxHeaderBg}`}
-                                  style={{ backgroundColor: theme.boxHeaderBgInline }}
+                                  className={`flex items-center justify-between px-1.5 py-0.5 rounded-xs text-[8px] font-black uppercase tracking-wider shrink-0 ${
+                                    isAbsent
+                                      ? 'bg-rose-700 text-white'
+                                      : isPresent
+                                      ? 'bg-emerald-700 text-white'
+                                      : theme.boxHeaderBg
+                                  }`}
+                                  style={{
+                                    backgroundColor: isAbsent
+                                      ? '#be123c'
+                                      : isPresent
+                                      ? '#047857'
+                                      : theme.boxHeaderBgInline
+                                  }}
                                 >
                                   <span className="flex items-center gap-1">
                                     <span>R{rowIdx + 1}C{colIdx + 1}</span>
                                     {isSelectedForMove && <span className="text-amber-300 font-bold">(HAMISHA)</span>}
                                   </span>
+
                                   <div className="flex items-center gap-1">
-                                    {/* Attendance Checkbox in Header Bar so it NEVER covers the Candidate Number */}
-                                    <input 
-                                      type="checkbox" 
-                                      className="w-2.5 h-2.5 cursor-pointer accent-emerald-400 rounded-xs"
-                                      title="Tiki kama mtahiniwa amehudhuria"
-                                      onClick={(e) => e.stopPropagation()}
-                                    />
-                                    <div className="no-print flex items-center gap-1">
+                                    {/* Attendance Buttons: Waliofanya (✓) and Wasiofanya (✗) */}
+                                    <div className="flex items-center gap-0.5">
+                                      {/* Interactive Screen Buttons */}
+                                      <div className="no-print flex items-center gap-0.5">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleToggleAttendance(actualRoomIdx, rowIdx, colIdx, 'PRESENT', e)}
+                                          title={isPresent ? 'Ondoa alama ya Waliofanya' : 'Weka: Mtahiniwa Amefanya Mtihani (Waliofanya ✓)'}
+                                          className={`p-0.5 rounded cursor-pointer transition ${
+                                            isPresent
+                                              ? 'bg-white text-emerald-800 ring-1 ring-white font-black shadow-xs'
+                                              : 'bg-black/20 hover:bg-emerald-500 hover:text-white text-white/90'
+                                          }`}
+                                        >
+                                          <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={(e) => handleToggleAttendance(actualRoomIdx, rowIdx, colIdx, 'ABSENT', e)}
+                                          title={isAbsent ? 'Ondoa alama ya Wasiofanya' : 'Weka: Mtahiniwa Hakufanya Mtihani / Hakuwepo (Wasiofanya ✗)'}
+                                          className={`p-0.5 rounded cursor-pointer transition ${
+                                            isAbsent
+                                              ? 'bg-white text-rose-800 ring-1 ring-white font-black shadow-xs'
+                                              : 'bg-black/20 hover:bg-rose-600 hover:text-white text-white/90'
+                                          }`}
+                                        >
+                                          <X className="w-2.5 h-2.5 stroke-[3]" />
+                                        </button>
+                                      </div>
+
+                                      {/* High-visibility Print Stamped Badge */}
+                                      <div className="hidden print:flex items-center text-[7px] font-black leading-none">
+                                        {isPresent && (
+                                          <span className="text-emerald-800 bg-white border border-emerald-600 px-1 py-0.2 rounded-xs font-black">
+                                            ✓ DONE
+                                          </span>
+                                        )}
+                                        {isAbsent && (
+                                          <span className="text-rose-800 bg-white border border-rose-600 px-1 py-0.2 rounded-xs font-black">
+                                            ✗ ABSENT
+                                          </span>
+                                        )}
+                                        {!attendanceStatus && (
+                                          <span className="border border-slate-600 w-2.5 h-2.5 inline-block rounded-xs bg-white text-center leading-none" />
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* Desk Edit/Delete Tool Buttons */}
+                                    <div className="no-print flex items-center gap-0.5 ml-0.5">
                                       <button
                                         type="button"
                                         title="Hamisha meza hii (Move / Swap Desk)"
@@ -3144,7 +3870,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                                             : 'bg-white/15 hover:bg-amber-400 hover:text-slate-950 text-white'
                                         }`}
                                       >
-                                        <RefreshCw className="w-2.5 h-2.5" />
+                                        <RefreshCw className="w-2 h-2" />
                                       </button>
                                       <button
                                         type="button"
@@ -3152,32 +3878,72 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                                         onClick={(e) => handleDeleteDesk(actualRoomIdx, rowIdx, colIdx, e)}
                                         className="px-1 py-0.2 rounded bg-rose-500/80 hover:bg-rose-600 text-white transition cursor-pointer"
                                       >
-                                        <Trash2 className="w-2.5 h-2.5" />
+                                        <Trash2 className="w-2 h-2" />
                                       </button>
                                     </div>
                                   </div>
                                 </div>
 
-                                {/* Candidate Roll Number - Unclipped on Screen (<input>) AND Unclipped on Print (<span>) */}
-                                <div className="flex-1 flex items-center justify-center w-full px-0.5 py-0.5 overflow-visible">
-                                  <input
-                                    type="text"
-                                    value={seat.seatNo}
-                                    placeholder="----"
-                                    title="Bofya hapa kubadili namba ya mtahiniwa moja kwa moja"
-                                    onClick={(e) => {
-                                      if (!selectedDeskForMove) {
+                                {/* Candidate Roll Number & Scannable QR Code */}
+                                <div className="flex-1 flex items-center justify-between w-full px-1 py-0.5 gap-1 overflow-visible">
+                                  {/* Printable/Scannable QR Code */}
+                                  {showDeskQRCodes && seat.seatNo && (
+                                    <div
+                                      onClick={(e) => {
                                         e.stopPropagation();
-                                      }
-                                    }}
-                                    onChange={(e) => handleInlineSeatChange(actualRoomIdx, rowIdx, colIdx, e.target.value)}
-                                    className={`no-print w-full text-center bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded font-mono text-slate-950 py-0 px-0.5 ${cellFontSizeClass}`}
-                                  />
-                                  <span
-                                    className={`hidden desk-seat-number-print font-mono text-slate-950 text-center w-full px-0.5 ${cellFontSizeClass}`}
-                                  >
-                                    {seat.seatNo || '----'}
-                                  </span>
+                                        setSelectedStudentForQRDetail({
+                                          seatNo: seat.seatNo,
+                                          stepOrder: seat.stepOrder,
+                                          roomIdx: actualRoomIdx,
+                                          roomName: room.name || `ROOM ${actualRoomIdx + 1}`,
+                                          roomNumber: actualRoomIdx + 1,
+                                          totalRooms: rooms.length,
+                                          rowIdx,
+                                          colIdx,
+                                          deskKey,
+                                          status: attendanceStatus
+                                        });
+                                      }}
+                                      className="shrink-0 bg-white p-0.5 rounded border border-slate-300 shadow-2xs hover:ring-2 hover:ring-purple-500 cursor-pointer transition print:border-black print:p-0.2 print:shadow-none"
+                                      title="Bofya kuona Kadi ya Meza ya Mtahiniwa / Hakiki Mahudhurio"
+                                    >
+                                      <QRCodeSVG
+                                        value={JSON.stringify({
+                                          app: 'HABY_EXAM',
+                                          seat: String(seat.seatNo || '').trim(),
+                                          room: actualRoomIdx + 1,
+                                          name: room.name || `ROOM ${actualRoomIdx + 1}`,
+                                          pos: `R${rowIdx + 1}C${colIdx + 1}`,
+                                          key: deskKey,
+                                          code: codeNo || ''
+                                        })}
+                                        size={getDynamicQRSize(room.maxRows, room.numColumns)}
+                                        level="L"
+                                      />
+                                    </div>
+                                  )}
+
+                                  {/* Candidate Number - Input on Screen & Crisp Span on Print */}
+                                  <div className="flex-1 flex items-center justify-center min-w-0">
+                                    <input
+                                      type="text"
+                                      value={seat.seatNo}
+                                      placeholder="----"
+                                      title="Bofya hapa kubadili namba ya mtahiniwa moja kwa moja"
+                                      onClick={(e) => {
+                                        if (!selectedDeskForMove) {
+                                          e.stopPropagation();
+                                        }
+                                      }}
+                                      onChange={(e) => handleInlineSeatChange(actualRoomIdx, rowIdx, colIdx, e.target.value)}
+                                      className={`no-print w-full text-center bg-transparent border-0 focus:outline-none focus:ring-1 focus:ring-blue-500 rounded font-mono text-slate-950 py-0 px-0.5 ${cellFontSizeClass}`}
+                                    />
+                                    <span
+                                      className={`hidden desk-seat-number-print font-mono text-slate-950 text-center w-full px-0.5 ${cellFontSizeClass}`}
+                                    >
+                                      {seat.seatNo || '----'}
+                                    </span>
+                                  </div>
                                 </div>
 
                                 {/* Desk Bottom Sub-tag */}
@@ -3198,7 +3964,7 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
 
               {/* REAR OF EXAMINATION ROOM */}
               <div className="text-center text-[10px] font-bold text-slate-500 uppercase tracking-widest py-1 border-t border-slate-300">
-                — REAR / BACK OF EXAMINATION ROOM —
+                — REAR / BACK OF EXAMINATION ROOM ({(roomOrdinalLabel || '').toUpperCase()}) —
               </div>
 
               {/* OFFICIAL SIGNATURES & SCHOOL STAMP FOOTER */}
@@ -3251,6 +4017,713 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
           );
         })}
       </div>
+
+      {/* =========================================================================
+          MODAL 1: INVIGILATOR QR CAMERA SCANNER & ATTENDANCE VERIFICATION
+          Allows invigilators to scan student seat QR codes or search roll numbers
+          and instantly mark / verify attendance status (Waliofanya ✓ vs Wasiofanya ✗)
+          ========================================================================= */}
+      {showQRScannerModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-xl w-full p-4 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-auto animate-in fade-in zoom-in duration-150">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-purple-100 text-purple-700 rounded-xl">
+                  <Scan className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                    <span>Invigilator Exam QR Scanner</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-purple-100 text-purple-800">
+                      Hakiki Mahudhurio
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Elekeza kamera kwenye QR code ya meza ya mwanafunzi kuthibitisha mahudhurio
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowQRScannerModal(false)}
+                className="text-slate-400 hover:text-slate-700 text-lg font-black p-1 cursor-pointer transition rounded-lg hover:bg-slate-100"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Auto-mark Present Toggle + Sound indicator */}
+            <div className="flex items-center justify-between bg-purple-50 border border-purple-200 p-2.5 rounded-xl text-xs text-purple-950 flex-wrap gap-2">
+              <label className="flex items-center gap-2 cursor-pointer font-bold select-none">
+                <input
+                  type="checkbox"
+                  checked={autoMarkPresent}
+                  onChange={(e) => setAutoMarkPresent(e.target.checked)}
+                  className="w-4 h-4 accent-purple-600 rounded cursor-pointer"
+                />
+                <span>Weka Waliofanya (✓) Kiotomatiki Unapo-scan (Auto-mark Present)</span>
+              </label>
+              <span className="text-[10px] text-purple-700 font-semibold flex items-center gap-1">
+                <Volume2 className="w-3.5 h-3.5" />
+                <span>Mlio wa Sauti Umewashwa</span>
+              </span>
+            </div>
+
+            {/* Camera Viewfinder Box */}
+            <div className="relative bg-slate-950 rounded-2xl overflow-hidden p-2 text-center border-2 border-purple-400 shadow-inner">
+              <div 
+                id="haby-exam-qr-reader"
+                className="w-full max-w-[280px] sm:max-w-[320px] mx-auto rounded-xl overflow-hidden aspect-square bg-slate-900 flex items-center justify-center text-slate-400 text-xs"
+              />
+              {!scannerActive && !cameraError && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-950/80 text-white gap-2 p-4">
+                  <Camera className="w-8 h-8 text-purple-400 animate-pulse" />
+                  <span className="text-xs font-bold">Inawasha kamera ya simu/kifaa...</span>
+                </div>
+              )}
+              {cameraError && (
+                <div className="p-3 bg-rose-950/90 text-rose-200 rounded-xl text-xs space-y-1 m-2 border border-rose-800 text-left">
+                  <div className="font-bold flex items-center gap-1.5 text-rose-300">
+                    <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+                    <span>Taarifa ya Kamera:</span>
+                  </div>
+                  <p>{cameraError}</p>
+                </div>
+              )}
+            </div>
+
+            {/* Quick Manual Roll Number Input & Fallback */}
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-2.5 space-y-1.5">
+              <div className="text-[11px] font-bold text-slate-700 flex items-center justify-between">
+                <span>Au Tafuta / Weka Namba ya Mtahiniwa Moja kwa Moja:</span>
+                <span className="text-[10px] text-slate-400 font-mono">0001, S0123/0001</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={manualScanInput}
+                    onChange={(e) => setManualScanInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && manualScanInput.trim()) {
+                        handleScannedQRCode(manualScanInput.trim());
+                        setManualScanInput('');
+                      }
+                    }}
+                    placeholder="Weka namba ya mtahiniwa (k.v. 0001)..."
+                    className="w-full pl-9 pr-3 py-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-purple-500 font-mono"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (manualScanInput.trim()) {
+                      handleScannedQRCode(manualScanInput.trim());
+                      setManualScanInput('');
+                    }
+                  }}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-xs font-black cursor-pointer shadow-xs transition"
+                >
+                  Hakiki
+                </button>
+              </div>
+            </div>
+
+            {/* Status Banner */}
+            {scanBannerMessage && (
+              <div
+                className={`p-3 rounded-xl text-xs font-bold flex items-center gap-2 border ${
+                  scanBannerMessage.type === 'success'
+                    ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                    : scanBannerMessage.type === 'error'
+                    ? 'bg-rose-50 text-rose-900 border-rose-300'
+                    : scanBannerMessage.type === 'warning'
+                    ? 'bg-amber-50 text-amber-900 border-amber-300'
+                    : 'bg-blue-50 text-blue-900 border-blue-300'
+                }`}
+              >
+                {scanBannerMessage.type === 'success' ? (
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                )}
+                <span>{scanBannerMessage.text}</span>
+              </div>
+            )}
+
+            {/* Scanned Student Focus Detail Card */}
+            {lastScannedDesk && (
+              <div className="bg-slate-900 text-white p-3.5 rounded-xl border border-slate-700 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-purple-300">
+                    Mtahiniwa Aliyeskaniwa (Scanned Candidate)
+                  </span>
+                  <span className="text-[10px] font-mono text-slate-400">
+                    ROOM {lastScannedDesk.roomNumber} OUT OF {lastScannedDesk.totalRooms}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <div className="font-mono text-xl sm:text-2xl font-black text-white tracking-wider">
+                      {lastScannedDesk.seatNo}
+                    </div>
+                    <div className="text-xs text-slate-300 font-semibold">
+                      {lastScannedDesk.roomName} · Row {lastScannedDesk.rowIdx + 1}, Col {lastScannedDesk.colIdx + 1}
+                      {lastScannedDesk.stepOrder ? ` · Meza #${lastScannedDesk.stepOrder}` : ''}
+                    </div>
+                  </div>
+
+                  {/* Attendance badge */}
+                  <div>
+                    {attendanceState[lastScannedDesk.deskKey] === 'PRESENT' && (
+                      <span className="px-3 py-1 bg-emerald-500 text-slate-950 font-black rounded-lg text-xs flex items-center gap-1 shadow-sm">
+                        <Check className="w-4 h-4 stroke-[3]" />
+                        <span>WALIOFANYA MTIHANI</span>
+                      </span>
+                    )}
+                    {attendanceState[lastScannedDesk.deskKey] === 'ABSENT' && (
+                      <span className="px-3 py-1 bg-rose-500 text-white font-black rounded-lg text-xs flex items-center gap-1 shadow-sm">
+                        <X className="w-4 h-4 stroke-[3]" />
+                        <span>WASIOFANYA MTIHANI</span>
+                      </span>
+                    )}
+                    {!attendanceState[lastScannedDesk.deskKey] && (
+                      <span className="px-3 py-1 bg-amber-400 text-slate-950 font-bold rounded-lg text-xs">
+                        Bado Haijawekwa
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Quick Toggle Buttons */}
+                <div className="flex items-center gap-2 pt-1 border-t border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttendanceState(prev => ({
+                        ...prev,
+                        [lastScannedDesk.deskKey]: 'PRESENT'
+                      }));
+                      playScanFeedback();
+                      setScanBannerMessage({
+                        type: 'success',
+                        text: `Mtahiniwa [${lastScannedDesk.seatNo}] amewekwa Waliofanya mtihani (✓)!`
+                      });
+                    }}
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-black flex items-center justify-center gap-1 cursor-pointer transition ${
+                      attendanceState[lastScannedDesk.deskKey] === 'PRESENT'
+                        ? 'bg-emerald-500 text-slate-950 ring-2 ring-emerald-300'
+                        : 'bg-emerald-700/80 hover:bg-emerald-600 text-white'
+                    }`}
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Waliofanya (✓)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttendanceState(prev => ({
+                        ...prev,
+                        [lastScannedDesk.deskKey]: 'ABSENT'
+                      }));
+                      playScanFeedback();
+                      setScanBannerMessage({
+                        type: 'error',
+                        text: `Mtahiniwa [${lastScannedDesk.seatNo}] amewekwa Wasiofanya mtihani (✗)!`
+                      });
+                    }}
+                    className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-black flex items-center justify-center gap-1 cursor-pointer transition ${
+                      attendanceState[lastScannedDesk.deskKey] === 'ABSENT'
+                        ? 'bg-rose-500 text-white ring-2 ring-rose-300'
+                        : 'bg-rose-800/80 hover:bg-rose-700 text-white'
+                    }`}
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Wasiofanya (✗)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttendanceState(prev => {
+                        const next = { ...prev };
+                        delete next[lastScannedDesk.deskKey];
+                        return next;
+                      });
+                      setScanBannerMessage({
+                        type: 'info',
+                        text: `Alama ya mahudhurio ya [${lastScannedDesk.seatNo}] imefutwa.`
+                      });
+                    }}
+                    className="py-1.5 px-2.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-lg text-xs font-bold cursor-pointer transition"
+                  >
+                    Futa Alama
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Recent Scans History (Last 10) */}
+            {scanHistory.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+                  <span>Mlolongo wa Walioskaniwa Hivi Karibuni ({scanHistory.length}):</span>
+                  <button
+                    type="button"
+                    onClick={() => setScanHistory([])}
+                    className="text-slate-400 hover:text-slate-600 text-[10px] cursor-pointer"
+                  >
+                    Futa Orodha
+                  </button>
+                </div>
+                <div className="max-h-36 overflow-y-auto space-y-1 pr-1">
+                  {scanHistory.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex items-center justify-between p-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-medium"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="font-mono font-black text-slate-900">{item.seatNo}</span>
+                        <span className="text-[10px] text-slate-500">
+                          {item.roomName} ({item.pos})
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-slate-400 font-mono">{item.time}</span>
+                        {item.status === 'PRESENT' ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800">
+                            ✓ Done
+                          </span>
+                        ) : item.status === 'ABSENT' ? (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-black bg-rose-100 text-rose-800">
+                            ✗ Absent
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700">
+                            Pending
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Footer Buttons */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowQRScannerModal(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg cursor-pointer transition"
+              >
+                Funga Scanner
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 2: PRINTABLE DESK QR SLIPS (VIBANDIKO VYA MEZA)
+          Generates printable desk labels/stickers with QR codes for each candidate desk
+          ========================================================================= */}
+      {showDeskSlipsModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl max-w-4xl w-full p-4 sm:p-6 shadow-2xl border border-slate-200 space-y-4 my-auto max-h-[92vh] flex flex-col">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-100 text-indigo-700 rounded-xl">
+                  <Tag className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-black text-slate-900 text-base flex items-center gap-2">
+                    <span>Vibandiko vya Meza (Printable Desk QR Slips)</span>
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">
+                      A4 Portrait
+                    </span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Chapisha kadi/vibandiko vya kubandika mezani vyenye jina la shule, namba ya mtahiniwa na QR code
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handlePrintDeskSlips}
+                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>Print Desk Slips</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowDeskSlipsModal(false)}
+                  className="text-slate-400 hover:text-slate-700 text-lg font-black p-1 cursor-pointer transition rounded-lg hover:bg-slate-100"
+                >
+                  ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Scope Switcher */}
+            <div className="flex items-center justify-between bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs shrink-0 flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-slate-700">Chagua Vyumba vya Kuchapisha:</span>
+                <button
+                  type="button"
+                  onClick={() => setDeskSlipsScope('current')}
+                  className={`px-2.5 py-1 rounded-lg font-black cursor-pointer transition ${
+                    deskSlipsScope === 'current'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-slate-300'
+                  }`}
+                >
+                  Chumba cha Sasa ({activeComputedRoom.name})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDeskSlipsScope('all')}
+                  className={`px-2.5 py-1 rounded-lg font-black cursor-pointer transition ${
+                    deskSlipsScope === 'all'
+                      ? 'bg-blue-600 text-white shadow-xs'
+                      : 'bg-white text-slate-700 border border-slate-300'
+                  }`}
+                >
+                  Vyumba Vyote ({rooms.length})
+                </button>
+              </div>
+
+              <span className="text-[11px] text-slate-500 font-medium">
+                Vibandiko vinatoka vikiwa na mistari ya kukata (Cut along dashed lines)
+              </span>
+            </div>
+
+            {/* Printable Slips Canvas */}
+            <div className="flex-1 overflow-y-auto p-2 bg-slate-100 rounded-xl border border-slate-200">
+              <div
+                ref={deskSlipsContainerRef}
+                id="desk-slips-print-root"
+                className="space-y-6 bg-white p-4 max-w-[760px] mx-auto shadow-sm"
+              >
+                {(deskSlipsScope === 'all' ? computedRooms : [activeComputedRoom]).map((rm, rIdx) => {
+                  const actualIdx = rm.roomIdx ?? (deskSlipsScope === 'all' ? rIdx : activeRoomIndex);
+                  const roomNumber = actualIdx + 1;
+                  const roomOrdinalLabel = `Room ${roomNumber} out of ${rooms.length}`;
+                  const roomTitleOutOf = `ROOM ${roomNumber} OUT OF ${rooms.length}`;
+
+                  // Flatten all active seats in this room
+                  const activeSeatsInRoom = [];
+                  (rm.grid || []).forEach((rowArr, row) => {
+                    rowArr.forEach((seat, col) => {
+                      if (seat && !seat.isDeleted && seat.seatNo) {
+                        activeSeatsInRoom.push({
+                          ...seat,
+                          row,
+                          col,
+                          key: `${actualIdx}-${row}-${col}`
+                        });
+                      }
+                    });
+                  });
+
+                  return (
+                    <div key={rm.id || rIdx} className="desk-slips-page space-y-3 pb-4">
+                      {/* Sub-header per room */}
+                      <div className="border-b-2 border-slate-800 pb-1 flex items-center justify-between text-xs font-black uppercase tracking-wider text-slate-800">
+                        <span>{schoolName} — {examType} — {roomOrdinalLabel} ({rm.name})</span>
+                        <span className="text-slate-500 font-mono">Total Slips: {activeSeatsInRoom.length}</span>
+                      </div>
+
+                      {/* Slips Grid (2 or 3 per row) */}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                        {activeSeatsInRoom.map((st) => (
+                          <div
+                            key={st.key}
+                            className="border-2 border-dashed border-slate-400 p-2.5 rounded-lg flex flex-col justify-between bg-white text-slate-900 shadow-2xs space-y-1.5"
+                          >
+                            {/* Slip Header */}
+                            <div className="border-b border-slate-200 pb-1 text-center">
+                              <div className="text-[8px] font-black uppercase tracking-wider text-slate-500">
+                                {schoolName}
+                              </div>
+                              <div className="text-[9px] font-black uppercase text-blue-900 truncate">
+                                {examType} — {subject} ({codeNo})
+                              </div>
+                            </div>
+
+                            {/* Candidate Roll Number & Large QR Code */}
+                            <div className="flex items-center justify-between gap-2 py-0.5">
+                              <div className="flex-1">
+                                <div className="text-[8px] font-bold text-slate-500 uppercase">
+                                  CANDIDATE NO:
+                                </div>
+                                <div className="font-mono text-base font-black text-slate-950 tracking-wider">
+                                  {st.seatNo}
+                                </div>
+                                <div className="text-[8px] font-bold text-slate-700 mt-0.5">
+                                  {roomOrdinalLabel} ({rm.name})
+                                </div>
+                                <div className="text-[8px] font-bold text-indigo-700">
+                                  Row {st.row + 1}, Col {st.col + 1}
+                                  {st.stepOrder ? ` · Desk #${st.stepOrder}` : ''}
+                                </div>
+                              </div>
+
+                              <div className="shrink-0 p-1 bg-white border border-slate-300 rounded shadow-2xs">
+                                <QRCodeSVG
+                                  value={JSON.stringify({
+                                    app: 'HABY_EXAM',
+                                    seat: String(st.seatNo).trim(),
+                                    room: actualIdx + 1,
+                                    name: rm.name || `ROOM ${actualIdx + 1}`,
+                                    pos: `R${st.row + 1}C${st.col + 1}`,
+                                    key: st.key,
+                                    code: codeNo || ''
+                                  })}
+                                  size={52}
+                                  level="L"
+                                />
+                              </div>
+                            </div>
+
+                            {/* Slip Footer with candidate sign & tick */}
+                            <div className="border-t border-slate-200 pt-1 flex items-center justify-between text-[7px] text-slate-500">
+                              <span>Date: {examDate}</span>
+                              <span className="font-mono">Sign: ____________</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowDeskSlipsModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Funga
+              </button>
+              <button
+                type="button"
+                onClick={handlePrintDeskSlips}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>Print Vibandiko Vyote</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =========================================================================
+          MODAL 3: INDIVIDUAL STUDENT QR PASS & ATTENDANCE CARD
+          Shown when clicking any individual desk's QR code on screen
+          ========================================================================= */}
+      {selectedStudentForQRDetail && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in duration-150">
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-slate-200 pb-2.5">
+              <div className="flex items-center gap-2">
+                <QrCode className="w-5 h-5 text-purple-600" />
+                <h3 className="font-black text-slate-900 text-sm">Kadi ya Meza ya Mtahiniwa</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSelectedStudentForQRDetail(null)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-black p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Card Content */}
+            <div className="text-center space-y-3">
+              <div className="p-3 bg-purple-50 rounded-xl border border-purple-200">
+                <div className="text-[10px] font-bold uppercase text-purple-800 tracking-wider">
+                  Candidate Roll Number
+                </div>
+                <div className="font-mono text-2xl font-black text-slate-900 tracking-widest mt-0.5">
+                  {selectedStudentForQRDetail.seatNo}
+                </div>
+                <div className="text-xs text-purple-950 font-semibold mt-1">
+                  ROOM {selectedStudentForQRDetail.roomNumber} OUT OF {selectedStudentForQRDetail.totalRooms} ({selectedStudentForQRDetail.roomName})
+                </div>
+                <div className="text-[11px] text-slate-600 font-medium">
+                  Nafasi: Row {selectedStudentForQRDetail.rowIdx + 1}, Column {selectedStudentForQRDetail.colIdx + 1}
+                  {selectedStudentForQRDetail.stepOrder ? ` · Meza #${selectedStudentForQRDetail.stepOrder}` : ''}
+                </div>
+              </div>
+
+              {/* Large QR Code */}
+              <div className="flex justify-center p-3 bg-white border border-slate-300 rounded-xl shadow-xs w-fit mx-auto">
+                <QRCodeSVG
+                  value={JSON.stringify({
+                    app: 'HABY_EXAM',
+                    seat: String(selectedStudentForQRDetail.seatNo).trim(),
+                    room: selectedStudentForQRDetail.roomNumber,
+                    name: selectedStudentForQRDetail.roomName,
+                    pos: `R${selectedStudentForQRDetail.rowIdx + 1}C${selectedStudentForQRDetail.colIdx + 1}`,
+                    key: selectedStudentForQRDetail.deskKey,
+                    code: codeNo || ''
+                  })}
+                  size={120}
+                  level="M"
+                />
+              </div>
+
+              {/* Attendance Status & Actions */}
+              <div className="space-y-2 pt-1 border-t border-slate-100">
+                <div className="text-xs font-bold text-slate-700 flex items-center justify-center gap-1.5">
+                  <span>Hali ya Mahudhurio:</span>
+                  {attendanceState[selectedStudentForQRDetail.deskKey] === 'PRESENT' && (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-black bg-emerald-100 text-emerald-800 border border-emerald-300">
+                      ✓ Waliofanya Mtihani
+                    </span>
+                  )}
+                  {attendanceState[selectedStudentForQRDetail.deskKey] === 'ABSENT' && (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-black bg-rose-100 text-rose-800 border border-rose-300">
+                      ✗ Wasiofanya Mtihani
+                    </span>
+                  )}
+                  {!attendanceState[selectedStudentForQRDetail.deskKey] && (
+                    <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-100 text-slate-600 border border-slate-300">
+                      Bado Haijawekwa
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttendanceState(prev => ({
+                        ...prev,
+                        [selectedStudentForQRDetail.deskKey]: 'PRESENT'
+                      }));
+                      playScanFeedback();
+                      setSelectedStudentForQRDetail(null);
+                    }}
+                    className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-black flex items-center justify-center gap-1 cursor-pointer transition shadow-xs"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                    <span>Weka Waliofanya (✓)</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAttendanceState(prev => ({
+                        ...prev,
+                        [selectedStudentForQRDetail.deskKey]: 'ABSENT'
+                      }));
+                      playScanFeedback();
+                      setSelectedStudentForQRDetail(null);
+                    }}
+                    className="py-2 px-3 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-black flex items-center justify-center gap-1 cursor-pointer transition shadow-xs"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                    <span>Weka Wasiofanya (✗)</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-end pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setSelectedStudentForQRDetail(null)}
+                className="px-4 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Funga
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* WHATSAPP SHARING MODAL */}
+      {showWhatsAppModal && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="p-2 bg-emerald-100 text-emerald-700 rounded-xl">
+                  <MessageCircle className="w-5 h-5" />
+                </div>
+                <h3 className="font-black text-slate-900 text-base">Send Sitting Plan via WhatsApp</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppModal(false)}
+                className="text-slate-400 hover:text-slate-600 text-sm font-black p-1 cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600">
+              The examination sitting plan PDF has been downloaded to your device. You can now send this summary message and notify teachers or students via WhatsApp.
+            </p>
+
+            <div className="space-y-3 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Recipient Phone Number (Optional)</label>
+                <input
+                  type="text"
+                  value={whatsAppPhone}
+                  onChange={(e) => setWhatsAppPhone(e.target.value)}
+                  placeholder="e.g. 255717616343"
+                  className="w-full p-2.5 border border-slate-300 rounded-lg font-mono text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">WhatsApp Message Summary</label>
+                <textarea
+                  rows={6}
+                  value={whatsAppMsg}
+                  onChange={(e) => setWhatsAppMsg(e.target.value)}
+                  className="w-full p-3 border border-slate-300 rounded-xl font-mono text-xs text-slate-900 focus:ring-2 focus:ring-emerald-500 leading-relaxed"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setShowWhatsAppModal(false)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleSendWhatsApp}
+                className="px-4 py-2 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg cursor-pointer shadow-sm flex items-center gap-1.5"
+              >
+                <Share2 className="w-4 h-4" />
+                <span>Open WhatsApp & Send</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

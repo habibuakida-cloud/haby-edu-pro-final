@@ -50,9 +50,15 @@ export function toSupabaseStudent(s: any, schoolId: string, matchedClassId?: str
   const validSchoolId = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
     ? DEFAULT_PRIMARY_SCHOOL_ID
     : schoolId;
+  const existingUuid =
+    typeof s.firestoreDocId === 'string' && UUID_REGEX.test(s.firestoreDocId)
+      ? s.firestoreDocId
+      : typeof s.id === 'string' && UUID_REGEX.test(s.id)
+      ? s.id
+      : null;
   const regKey = String(s.regNo || s.reg_no || '').trim().toUpperCase();
-  const seed = `std_${validSchoolId}_${regKey || s.id || s.name}`;
-  const stableId = makeDeterministicUuid(seed);
+  const seed = `std_${validSchoolId}_${s.id || regKey || s.name}`;
+  const stableId = existingUuid || makeDeterministicUuid(seed);
   return {
     id: stableId,
     school_id: validSchoolId,
@@ -61,7 +67,10 @@ export function toSupabaseStudent(s: any, schoolId: string, matchedClassId?: str
     class_name: s.className || s.class_name || 'Form 1',
     className: s.className || s.class_name || 'Form 1',
     stream: s.stream || 'A',
+    combination: s.combination || null,
     gender: s.gender || 'Male',
+    parent_name: s.parentName || s.parent_name || '',
+    parentName: s.parentName || s.parent_name || '',
     parent_phone: s.parentPhone || s.phone || '',
     parentPhone: s.parentPhone || s.phone || '',
     phone: s.phone || s.parentPhone || '',
@@ -76,6 +85,8 @@ export function toSupabaseStudent(s: any, schoolId: string, matchedClassId?: str
     total: String(s.total ?? 0),
     average: String(s.average ?? '0.0'),
     division: s.division || '-',
+    fee_status: s.feeStatus || s.fee_status || 'UNPAID',
+    feeStatus: s.feeStatus || s.fee_status || 'UNPAID',
     class_id: matchedClassId
   };
 }
@@ -98,7 +109,9 @@ export function fromSupabaseStudent(s: any, idx: number): Student {
     name: s.name || '',
     className: s.class_name || s.className || '',
     stream: s.stream || '',
+    combination: s.combination || undefined,
     gender: (s.gender as any) || 'Male',
+    parentName: s.parent_name || s.parentName || undefined,
     parentPhone: s.parent_phone || s.parentPhone || '',
     phone: s.phone || s.parent_phone || '',
     regNo: s.reg_no || s.regNo || '',
@@ -119,12 +132,21 @@ export function toSupabaseTeacher(t: any, schoolId: string) {
   const validSchoolId = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
     ? DEFAULT_PRIMARY_SCHOOL_ID
     : schoolId;
-  const tchKey = String(t.email || t.name || t.id || '').trim().toLowerCase();
+  const existingUuid =
+    typeof t.firestoreDocId === 'string' && UUID_REGEX.test(t.firestoreDocId)
+      ? t.firestoreDocId
+      : typeof t.id === 'string' && UUID_REGEX.test(t.id)
+      ? t.id
+      : null;
+  const numericId = typeof t.id === 'number' ? t.id : (typeof t.numericId === 'number' ? t.numericId : undefined);
+  const tchKey = String(numericId || t.id || t.email || t.name || '').trim().toLowerCase();
   const seed = `tch_${validSchoolId}_${tchKey}`;
-  const stableId = makeDeterministicUuid(seed);
+  const stableId = existingUuid || makeDeterministicUuid(seed);
   const calculatedInitial = (t.name ? computeTeacherInitial(t.name) : '') || t.initial || 'TR';
   return {
     id: stableId,
+    numericId,
+    numeric_id: numericId,
     school_id: validSchoolId,
     schoolId: validSchoolId,
     name: t.name || '',
@@ -134,6 +156,8 @@ export function toSupabaseTeacher(t: any, schoolId: string) {
     initial: calculatedInitial,
     phone: t.phone || '',
     email: t.email || '',
+    passport_photo: t.passportPhoto || t.passport_photo || null,
+    passportPhoto: t.passportPhoto || t.passport_photo || null,
     subjects: Array.isArray(t.subjects) ? t.subjects : [],
     teaching_streams: Array.isArray(t.teachingStreams) ? t.teachingStreams : (Array.isArray(t.teaching_streams) ? t.teaching_streams : []),
     teachingStreams: Array.isArray(t.teachingStreams) ? t.teachingStreams : (Array.isArray(t.teaching_streams) ? t.teaching_streams : []),
@@ -153,7 +177,7 @@ export function fromSupabaseTeacher(t: any, idx: number): Teacher {
       ? t.numericId
       : typeof t.numeric_id === 'number'
       ? t.numeric_id
-      : 1001 + idx;
+      : 101 + idx;
   const calculatedInitial = (t.name ? computeTeacherInitial(t.name) : '') || t.initial || 'TR';
   return {
     id: numId,
@@ -164,6 +188,7 @@ export function fromSupabaseTeacher(t: any, idx: number): Teacher {
     initial: calculatedInitial,
     phone: t.phone || '',
     email: t.email || '',
+    passportPhoto: t.passport_photo || t.passportPhoto || undefined,
     subjects: Array.isArray(t.subjects) ? t.subjects : [],
     teachingStreams: Array.isArray(t.teaching_streams) ? t.teaching_streams : (Array.isArray(t.teachingStreams) ? t.teachingStreams : []),
     color: t.color || '#1d4ed8',
@@ -527,6 +552,72 @@ class QueryBuilder {
 
 export const supabase = {
   from: (tableName: string) => new QueryBuilder(tableName),
+  storage: {
+    from: (bucketName: string) => ({
+      upload: async (path: string, body: any, options?: { contentType?: string; upsert?: boolean; metadata?: any }) => {
+        try {
+          const schoolId = options?.metadata?.schoolId || path.split('/')[0] || getCurrentSchoolId();
+          const triggerType = options?.metadata?.triggerType || 'manual';
+          const res = await fetch('/api/backups/snapshot', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              bucket: bucketName,
+              path,
+              schoolId,
+              triggerType,
+              payload: typeof body === 'string' ? JSON.parse(body) : body,
+            }),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.success) {
+            return { data: null, error: new Error(json.error || 'Storage upload failed') };
+          }
+          return { data: json.snapshot, error: null };
+        } catch (err: any) {
+          return { data: null, error: err };
+        }
+      },
+      list: async (prefix?: string) => {
+        try {
+          const schoolId = prefix || getCurrentSchoolId();
+          const res = await fetch(`/api/backups/list?schoolId=${encodeURIComponent(schoolId)}`);
+          const json = await res.json();
+          return { data: json.snapshots || [], error: null };
+        } catch (err: any) {
+          return { data: [], error: err };
+        }
+      },
+      download: async (path: string) => {
+        try {
+          const parts = path.split('/');
+          const snapshotId = parts[parts.length - 1].replace(/\.json$/i, '');
+          const schoolId = parts.length > 1 ? parts[0] : getCurrentSchoolId();
+          const res = await fetch(`/api/backups/download/${encodeURIComponent(snapshotId)}?schoolId=${encodeURIComponent(schoolId)}`);
+          if (!res.ok) return { data: null, error: new Error('Failed to download snapshot') };
+          const data = await res.json();
+          return { data, error: null };
+        } catch (err: any) {
+          return { data: null, error: err };
+        }
+      },
+      remove: async (paths: string[]) => {
+        try {
+          const schoolId = getCurrentSchoolId();
+          for (const p of paths) {
+            const parts = p.split('/');
+            const snapshotId = parts[parts.length - 1].replace(/\.json$/i, '');
+            await fetch(`/api/backups/${encodeURIComponent(snapshotId)}?schoolId=${encodeURIComponent(schoolId)}`, {
+              method: 'DELETE',
+            });
+          }
+          return { data: paths, error: null };
+        } catch (err: any) {
+          return { data: null, error: err };
+        }
+      },
+    }),
+  },
   channel: (_name: string) => ({
     on: (..._args: any[]) => ({
       subscribe: () => ({

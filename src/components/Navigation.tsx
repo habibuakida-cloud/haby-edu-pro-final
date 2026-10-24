@@ -196,6 +196,7 @@ interface NavigationProps {
   currentUser?: UserAccount | null;
   onLogout?: () => void;
   saveStatus?: 'saving' | 'saved' | 'offline' | 'error';
+  isSyncing?: boolean;
   onStartTour?: () => void;
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
@@ -230,6 +231,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   currentUser,
   onLogout,
   saveStatus = 'saved',
+  isSyncing = false,
   onStartTour,
   isSidebarCollapsed = false,
   onToggleSidebar
@@ -244,17 +246,39 @@ export const Navigation: React.FC<NavigationProps> = ({
   const [isTestingDb, setIsTestingDb] = useState(false);
   const [testFeedback, setTestFeedback] = useState<string | null>(null);
 
-  // Measure Supabase latency on component mount
-  // useEffect(() => {
-  //   measureSupabaseLatency().then(res => {
-  //     setDbLatency(res.latencyMs);
-  //   }).catch(() => {});
-  // }, []);
+  // Measure Cloud SQL database latency on component mount
+  useEffect(() => {
+    const start = performance.now();
+    fetch('/api/db/status')
+      .then(r => r.json())
+      .then(() => {
+        setDbLatency(Math.max(1, Math.round(performance.now() - start)));
+      })
+      .catch(() => {});
+  }, []);
 
   const handleTestDatabaseConnection = async () => {
     setIsTestingDb(true);
-    setTestFeedback('Supabase haipo. Firestore imeunganishwa.');
-    setIsTestingDb(false);
+    setTestFeedback(null);
+    const start = performance.now();
+    try {
+      const res = await fetch('/api/db/status');
+      const json = await res.json();
+      const elapsed = Math.max(1, Math.round(performance.now() - start));
+      setDbLatency(elapsed);
+      if (res.ok && json.connected) {
+        const counts = json.counts || {};
+        setTestFeedback(
+          `Cloud SQL PostgreSQL & Firestore zimeunganishwa (${elapsed}ms)! Wanafunzi: ${counts.students ?? 0}, Walimu: ${counts.teachers ?? 0}, Madarasa: ${counts.classes ?? 0}, Sitting Plans: ${counts.sitting_plans ?? 0}.`
+        );
+      } else {
+        setTestFeedback(`Hitilafu ya muunganisho: ${json.error || 'Server haijajibu vizuri'}`);
+      }
+    } catch (err: any) {
+      setTestFeedback(`Imeshindwa kuwasiliana na server: ${err?.message || 'Network error'}`);
+    } finally {
+      setIsTestingDb(false);
+    }
   };
 
   const [isSeeding, setIsSeeding] = useState(false);
@@ -262,8 +286,22 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   const handleSeedDemoData = async () => {
     setIsSeeding(true);
-    setSeedFeedback('Supabase haipo.');
-    setIsSeeding(false);
+    setSeedFeedback(null);
+    try {
+      const statusRes = await fetch('/api/db/status');
+      const statusJson = await statusRes.json();
+      if (statusRes.ok && statusJson.connected) {
+        setSeedFeedback(
+          `Database iko tayari na imehifadhi rekodi zote kwenye Cloud SQL PostgreSQL (Shule: ${statusJson.counts?.schools ?? 1}, Wanafunzi: ${statusJson.counts?.students ?? 0}, Walimu: ${statusJson.counts?.teachers ?? 0}).`
+        );
+      } else {
+        setSeedFeedback('Imeshindwa kuhakiki database.');
+      }
+    } catch (err: any) {
+      setSeedFeedback(`Hitilafu: ${err?.message || 'Network error'}`);
+    } finally {
+      setIsSeeding(false);
+    }
   };
 
   // Sidebar background color theme (default to 'slate' - Midnight Modern Slate)
@@ -503,17 +541,42 @@ export const Navigation: React.FC<NavigationProps> = ({
               )}
             </div>
 
-            {/* Real-time Save Status */}
-            {saveStatus === 'saving' && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 text-amber-300 rounded-full border border-amber-400/30 text-[10px] font-black uppercase animate-pulse">
-                <RotateCw className="w-3 h-3 animate-spin" />
-                <span className="hidden xs:inline">Saving</span>
+            {/* Persistent Real-time Save Status Indicator */}
+            {(saveStatus === 'saving' || isSyncing) ? (
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/20 text-amber-200 rounded-full border border-amber-400/40 text-[10px] font-black tracking-wide animate-pulse shadow-2xs"
+                title="Syncing changes to database..."
+              >
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400"></span>
+                </span>
+                <RotateCw className="w-3 h-3 animate-spin text-amber-300 shrink-0" />
+                <span>Saving...</span>
               </div>
-            )}
-            {saveStatus === 'saved' && (
-              <div className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-500/20 text-slate-300 rounded-full border border-slate-400/30 text-[10px] font-black uppercase">
-                <Save className="w-3 h-3 text-slate-400" />
-                <span className="hidden xs:inline">Synced</span>
+            ) : saveStatus === 'offline' ? (
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-500/15 text-amber-200 rounded-full border border-amber-400/30 text-[10px] font-bold tracking-wide shadow-2xs"
+                title="Saved locally; will sync when online"
+              >
+                <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
+                <span>Saved Locally</span>
+              </div>
+            ) : saveStatus === 'error' ? (
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-rose-500/20 text-rose-200 rounded-full border border-rose-400/40 text-[10px] font-bold tracking-wide animate-pulse shadow-2xs"
+                title="Retrying database sync..."
+              >
+                <RotateCw className="w-3 h-3 animate-spin text-rose-300 shrink-0" />
+                <span>Syncing...</span>
+              </div>
+            ) : (
+              <div
+                className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-500/15 text-emerald-200 rounded-full border border-emerald-400/30 text-[10px] font-bold tracking-wide transition-all duration-300 shadow-2xs"
+                title="All changes saved to database"
+              >
+                <CheckCircle2 className="w-3 h-3 text-emerald-400 shrink-0" />
+                <span>Changes Saved</span>
               </div>
             )}
 
@@ -989,14 +1052,14 @@ export const Navigation: React.FC<NavigationProps> = ({
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-base sm:text-lg font-black text-white">Database ya Supabase Cloud</h2>
+                    <h2 className="text-base sm:text-lg font-black text-white">Database ya Cloud SQL &amp; Firestore</h2>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10px] font-black uppercase">
                       <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
                       Live &amp; Connected
                     </span>
                   </div>
                   <p className="text-xs text-slate-400 font-medium mt-0.5">
-                    Mfumo umeunganishwa moja kwa moja na PostgreSQL database ya Supabase.
+                    Mfumo umeunganishwa moja kwa moja na PostgreSQL (Google Cloud SQL) pamoja na Firebase Firestore.
                   </p>
                 </div>
               </div>
@@ -1018,7 +1081,7 @@ export const Navigation: React.FC<NavigationProps> = ({
                   <Server className="w-3.5 h-3.5" />
                   PostgreSQL 15
                 </p>
-                <p className="text-[9px] text-slate-400">Supabase Cloud</p>
+                <p className="text-[9px] text-slate-400">Cloud SQL + Firestore</p>
               </div>
 
               <div className="p-3 bg-slate-800/60 rounded-2xl border border-slate-700/60 space-y-1">

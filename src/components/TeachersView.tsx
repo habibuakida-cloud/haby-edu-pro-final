@@ -46,7 +46,9 @@ import {
   ChevronUp,
   ChevronDown,
   Zap,
-  CheckCircle2
+  CheckCircle2,
+  MessageSquare,
+  Send
 } from 'lucide-react';
 import { GenderSummary, formatGenderSummaryText } from './common/GenderSummary';
 import { CameraCaptureModal } from './common/CameraCaptureModal';
@@ -61,6 +63,8 @@ import {
   PeriodSetting 
 } from '../types';
 import { SUBJECT_LIST, INVIGILATOR_COLORS, STAFF_ROLES_LIST, DEFAULT_CLASSES } from '../constants/defaults';
+import { SubjectRegistry } from '../constants/SubjectRegistry';
+
 import { getTeacherColor } from '../utils/colors';
 import { cleanSubjectName } from '../utils/cleanSubject';
 import { TeacherEvaluationView } from './TeacherEvaluationView';
@@ -69,6 +73,9 @@ import { PhoneInputPlugin } from './common/PhoneInputPlugin';
 import { StudentPhoneBadge } from './common/StudentPhoneBadge';
 import { useConfirmDelete } from '../context/ConfirmDeleteContext';
 import { computeTeacherInitial } from '../utils/teacherInitials';
+import { TeacherTimetable } from './Timetable/TeacherTimetable';
+import { isSamePeriod, isSameStream } from '../lib/timetableService';
+import { isSameClass } from '../utils/reportCardUtils';
 
 interface TeachersViewProps {
   teachers: Teacher[];
@@ -90,21 +97,7 @@ interface TeachersViewProps {
 
 const WEEKDAYS = ['MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY'];
 
-const POPULAR_SUBJECTS = [
-  'Mathematics',
-  'Basic Mathematics',
-  'English Language',
-  'Kiswahili',
-  'Biology',
-  'Chemistry',
-  'Physics',
-  'Geography',
-  'History',
-  'Civics',
-  'ICT / TEHAMA',
-  'Commerce',
-  'Book Keeping'
-];
+const POPULAR_SUBJECTS = SubjectRegistry.getPopular();
 
 export const TeachersView: React.FC<TeachersViewProps> = ({
   teachers,
@@ -134,8 +127,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   const currentTeacherEmail = (currentUser?.email || '').toLowerCase().trim();
 
   const effectiveTeachers = useMemo(() => {
-    if (!isTeacherUser) return teachers;
-    const match = teachers.filter(t => {
+    let list = !isTeacherUser ? teachers : teachers.filter(t => {
       const tName = (t.name || '').toLowerCase().trim();
       const tEmail = (t.email || '').toLowerCase().trim();
       return (
@@ -143,15 +135,17 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
         (tName && (tName.includes(currentTeacherName) || currentTeacherName.includes(tName)))
       );
     });
-    if (match.length > 0) return match;
-    return [{
-      id: 9999,
-      name: currentUser?.fullName || 'Mwalimu wa Somo',
-      email: currentUser?.email || '',
-      subjects: currentUser?.assignedSubjects || [],
-      schoolRole: 'Subject Teacher',
-      gender: 'Male'
-    } as Teacher];
+    if (isTeacherUser && list.length === 0) {
+      list = [{
+        id: 9999,
+        name: currentUser?.fullName || 'Mwalimu wa Somo',
+        email: currentUser?.email || '',
+        subjects: currentUser?.assignedSubjects || [],
+        schoolRole: 'Subject Teacher',
+        gender: 'Male'
+      } as Teacher];
+    }
+    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
   }, [teachers, isTeacherUser, currentTeacherName, currentTeacherEmail, currentUser]);
 
   // Workload Analytics State
@@ -237,14 +231,10 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   const [formNotice, setFormNotice] = useState<string | null>(null);
   
   // MULTIPLE TEACHING SUBJECTS WITH STREAM ID (One after another)
-  const [subjects, setSubjects] = useState<string[]>([
-    'Physics Form 3A',
-    'Physics Form 3B',
-    'Physics Form 3D'
-  ]);
-  const [allocSubject, setAllocSubject] = useState<string>('Physics');
-  const [allocClass, setAllocClass] = useState<string>('Form 3');
-  const [allocStreams, setAllocStreams] = useState<string[]>(['A', 'B', 'D']);
+  const [subjects, setSubjects] = useState<string[]>([]);
+  const [allocSubject, setAllocSubject] = useState<string>('Basic Mathematics');
+  const [allocClass, setAllocClass] = useState<string>('Form 1');
+  const [allocStreams, setAllocStreams] = useState<string[]>(['A', 'B']);
   const [customSubjectText, setCustomSubjectText] = useState<string>('');
   const [manualSubjectStreamInput, setManualSubjectStreamInput] = useState<string>('');
   const [subjectSearch, setSubjectSearch] = useState('');
@@ -256,9 +246,27 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   const [passportPhoto, setPassportPhoto] = useState<string>('');
   const [isCameraCaptureOpen, setIsCameraCaptureOpen] = useState(false);
   
+  // Quick SMS State
+  const [quickSmsTeacher, setQuickSmsTeacher] = useState<Teacher | null>(null);
+  const [quickSmsMessage, setQuickSmsMessage] = useState<string>('');
+  const [isSendingQuickSms, setIsSendingQuickSms] = useState<boolean>(false);
+  const [quickSmsToast, setQuickSmsToast] = useState<string | null>(null);
+  
   // Teaching streams allocation
   const [teachingStreams, setTeachingStreams] = useState<string[]>([]);
   const [maxPeriodsPerWeek, setMaxPeriodsPerWeek] = useState<number>(20);
+
+  // Complete deduplicated list of all subjects from registry, SUBJECT_LIST, streamSettings, and existing teachers
+  const allAvailableSubjectsList = useMemo(() => {
+    const customFromTeachers = teachers.flatMap(t => (t.subjects || []).map(cleanSubjectName));
+    return Array.from(
+      new Set([
+        ...POPULAR_SUBJECTS,
+        ...SUBJECT_LIST.map(s => s.name).filter(n => n !== 'Mikondo'),
+        ...customFromTeachers
+      ].filter(Boolean))
+    );
+  }, [teachers]);
 
   // Available stream IDs for selected allocation class
   const availableStreamIdsForClass = useMemo(() => {
@@ -274,6 +282,18 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     return `${sub.trim()} ${cName}${cleanStream}`;
   };
 
+  const handleAddSubjectOnly = () => {
+    const sub = customSubjectText.trim() || allocSubject.trim();
+    if (!sub) {
+      alert('Tafadhali chagua au andika somo (Please select or enter a teaching subject).');
+      return;
+    }
+    if (!subjects.includes(sub)) {
+      setSubjects(prev => [...prev, sub]);
+    }
+    setCustomSubjectText('');
+  };
+
   const handleRegisterSubjectStreams = () => {
     const sub = customSubjectText.trim() || allocSubject.trim();
     if (!sub) {
@@ -281,7 +301,11 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       return;
     }
     if (allocStreams.length === 0) {
-      alert('Please select at least one stream ID.');
+      // If no stream selected, add the subject directly
+      if (!subjects.includes(sub)) {
+        setSubjects(prev => [...prev, sub]);
+      }
+      setCustomSubjectText('');
       return;
     }
 
@@ -328,6 +352,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   };
 
   const [editingTeacher, setEditingTeacher] = useState<Teacher | null>(null);
+  const [isEditTeacherModalOpen, setIsEditTeacherModalOpen] = useState<boolean>(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [roleFilter, setRoleFilter] = useState('ALL');
 
@@ -441,12 +466,17 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       alert('Please enter teacher full name.');
       return;
     }
-    if (subjects.length === 0) {
+
+    const effectiveSubjectsList = subjects.length > 0
+      ? subjects
+      : (customSubjectText.trim() || allocSubject.trim() ? [customSubjectText.trim() || allocSubject.trim()] : []);
+
+    if (effectiveSubjectsList.length === 0) {
       alert('Please select at least one teaching subject.');
       return;
     }
 
-    const cleanedSubjects = Array.from(new Set(subjects.map(cleanSubjectName).filter(Boolean)));
+    const cleanedSubjects = Array.from(new Set(effectiveSubjectsList.map(cleanSubjectName).filter(Boolean)));
     const finalRole = isCustomRole ? (customRole.trim() || 'Subject Teacher') : schoolRole;
     const finalGender = gender || (finalRole.includes('Mistress') || finalRole.includes('Headmistress') ? 'Female' : 'Male');
 
@@ -468,8 +498,9 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       };
       onUpdateTeacher(updatedTeacher);
       setEditingTeacher(null);
-      setFormNotice(`Teacher ${updatedTeacher.name} updated successfully with ${cleanedSubjects.length} subjects!`);
-      setTimeout(() => setFormNotice(null), 4000);
+      setIsEditTeacherModalOpen(false);
+      setFormNotice(`✓ Taarifa za Mwalimu ${updatedTeacher.name} zimehaririwa na kuhifadhiwa kikamilifu (${cleanedSubjects.join(', ')})!`);
+      setTimeout(() => setFormNotice(null), 5000);
     } else {
       const newTeacher: Teacher = {
         id: Date.now(),
@@ -487,7 +518,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
         maxPeriodsPerWeek
       };
       onAddTeacher(newTeacher);
-      setFormNotice(`Teacher ${newTeacher.name} (${newTeacher.initial}) registered successfully with ${subjects.length} teaching subjects!`);
+      setFormNotice(`Teacher ${newTeacher.name} (${newTeacher.initial}) registered successfully with subjects: ${cleanedSubjects.join(', ')}!`);
       setTimeout(() => setFormNotice(null), 4000);
     }
     
@@ -497,7 +528,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     setSchoolRole('Subject Teacher');
     setIsCustomRole(false);
     setCustomRole('');
-    setSubjects(['Physics Form 3A', 'Physics Form 3B', 'Physics Form 3D']);
+    setSubjects([]);
     setSubjectSearch('');
     setExcludeInvigilation(false);
     setCustomColor(INVIGILATOR_COLORS[0].hex);
@@ -506,16 +537,16 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     setPassportPhoto('');
     setTeachingStreams([]);
     setMaxPeriodsPerWeek(20);
-    setAllocSubject('Physics');
-    setAllocClass('Form 3');
-    setAllocStreams(['A', 'B', 'D']);
+    setAllocSubject('Basic Mathematics');
+    setAllocClass('Form 1');
+    setAllocStreams(['A', 'B']);
     setCustomSubjectText('');
     setManualSubjectStreamInput('');
   };
 
   const handleEdit = (teacher: Teacher) => {
     setEditingTeacher(teacher);
-    setName(teacher.name);
+    setName(teacher.name || '');
     setGender(teacher.gender || (teacher.schoolRole?.includes('Mistress') || teacher.schoolRole?.includes('Headmistress') ? 'Female' : 'Male'));
     
     if (teacher.schoolRole && STAFF_ROLES_LIST.includes(teacher.schoolRole)) {
@@ -530,25 +561,32 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       setIsCustomRole(false);
     }
 
-    setSubjects(teacher.subjects && teacher.subjects.length > 0 ? teacher.subjects : ['Physics Form 3A', 'Physics Form 3B']);
-    setExcludeInvigilation(teacher.excludeInvigilation);
+    setSubjects(teacher.subjects && teacher.subjects.length > 0 ? [...teacher.subjects] : []);
+    if (teacher.subjects && teacher.subjects.length > 0) {
+      setAllocSubject(cleanSubjectName(teacher.subjects[0]));
+    }
+    setExcludeInvigilation(Boolean(teacher.excludeInvigilation));
     setCustomColor(teacher.color || INVIGILATOR_COLORS[0].hex);
     setPhone(teacher.phone || '');
     setEmail(teacher.email || '');
     setPassportPhoto(teacher.passportPhoto || '');
-    setTeachingStreams(teacher.teachingStreams || []);
+    setTeachingStreams(Array.isArray(teacher.teachingStreams) ? [...teacher.teachingStreams] : []);
     setMaxPeriodsPerWeek(teacher.maxPeriodsPerWeek || 20);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setSubjectSearch('');
+    setCustomSubjectText('');
+    setManualSubjectStreamInput('');
+    setIsEditTeacherModalOpen(true);
   };
 
   const cancelEdit = () => {
     setEditingTeacher(null);
+    setIsEditTeacherModalOpen(false);
     setName('');
     setGender('Male');
     setSchoolRole('Subject Teacher');
     setIsCustomRole(false);
     setCustomRole('');
-    setSubjects(['Physics Form 3A', 'Physics Form 3B', 'Physics Form 3D']);
+    setSubjects([]);
     setSubjectSearch('');
     setExcludeInvigilation(false);
     setCustomColor(INVIGILATOR_COLORS[0].hex);
@@ -557,9 +595,9 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     setPassportPhoto('');
     setTeachingStreams([]);
     setMaxPeriodsPerWeek(20);
-    setAllocSubject('Physics');
-    setAllocClass('Form 3');
-    setAllocStreams(['A', 'B', 'D']);
+    setAllocSubject('Basic Mathematics');
+    setAllocClass('Form 1');
+    setAllocStreams(['A', 'B']);
     setCustomSubjectText('');
     setManualSubjectStreamInput('');
   };
@@ -700,21 +738,22 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
 
   // Filter subjects for the multi-select search
   const searchedSubjects = useMemo(() => {
-    if (!subjectSearch.trim()) return SUBJECT_LIST.map(s => s.name);
+    if (!subjectSearch.trim()) return allAvailableSubjectsList;
     const q = subjectSearch.toLowerCase();
-    return SUBJECT_LIST.filter(s => s.name.toLowerCase().includes(q)).map(s => s.name);
-  }, [subjectSearch]);
+    return allAvailableSubjectsList.filter(s => s.toLowerCase().includes(q));
+  }, [subjectSearch, allAvailableSubjectsList]);
 
   // Timetable slots for viewing teacher
   const viewingTeacherSlots = useMemo(() => {
     if (!viewingTimetableTeacher) return [];
-    const tName = viewingTimetableTeacher.name.toLowerCase();
-    const tInit = viewingTimetableTeacher.initial?.toLowerCase();
+    const tName = (viewingTimetableTeacher.name || '').trim().toLowerCase();
+    const tInit = (viewingTimetableTeacher.initial || '').trim().toLowerCase();
 
-    return timetableAssignments.filter(a => {
-      const matchId = a.teacherId === viewingTimetableTeacher.id;
-      const aTeacher = (('teacher' in a ? (a as any).teacher : '') || '').toLowerCase();
-      return matchId || aTeacher === tName || (tInit && aTeacher === tInit) || aTeacher.includes(tName);
+    return (timetableAssignments || []).filter(a => {
+      if (!a || !a.subject) return false;
+      const matchId = a.teacherId !== undefined && Number(a.teacherId) === Number(viewingTimetableTeacher.id);
+      const aTeacher = (('teacher' in a ? (a as any).teacher : (a as any).teacherName) || '').trim().toLowerCase();
+      return matchId || (tName && aTeacher === tName) || (tInit && aTeacher === tInit);
     });
   }, [viewingTimetableTeacher, timetableAssignments]);
 
@@ -725,7 +764,9 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       matrix[day] = {};
       periodsList.forEach(p => {
         const found = viewingTeacherSlots.find(s => 
-          s.day.toUpperCase() === day && s.period.toUpperCase() === p.toUpperCase()
+          s &&
+          (s.day || '').trim().toUpperCase() === day &&
+          isSamePeriod(s.period, s.periodName, p)
         );
         matrix[day][p] = found;
       });
@@ -736,39 +777,54 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   // Handle adding a timetable slot for the teacher
   const handleAddTimetableSlot = () => {
     if (!viewingTimetableTeacher || !onUpdateTimetableAssignments) return;
-    const subjectToAssign = slotSubject || viewingTimetableTeacher.subjects[0] || 'Basic Mathematics';
+    const tSubjects = (viewingTimetableTeacher.subjects || []).filter(Boolean);
+    if (tSubjects.length === 0) {
+      alert('Mwalimu huyu hajasajiliwa somo lolote. Tafadhali msajilie masomo kwanza.');
+      return;
+    }
+    const subjectToAssign = tSubjects.length === 1 ? tSubjects[0] : (tSubjects.includes(slotSubject) ? slotSubject : '');
+
+    if (!subjectToAssign) {
+      alert('Mwalimu huyu ana masomo zaidi ya moja. Tafadhali chagua somo alilosajiliwa (Please select a registered subject).');
+      return;
+    }
+
+    const formattedDay = slotDay.charAt(0).toUpperCase() + slotDay.slice(1).toLowerCase();
 
     const newSlot: TimetableAssignment = {
       id: Date.now(),
-      day: slotDay as any,
+      day: formattedDay as any,
       period: slotPeriod,
+      periodName: slotPeriod.split(' (')[0].trim(),
       teacherId: viewingTimetableTeacher.id,
       subject: subjectToAssign,
       className: slotClass,
       stream: slotStream,
-      room: slotRoom.trim() || undefined
+      room: slotRoom.trim() || undefined,
+      activityType: 'academic'
     };
     (newSlot as any).teacher = viewingTimetableTeacher.name;
 
     // Filter out existing slot in same day & period if exists
     const updated = [
-      ...timetableAssignments.filter(a => 
-        !(a.day.toUpperCase() === slotDay.toUpperCase() && 
-          a.period.toUpperCase() === slotPeriod.toUpperCase() &&
-          a.className.toLowerCase() === slotClass.toLowerCase() &&
-          a.stream.toLowerCase() === slotStream.toLowerCase())
+      ...(timetableAssignments || []).filter(a => 
+        !(a &&
+          (a.day || '').trim().toUpperCase() === slotDay.toUpperCase() && 
+          isSamePeriod(a.period, a.periodName, slotPeriod) &&
+          isSameClass(a.className, slotClass) &&
+          isSameStream(a.stream, slotStream))
       ),
       newSlot
     ];
 
     onUpdateTimetableAssignments(updated);
-    setSlotToast(`Assigned ${subjectToAssign} for ${slotClass} (${slotStream}) on ${slotDay} ${slotPeriod}`);
+    setSlotToast(`Assigned ${subjectToAssign} for ${slotClass} (${slotStream}) on ${formattedDay} ${slotPeriod}`);
     setTimeout(() => setSlotToast(null), 3000);
   };
 
   const handleRemoveTimetableSlot = (slotId: number | string) => {
     if (!onUpdateTimetableAssignments) return;
-    const updated = timetableAssignments.filter(a => String(a.id) !== String(slotId));
+    const updated = (timetableAssignments || []).filter(a => a && String(a.id) !== String(slotId));
     onUpdateTimetableAssignments(updated);
   };
 
@@ -1542,32 +1598,116 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                     </div>
                   </div>
 
-                  {/* SUBJECT REGISTRATION WITH STREAM ID (One after another, not combined) */}
+                  {/* SUBJECT REGISTRATION WITH STREAM ID OR DIRECT SELECTION (ALL SUBJECTS INCLUDED) */}
                   <div className="p-5 bg-gradient-to-br from-blue-50/70 via-indigo-50/40 to-slate-50 border-2 border-blue-200 rounded-2xl space-y-4 shadow-2xs">
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200/80 pb-3">
                       <div>
                         <div className="flex items-center gap-2">
                           <BookOpen className="w-5 h-5 text-blue-700" />
                           <h4 className="text-sm font-black text-blue-950 uppercase tracking-wide">
-                            Subject Registration with Stream ({subjects.length} Allocated)
+                            Chagua Masomo ya Mwalimu / Subject Registration ({subjects.length} Selected)
                           </h4>
                         </div>
                         <p className="text-xs text-blue-800/80 mt-0.5 font-medium">
-                          Each subject is registered with its Stream ID one after another, not combined (e.g. <strong>Physics Form 3A</strong>, <strong>Physics Form 3B</strong>, <strong>Physics Form 3D</strong>).
+                          Chagua somo lolote (mfano: <strong>Elimu ya Dini ya Kiislamu</strong>, <strong>Fine Art</strong>, <strong>Bible Knowledge</strong>, <strong>Arabic</strong>, <strong>Physics</strong>, n.k.) moja kwa moja au pamoja na darasa/mkondo.
                         </p>
                       </div>
                       <div className="text-[11px] font-bold px-2.5 py-1 bg-blue-100 text-blue-900 rounded-full border border-blue-300">
-                        Multi-stream enabled
+                        All NECTA &amp; School Subjects ({allAvailableSubjectsList.length})
+                      </div>
+                    </div>
+
+                    {/* QUICK DIRECT MULTI-SELECT PILLS FOR ALL SUBJECTS WITH LIVE SEARCH */}
+                    <div className="p-4 bg-white rounded-xl border border-blue-200 space-y-3 shadow-2xs">
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                        <div>
+                          <span className="text-xs font-black text-slate-800 uppercase tracking-wide block">
+                            A. Bonyeza Kuchagua Somo Moja kwa Moja (1-Click Select Any Subject)
+                          </span>
+                          <span className="text-[11px] text-slate-500">
+                            Bonyeza somo lolote hapa chini kuliongeza au kuliondoa kwa mwalimu huyu:
+                          </span>
+                        </div>
+                        <div className="relative w-full sm:w-72">
+                          <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
+                          <input
+                            type="text"
+                            placeholder="Tafuta somo (mf. Kiislamu, Fine Art, Arabic...)"
+                            value={subjectSearch}
+                            onChange={e => setSubjectSearch(e.target.value)}
+                            className="w-full pl-8 pr-7 py-1.5 text-xs border border-slate-300 rounded-xl bg-slate-50 focus:bg-white focus:ring-2 focus:ring-blue-500 font-medium"
+                          />
+                          {subjectSearch && (
+                            <button
+                              type="button"
+                              onClick={() => setSubjectSearch('')}
+                              className="absolute right-2 top-2 text-slate-400 hover:text-slate-600 cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto p-2.5 bg-slate-50 rounded-xl border border-slate-200">
+                        {searchedSubjects.map(subName => {
+                          const isSelected = subjects.some(
+                            s => s.toLowerCase() === subName.toLowerCase() || cleanSubjectName(s).toLowerCase() === subName.toLowerCase()
+                          );
+                          return (
+                            <button
+                              key={subName}
+                              type="button"
+                              onClick={() => {
+                                setAllocSubject(subName);
+                                if (subjects.includes(subName)) {
+                                  setSubjects(prev => prev.filter(s => s !== subName));
+                                } else {
+                                  setSubjects(prev => [...prev, subName]);
+                                }
+                              }}
+                              className={`px-2.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 border ${
+                                isSelected
+                                  ? 'bg-blue-600 text-white border-blue-700 shadow-2xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:border-blue-400 hover:bg-blue-50/50'
+                              }`}
+                            >
+                              {isSelected ? <Check className="w-3 h-3 shrink-0" /> : <Plus className="w-3 h-3 text-slate-400 shrink-0" />}
+                              <span>{subName}</span>
+                            </button>
+                          );
+                        })}
+                        {searchedSubjects.length === 0 && subjectSearch.trim() && (
+                          <div className="w-full flex items-center justify-between p-2 text-xs text-slate-600">
+                            <span>Somo <strong>"{subjectSearch.trim()}"</strong> halipo kwenye orodha. Unaweza kuliongeza:</span>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const custom = subjectSearch.trim();
+                                if (custom && !subjects.includes(custom)) {
+                                  setSubjects(prev => [...prev, custom]);
+                                  setSubjectSearch('');
+                                }
+                              }}
+                              className="px-3 py-1 bg-blue-600 text-white rounded-lg font-bold cursor-pointer"
+                            >
+                              + Ongeza "{subjectSearch.trim()}"
+                            </button>
+                          </div>
+                        )}
                       </div>
                     </div>
 
                     {/* Interactive Stream-by-Stream Subject Builder */}
                     <div className="p-4 bg-white rounded-xl border border-blue-200 space-y-3 shadow-2xs">
+                      <div className="text-xs font-black text-slate-800 uppercase tracking-wide">
+                        B. Au Chagua Somo na Darasa / Mkondo (Subject + Class Stream Builder)
+                      </div>
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                         {/* 1. Subject selector */}
                         <div>
                           <label className="text-[10px] font-black text-slate-600 uppercase tracking-wider block mb-1">
-                            1. Select Subject
+                            1. Select Subject (Masomo Yote)
                           </label>
                           <select
                             value={allocSubject}
@@ -1577,13 +1717,91 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                             }}
                             className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-slate-50 focus:ring-2 focus:ring-blue-500 text-slate-800"
                           >
-                            {POPULAR_SUBJECTS.map(ps => (
-                              <option key={ps} value={ps}>{ps}</option>
-                            ))}
+                            <optgroup label="Masomo ya Dini (Religious Education)">
+                              <option value="Elimu ya Dini ya Kiislamu">Elimu ya Dini ya Kiislamu</option>
+                              <option value="Islamic Knowledge">Islamic Knowledge</option>
+                              <option value="Elimu ya Dini ya Kikristo">Elimu ya Dini ya Kikristo</option>
+                              <option value="Bible Knowledge">Bible Knowledge</option>
+                              <option value="Divinity">Divinity</option>
+                            </optgroup>
+                            <optgroup label="Sanaa, Muziki na Michezo (Arts & Sports)">
+                              <option value="Fine Art">Fine Art (Sanaa za Ufundi)</option>
+                              <option value="Music">Music (Muziki)</option>
+                              <option value="Physical Education">Physical Education (Elimu ya Michezo)</option>
+                              <option value="Theatre Arts">Theatre Arts (Sanaa za Maonyesho)</option>
+                              <option value="Sports and Games">Sports and Games</option>
+                            </optgroup>
+                            <optgroup label="Masomo ya Msingi Sekondari (Core O-Level)">
+                              <option value="Basic Mathematics">Basic Mathematics</option>
+                              <option value="English Language">English Language</option>
+                              <option value="Kiswahili">Kiswahili</option>
+                              <option value="Biology">Biology</option>
+                              <option value="Chemistry">Chemistry</option>
+                              <option value="Physics">Physics</option>
+                              <option value="Geography">Geography</option>
+                              <option value="History">History</option>
+                              <option value="Civics">Civics</option>
+                              <option value="Historia ya Tanzania na Maadili">Historia ya Tanzania na Maadili</option>
+                            </optgroup>
+                            <optgroup label="Lugha za Kigeni & Fasihi (Languages & Literature)">
+                              <option value="Literature in English">Literature in English</option>
+                              <option value="Arabic Language">Arabic Language (Kiarabu)</option>
+                              <option value="Lugha ya Kiarabu (Arabic)">Lugha ya Kiarabu (Arabic)</option>
+                              <option value="French Language">French Language (Kifaransa)</option>
+                              <option value="Chinese Language">Chinese Language (Kichina)</option>
+                            </optgroup>
+                            <optgroup label="Biashara na Uchumi (Business & Commercial)">
+                              <option value="Business Studies">Business Studies</option>
+                              <option value="Commerce">Commerce</option>
+                              <option value="Book Keeping">Book Keeping</option>
+                              <option value="Accountancy">Accountancy</option>
+                              <option value="Economics">Economics</option>
+                            </optgroup>
+                            <optgroup label="Sayansi, Kilimo, TEHAMA & Lishe (Science, ICT & Nutrition)">
+                              <option value="Agriculture">Agriculture (Kilimo)</option>
+                              <option value="Additional Mathematics">Additional Mathematics</option>
+                              <option value="Information & Computer Studies">Information & Computer Studies (ICS)</option>
+                              <option value="Computer Studies">Computer Studies</option>
+                              <option value="Computer Science">Computer Science</option>
+                              <option value="Food and Human Nutrition">Food and Human Nutrition</option>
+                              <option value="Home Economics">Home Economics</option>
+                              <option value="Textiles and Garment Construction">Textiles and Garment Construction</option>
+                            </optgroup>
+                            <optgroup label="Masomo ya Ufundi (Technical & Engineering)">
+                              <option value="Engineering Science">Engineering Science</option>
+                              <option value="Building Construction">Building Construction</option>
+                              <option value="Architectural Draughting">Architectural Draughting</option>
+                              <option value="Surveying">Surveying</option>
+                              <option value="Woodwork and Painting">Woodwork and Painting</option>
+                              <option value="Electrical Engineering">Electrical Engineering</option>
+                              <option value="Electronics and Radio Repair">Electronics and Radio Repair</option>
+                              <option value="Mechanical Engineering">Mechanical Engineering</option>
+                              <option value="Motor Vehicle Mechanics">Motor Vehicle Mechanics</option>
+                              <option value="Welding and Metal Fabrication">Welding and Metal Fabrication</option>
+                              <option value="Engineering Drawing">Engineering Drawing</option>
+                            </optgroup>
+                            <optgroup label="Kidato cha 5 & 6 (A-Level)">
+                              <option value="General Studies">General Studies</option>
+                              <option value="Basic Applied Mathematics">Basic Applied Mathematics (BAM)</option>
+                              <option value="Advanced Mathematics">Advanced Mathematics</option>
+                              <option value="Academic Communication">Academic Communication</option>
+                              <option value="Education">Education</option>
+                            </optgroup>
+                            <optgroup label="Shule ya Msingi & Awali (Primary & Pre-Primary)">
+                              <option value="Mathematics">Mathematics (Hisabati)</option>
+                              <option value="Science and Technology">Science and Technology (Sayansi na Teknolojia)</option>
+                              <option value="Social Studies & Vocational Skills">Social Studies & Vocational Skills</option>
+                              <option value="Civic and Moral Education">Civic and Moral Education (Uraia na Maadili)</option>
+                              <option value="Sanaa na Michezo (Arts & Sports)">Sanaa na Michezo (Arts & Sports)</option>
+                              <option value="Afya na Mazingira (Health & Environment)">Afya na Mazingira (Health & Environment)</option>
+                              <option value="Kusoma (Reading)">Kusoma (Reading)</option>
+                              <option value="Kuandika (Writing)">Kuandika (Writing)</option>
+                              <option value="Kuhesabu (Arithmetic)">Kuhesabu (Arithmetic)</option>
+                            </optgroup>
                           </select>
                           <input
                             type="text"
-                            placeholder="Or specify custom subject name..."
+                            placeholder="Au andika somo jingine maalum hapa..."
                             value={customSubjectText}
                             onChange={e => setCustomSubjectText(e.target.value)}
                             className="mt-1.5 w-full px-2.5 py-1 text-xs border border-slate-200 rounded-lg bg-white placeholder-slate-400"
@@ -1668,7 +1886,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                         </div>
                       </div>
 
-                      {/* Add Button & Preview */}
+                      {/* Add Buttons & Preview */}
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-100">
                         <div className="text-xs text-slate-600">
                           <span className="font-bold text-slate-700">Preview: </span>
@@ -1677,19 +1895,31 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                               {allocStreams.map(s => formatSubjectStream(customSubjectText || allocSubject, allocClass, s)).join(', ')}
                             </span>
                           ) : (
-                            <span className="italic text-slate-400">Select at least one stream above to generate entries</span>
+                            <span className="font-mono text-blue-900 font-bold">
+                              {customSubjectText || allocSubject}
+                            </span>
                           )}
                         </div>
 
-                        <button
-                          type="button"
-                          onClick={handleRegisterSubjectStreams}
-                          disabled={allocStreams.length === 0}
-                          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shrink-0"
-                        >
-                          <Plus className="w-4 h-4" />
-                          <span>Add {customSubjectText || allocSubject} to {allocStreams.length} Stream{allocStreams.length !== 1 ? 's' : ''} (One After Another)</span>
-                        </button>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={handleAddSubjectOnly}
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shrink-0"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Ongeza "{customSubjectText || allocSubject}" Pekee</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={handleRegisterSubjectStreams}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95 shrink-0"
+                          >
+                            <Plus className="w-4 h-4" />
+                            <span>Ongeza {customSubjectText || allocSubject} kwa Mikondo ({allocStreams.length})</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -1697,7 +1927,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
-                          Registered Teaching Subjects ({subjects.length} entries registered individually):
+                          Masomo Yaliyochaguliwa kwa Mwalimu Huyu ({subjects.length}):
                         </span>
                         {subjects.length > 0 && (
                           <button
@@ -1713,7 +1943,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                       <div className="flex flex-wrap gap-2 p-3 bg-white rounded-xl border border-blue-200 min-h-[50px] items-center">
                         {subjects.length === 0 ? (
                           <span className="text-xs text-slate-400 italic">
-                            No subjects registered yet. Use the builder above to register subjects with stream IDs.
+                            Bado hujachagua somo. Bonyeza somo lolote hapo juu (mf. Elimu ya Dini ya Kiislamu, Fine Art, Mathematics) au bonyeza kitufe cha "Ongeza".
                           </span>
                         ) : (
                           subjects.map((sub, idx) => (
@@ -1740,11 +1970,11 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                     {/* Manual Single Entry Input */}
                     <div className="flex items-center gap-2 pt-1">
                       <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">
-                        Or add custom stream entry manually:
+                        Au andika somo lolote kwa mkono:
                       </span>
                       <input
                         type="text"
-                        placeholder="e.g. Physics Form 3C"
+                        placeholder="mf. Elimu ya Dini ya Kiislamu, Fine Art..."
                         value={manualSubjectStreamInput}
                         onChange={e => setManualSubjectStreamInput(e.target.value)}
                         onKeyDown={e => {
@@ -1760,8 +1990,65 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                         onClick={handleAddManualSubjectStream}
                         className="px-3 py-1 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-lg text-xs font-bold border border-slate-300 cursor-pointer"
                       >
-                        + Add Entry
+                        + Add Subject
                       </button>
+                    </div>
+
+                    {/* Registered Teaching Streams (Madarasa & Mikondo Anayofundisha) with Delete (X) & Add (+) */}
+                    <div className="space-y-2 pt-3 border-t border-blue-200/80">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                          <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                          <span>Madarasa &amp; Mikondo Anayofundisha ({teachingStreams.length}):</span>
+                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newStreams = allocStreams.map(str => `${allocClass} - Stream ${str.toUpperCase()}`);
+                              setTeachingStreams(prev => Array.from(new Set([...prev, ...newStreams])));
+                            }}
+                            className="px-2.5 py-1 text-[11px] font-bold bg-indigo-50 hover:bg-indigo-100 text-indigo-800 border border-indigo-200 rounded-lg cursor-pointer"
+                          >
+                            + Ongeza {allocClass} ({allocStreams.join(', ')})
+                          </button>
+                          {teachingStreams.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setTeachingStreams([])}
+                              className="text-[11px] text-rose-600 hover:underline font-bold cursor-pointer"
+                            >
+                              Futa Mikondo Yote
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2 p-3 bg-white rounded-xl border border-indigo-200 min-h-[46px] items-center">
+                        {teachingStreams.length === 0 ? (
+                          <span className="text-xs text-slate-400 italic">
+                            Bado hujachagua darasa/mkondo maalum (All Streams / Standard). Unaweza kuongeza mikondo hapo juu au hapa chini.
+                          </span>
+                        ) : (
+                          teachingStreams.map((st, idx) => (
+                            <span
+                              key={`${st}_${idx}`}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-xl text-xs font-bold bg-indigo-50 text-indigo-950 border border-indigo-300 shadow-2xs"
+                            >
+                              <Layers className="w-3 h-3 text-indigo-600 shrink-0" />
+                              <span>{st}</span>
+                              <button
+                                type="button"
+                                onClick={() => setTeachingStreams(prev => prev.filter((_, i) => i !== idx))}
+                                className="text-indigo-700 hover:text-rose-700 hover:bg-rose-100 rounded-full p-0.5 transition cursor-pointer"
+                                title={`Futa mkondo ${st}`}
+                              >
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </span>
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2003,7 +2290,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                                   type="button"
                                   onClick={() => {
                                     setViewingTimetableTeacher(t);
-                                    if (t.subjects && t.subjects.length > 0) setSlotSubject(t.subjects[0]);
+                                    setSlotSubject(t.subjects && t.subjects.length === 1 ? t.subjects[0] : '');
                                   }}
                                   className="px-2 py-0.5 rounded text-[10px] font-bold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-1 cursor-pointer shadow-2xs"
                                   title="View complete weekly teaching schedule"
@@ -2083,7 +2370,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       {/* TEACHER TIMETABLE & TEACHING SCHEDULE MODAL */}
       {viewingTimetableTeacher && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-5 overflow-y-auto animate-in fade-in">
-          <div className="bg-white rounded-2xl w-full max-w-5xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+          <div className="bg-white rounded-2xl w-full max-w-6xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
             {/* Header */}
             <div className="bg-gradient-to-r from-[#0f2948] via-[#1f4d8b] to-indigo-900 text-white p-5 flex flex-wrap items-center justify-between gap-4 border-b border-blue-900 shrink-0">
               <div className="flex items-center gap-3">
@@ -2133,78 +2420,12 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                 </div>
               )}
 
-              {/* Weekly Timetable Grid */}
-              <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
-                <div className="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-                  <span className="font-bold text-xs text-slate-800 uppercase tracking-wider">
-                    Weekly Teaching Timetable ({viewingTeacherSlots.length} periods assigned)
-                  </span>
-                  <span className="text-xs text-slate-500">
-                    Target Quota: <strong>{viewingTimetableTeacher.maxPeriodsPerWeek || 20}</strong> periods / week
-                  </span>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border-collapse">
-                    <thead className="bg-[#1f4d8b] text-white uppercase text-[10px] tracking-wider">
-                      <tr>
-                        <th className="p-2.5 text-center w-24 border-r border-blue-900">Day</th>
-                        {periodsList.map((p, idx) => (
-                          <th key={p} className="p-2 text-center border-r border-blue-900 min-w-[110px]">
-                            <div>{p}</div>
-                            <div className="text-[9px] text-blue-200 font-normal">
-                              {periodSettings[idx] ? `${periodSettings[idx].start} - ${periodSettings[idx].end}` : `Period ${idx + 1}`}
-                            </div>
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {WEEKDAYS.map(day => (
-                        <tr key={day} className="hover:bg-slate-50/70 transition">
-                          <td className="p-3 border-r border-slate-200 font-black text-slate-800 bg-slate-50 text-center">
-                            {day}
-                          </td>
-                          {periodsList.map(p => {
-                            const slot = viewingScheduleMatrix[day]?.[p];
-                            return (
-                              <td key={p} className="p-2 border-r border-slate-200 text-center align-top">
-                                {slot ? (
-                                  <div className="p-1.5 rounded-lg bg-blue-50 border border-blue-200 text-slate-800 relative group">
-                                    <div className="font-bold text-xs text-blue-900 leading-tight">
-                                      {slot.subject}
-                                    </div>
-                                    <div className="text-[10px] font-semibold text-slate-700 mt-0.5">
-                                      {slot.className} {slot.stream ? `(${slot.stream})` : ''}
-                                    </div>
-                                    {slot.room && (
-                                      <div className="text-[9px] text-slate-500 font-mono">
-                                        Rm: {slot.room}
-                                      </div>
-                                    )}
-                                    {onUpdateTimetableAssignments && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRemoveTimetableSlot(slot.id)}
-                                        className="opacity-0 group-hover:opacity-100 absolute -top-1.5 -right-1.5 p-0.5 bg-rose-600 text-white rounded-full hover:bg-rose-700 transition cursor-pointer"
-                                        title="Remove slot"
-                                      >
-                                        <X className="w-2.5 h-2.5" />
-                                      </button>
-                                    )}
-                                  </div>
-                                ) : (
-                                  <span className="text-slate-300 font-mono text-xs">--</span>
-                                )}
-                              </td>
-                            );
-                          })}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
+              {/* Synchronized Teacher Timetable View */}
+              <TeacherTimetable
+                teacher={viewingTimetableTeacher}
+                assignments={timetableAssignments}
+                periodSettings={periodSettings}
+              />
 
               {/* Quick Add Timetable Slot Form */}
               {onUpdateTimetableAssignments && (
@@ -2263,23 +2484,33 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
 
                     <div>
                       <label className="text-[10px] font-bold text-slate-500 block mb-1">Subject</label>
-                      <select
-                        value={slotSubject || viewingTimetableTeacher.subjects[0] || 'Basic Mathematics'}
-                        onChange={e => setSlotSubject(e.target.value)}
-                        className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-bold"
-                      >
-                        {(viewingTimetableTeacher.subjects && viewingTimetableTeacher.subjects.length > 0 
-                          ? viewingTimetableTeacher.subjects 
-                          : SUBJECT_LIST
-                        ).map(s => <option key={s} value={s}>{s}</option>)}
-                      </select>
+                      {(viewingTimetableTeacher.subjects || []).length === 0 ? (
+                        <div className="w-full px-2.5 py-1.5 text-xs border border-rose-200 rounded-lg bg-rose-50 text-rose-800 font-bold truncate">
+                          ⚠️ Hana Somo
+                        </div>
+                      ) : (viewingTimetableTeacher.subjects || []).length === 1 ? (
+                        <div className="w-full px-2.5 py-1.5 text-xs border border-blue-200 rounded-lg bg-blue-50 text-blue-900 font-bold flex items-center justify-between">
+                          <span className="truncate">{viewingTimetableTeacher.subjects[0]}</span>
+                          <span className="text-[9px] bg-blue-100 text-blue-700 px-1 rounded font-black">Auto ✓</span>
+                        </div>
+                      ) : (
+                        <select
+                          value={viewingTimetableTeacher.subjects.includes(slotSubject) ? slotSubject : ''}
+                          onChange={e => setSlotSubject(e.target.value)}
+                          className="w-full px-2.5 py-1.5 text-xs border border-slate-300 rounded-lg bg-white font-bold"
+                        >
+                          <option value="">-- Chagua Somo --</option>
+                          {viewingTimetableTeacher.subjects.map(s => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      )}
                     </div>
 
                     <div className="flex items-end">
                       <button
                         type="button"
+                        disabled={(viewingTimetableTeacher.subjects || []).length === 0}
                         onClick={handleAddTimetableSlot}
-                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold cursor-pointer transition shadow-xs"
+                        className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white rounded-lg text-xs font-bold cursor-pointer transition shadow-xs"
                       >
                         Add to Schedule
                       </button>
@@ -2291,6 +2522,397 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
           </div>
         </div>
       )}
+      {/* EDIT TEACHER MODAL (Opens immediately when clicking Edit on any Teacher row) */}
+      {isEditTeacherModalOpen && editingTeacher && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-4xl w-full p-5 sm:p-6 space-y-5 max-h-[92vh] overflow-y-auto border border-slate-200">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base sm:text-lg font-black text-[#1f4d8b] flex items-center gap-2">
+                  <Edit3 className="w-5 h-5 text-amber-600" />
+                  <span>Hariri Taarifa za Mwalimu / Edit Teacher: {editingTeacher.name}</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Taarifa zote za mwanzo za mwalimu zimeletwa hapa chini. Unaweza kufuta (✕) au kuongeza (+) masomo, mikondo, picha, na taarifa zake kisha ubofye <strong>Hifadhi Mabadiliko</strong>.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={cancelEdit}
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="flex flex-col md:flex-row gap-5 items-start">
+                {/* Teacher Photo */}
+                <div className="flex flex-col items-center gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl w-full md:w-36 shrink-0">
+                  <div className="relative w-24 h-28 bg-white border border-slate-300 rounded-lg overflow-hidden flex items-center justify-center shadow-2xs">
+                    {passportPhoto ? (
+                      <>
+                        <img src={passportPhoto} alt={name} className="w-full h-full object-cover" />
+                        <button
+                          type="button"
+                          onClick={() => setPassportPhoto('')}
+                          className="absolute top-1 right-1 p-1 bg-rose-600 text-white rounded-full hover:bg-rose-700 shadow-xs cursor-pointer"
+                          title="Futa Picha"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </>
+                    ) : (
+                      <User className="w-10 h-10 text-slate-300" />
+                    )}
+                  </div>
+                  <div className="flex flex-col items-center gap-1.5 w-full text-[11px] font-bold">
+                    <label className="w-full py-1 px-2 text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md cursor-pointer flex items-center justify-center gap-1">
+                      <Upload className="w-3 h-3" />
+                      <span>Upload Photo</span>
+                      <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setIsCameraCaptureOpen(true)}
+                      className="w-full py-1 px-2 text-slate-700 bg-white hover:bg-slate-100 border border-slate-300 rounded-md cursor-pointer flex items-center justify-center gap-1"
+                    >
+                      <Camera className="w-3 h-3 text-blue-600" />
+                      <span>Take Photo</span>
+                    </button>
+                    {passportPhoto && (
+                      <button
+                        type="button"
+                        onClick={() => setPassportPhoto('')}
+                        className="w-full py-1 px-2 text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-md cursor-pointer flex items-center justify-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span>Futa Picha</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Personal & Role Info */}
+                <div className="flex-1 space-y-3 w-full">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Jina Kamili la Mwalimu *</label>
+                      <input
+                        type="text"
+                        value={name}
+                        onChange={e => setName(e.target.value)}
+                        className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-blue-500"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Jinsia (Gender) *</label>
+                      <select
+                        value={gender}
+                        onChange={e => setGender(e.target.value as 'Male' | 'Female')}
+                        className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white"
+                      >
+                        <option value="Male">Male (Mwanaume)</option>
+                        <option value="Female">Female (Mwanamke)</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Cheo / Wadhifa (Staff Role) *</label>
+                      {!isCustomRole ? (
+                        <select
+                          value={schoolRole}
+                          onChange={e => {
+                            if (e.target.value === 'CUSTOM') {
+                              setIsCustomRole(true);
+                              setCustomRole('');
+                            } else {
+                              setSchoolRole(e.target.value);
+                            }
+                          }}
+                          className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white"
+                        >
+                          {STAFF_ROLES_LIST.map(r => (
+                            <option key={r} value={r}>{r}</option>
+                          ))}
+                          <option value="CUSTOM">+ Cheo Kingine Maalum...</option>
+                        </select>
+                      ) : (
+                        <div className="flex gap-1">
+                          <input
+                            type="text"
+                            value={customRole}
+                            onChange={e => setCustomRole(e.target.value)}
+                            placeholder="Andika cheo..."
+                            className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCustomRole(false);
+                              setSchoolRole('Subject Teacher');
+                            }}
+                            className="px-2 py-1 text-xs bg-slate-100 rounded border"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                    <div>
+                      <PhoneInputPlugin
+                        value={phone}
+                        onChange={setPhone}
+                        label="Namba ya Simu"
+                        studentName={name}
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Barua Pepe (Email)</label>
+                      <input
+                        type="email"
+                        value={email}
+                        onChange={e => setEmail(e.target.value)}
+                        placeholder="teacher@school.ac.tz"
+                        className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Vipindi kwa Wiki (Quota)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="45"
+                        value={maxPeriodsPerWeek}
+                        onChange={e => setMaxPeriodsPerWeek(Number(e.target.value) || 20)}
+                        className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white"
+                      />
+                    </div>
+                    <div>
+                      <label className="text-xs font-bold text-slate-700 block mb-1">Usimamizi &amp; Rangi</label>
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          value={excludeInvigilation ? 'yes' : 'no'}
+                          onChange={e => setExcludeInvigilation(e.target.value === 'yes')}
+                          className="flex-1 px-2 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                        >
+                          <option value="no">Anasimamia</option>
+                          <option value="yes">Hasimamii</option>
+                        </select>
+                        <input
+                          type="color"
+                          value={customColor}
+                          onChange={e => setCustomColor(e.target.value)}
+                          className="w-9 h-8 rounded border border-slate-300 cursor-pointer shrink-0"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 1. MASOMO ALIYOSAJILIWA MWALIMU HUYU (DELETE X OR ADD +) */}
+              <div className="p-4 bg-gradient-to-br from-blue-50/70 via-indigo-50/40 to-slate-50 border border-blue-200 rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-blue-200/80 pb-2">
+                  <div className="flex items-center gap-2">
+                    <BookOpen className="w-4 h-4 text-blue-700" />
+                    <h4 className="text-xs font-black text-blue-950 uppercase tracking-wide">
+                      1. Masomo Anayofundisha Mwalimu Huyu ({subjects.length} Subjects)
+                    </h4>
+                  </div>
+                  {subjects.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setSubjects([])}
+                      className="px-2.5 py-1 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer"
+                    >
+                      Futa Masomo Yote
+                    </button>
+                  )}
+                </div>
+
+                {/* Current Subjects with Delete (X) */}
+                <div className="flex flex-wrap gap-1.5 p-3 bg-white rounded-xl border border-blue-200 min-h-[48px] items-center">
+                  {subjects.length === 0 ? (
+                    <span className="text-xs text-slate-400 italic">
+                      Hakuna somo lililochaguliwa. Ongeza somo hapa chini (+).
+                    </span>
+                  ) : (
+                    subjects.map((sub, idx) => (
+                      <span
+                        key={`${sub}_${idx}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-blue-100 text-blue-950 border border-blue-300 shadow-2xs"
+                      >
+                        <BookOpen className="w-3 h-3 text-blue-700 shrink-0" />
+                        <span>{sub}</span>
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveSubjectEntry(sub)}
+                          className="text-blue-700 hover:text-rose-700 hover:bg-rose-100 rounded-full p-0.5 transition cursor-pointer"
+                          title={`Futa somo la ${sub}`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+
+                {/* Add Subject via Dropdown or Custom Input */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                      Chagua Somo la Kuongeza (+ Ongeza Somo):
+                    </label>
+                    <select
+                      value=""
+                      onChange={e => {
+                        const val = e.target.value;
+                        if (val && !subjects.includes(val)) {
+                          setSubjects(prev => [...prev, val]);
+                        }
+                      }}
+                      className="w-full px-3 py-2 text-xs font-bold border border-slate-300 rounded-lg bg-white text-slate-800"
+                    >
+                      <option value="">+ Chagua Somo Kwenye Orodha...</option>
+                      {allAvailableSubjectsList.map(subName => (
+                        <option key={subName} value={subName} disabled={subjects.includes(subName)}>
+                          {subName} {subjects.includes(subName) ? ' (Tayari lipo ✓)' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-700 block mb-1">
+                      Au Andika Somo Jingine Kwa Mkono:
+                    </label>
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        value={manualSubjectStreamInput}
+                        onChange={e => setManualSubjectStreamInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            handleAddManualSubjectStream();
+                          }
+                        }}
+                        placeholder="Mf. Elimu ya Dini ya Kiislamu, Fine Art..."
+                        className="flex-1 px-3 py-2 text-xs border border-slate-300 rounded-lg bg-white"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleAddManualSubjectStream}
+                        className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold rounded-lg cursor-pointer shrink-0 flex items-center gap-1"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                        <span>Ongeza</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. MADARASA & MIKONDO ANAYOFUNDISHA (DELETE X OR ADD +) */}
+              <div className="p-4 bg-gradient-to-br from-indigo-50/70 via-slate-50 to-white border border-indigo-200 rounded-xl space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-indigo-200/80 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Layers className="w-4 h-4 text-indigo-700" />
+                    <h4 className="text-xs font-black text-indigo-950 uppercase tracking-wide">
+                      2. Madarasa na Mikondo Anayofundisha ({teachingStreams.length} Streams)
+                    </h4>
+                  </div>
+                  {teachingStreams.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setTeachingStreams([])}
+                      className="px-2.5 py-1 text-[10px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg cursor-pointer"
+                    >
+                      Futa Mikondo Yote
+                    </button>
+                  )}
+                </div>
+
+                {/* Current Teaching Streams Chips with Delete (X) */}
+                <div className="flex flex-wrap gap-1.5 p-3 bg-white rounded-xl border border-indigo-200 min-h-[48px] items-center">
+                  {teachingStreams.length === 0 ? (
+                    <span className="text-xs text-slate-400 italic">
+                      Hakuna mkondo maalum uliofungwa (Anaruhusiwa kufundisha mikondo yote). Bonyeza hapa chini kuongeza darasa/mkondo.
+                    </span>
+                  ) : (
+                    teachingStreams.map((st, idx) => (
+                      <span
+                        key={`${st}_${idx}`}
+                        className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-bold bg-indigo-100 text-indigo-950 border border-indigo-300 shadow-2xs"
+                      >
+                        <Layers className="w-3 h-3 text-indigo-700 shrink-0" />
+                        <span>{st}</span>
+                        <button
+                          type="button"
+                          onClick={() => setTeachingStreams(prev => prev.filter((_, i) => i !== idx))}
+                          className="text-indigo-700 hover:text-rose-700 hover:bg-rose-100 rounded-full p-0.5 transition cursor-pointer"
+                          title={`Futa mkondo ${st}`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+
+                {/* Quick Add Class & Stream */}
+                <div className="space-y-1.5">
+                  <span className="text-[11px] font-bold text-slate-600 block">
+                    Bonyeza Darasa &amp; Mkondo kuongeza (+) au kuondoa (✓):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-2 bg-white border border-slate-200 rounded-lg">
+                    {allAvailableStreams.map(streamLabel => {
+                      const isSelected = teachingStreams.includes(streamLabel);
+                      return (
+                        <button
+                          key={streamLabel}
+                          type="button"
+                          onClick={() => handleToggleStream(streamLabel)}
+                          className={`px-2.5 py-1 rounded text-[11px] font-bold border transition cursor-pointer flex items-center gap-1 ${
+                            isSelected
+                              ? 'bg-indigo-600 text-white border-indigo-700'
+                              : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-indigo-50'
+                          }`}
+                        >
+                          {isSelected ? <Check className="w-3 h-3" /> : <Plus className="w-3 h-3 text-slate-400" />}
+                          <span>{streamLabel}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-200">
+                <button
+                  type="button"
+                  onClick={cancelEdit}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+                >
+                  Ghairi (Cancel)
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-black text-white bg-amber-600 hover:bg-amber-700 rounded-xl shadow-md cursor-pointer flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Hifadhi Mabadiliko (Update Teacher)</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* Multiple Teacher Registration Modal (Spreadsheet & CSV Import) */}
       <CameraCaptureModal
         isOpen={isCameraCaptureOpen}

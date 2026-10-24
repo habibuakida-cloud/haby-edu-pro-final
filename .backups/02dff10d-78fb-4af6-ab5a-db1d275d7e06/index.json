@@ -1,0 +1,22 @@
+[
+  {
+    "id": "snap_2026-10-22_14-17-55_scheduled",
+    "schoolId": "02dff10d-78fb-4af6-ab5a-db1d275d7e06",
+    "filename": "snap_2026-10-22_14-17-55_scheduled.json",
+    "storagePath": "02dff10d-78fb-4af6-ab5a-db1d275d7e06/snap_2026-10-22_14-17-55_scheduled.json",
+    "bucket": "school-backups",
+    "createdAt": "2026-10-22T14:17:55.701Z",
+    "dateKey": "2026-10-22",
+    "triggerType": "scheduled",
+    "mode": "supabase_snapshot",
+    "sizeBytes": 891419,
+    "counts": {
+      "students": 600,
+      "teachers": 42,
+      "exams": 7,
+      "classes": 4,
+      "timetableAssignments": 22,
+      "examinationRecords": 8
+    }
+  }
+]

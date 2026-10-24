@@ -43,11 +43,13 @@ import {
   ToggleLeft,
   ToggleRight,
   Archive,
-  MessageCircle
+  MessageCircle,
+  Share2
 } from 'lucide-react';
 import { Student, SchoolInfo, UserAccount, Exam, ExaminationRecord, Teacher, UsalRecord, ExamTerm, RecordExamType, AcademicTermDates } from '../types';
 import { printReportCardDocument } from '../utils/export';
 import { exportGradeDistributionAndPerformancePDF } from '../utils/performancePdfExport';
+import { WhatsAppShareModal } from './common/WhatsAppShareModal';
 import { ReportCardDocument } from './ReportCard/ReportCardDocument';
 import { EditReportCardModal } from './ReportCard/EditReportCardModal';
 import { StudentComparisonView } from './StudentComparisonView';
@@ -224,6 +226,8 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   const [docModalExamId, setDocModalExamId] = useState<number | undefined>(undefined);
   const [isCutoffModalOpen, setIsCutoffModalOpen] = useState(false);
   const [isUsalModalOpen, setIsUsalModalOpen] = useState(false);
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [whatsAppDocTitle, setWhatsAppDocTitle] = useState('Examination Performance PDF');
 
   // Clear pending marks when filters change to ensure exam isolation
   useEffect(() => {
@@ -1504,6 +1508,8 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
           passStatus: c.passStatus
         }))
     });
+    setWhatsAppDocTitle(`Performance Summary (${selectedExam} - ${selectedClass})`);
+    setShowWhatsAppModal(true);
   };
 
   // Report Card navigation
@@ -1997,6 +2003,16 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
               >
                 <FileText className="w-3.5 h-3.5 text-rose-600" />
                 <span>Export PDF</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleExportPerformancePdf}
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="Download Performance PDF and send via WhatsApp"
+              >
+                <Share2 className="w-3.5 h-3.5 text-white" />
+                <span>Send via WhatsApp</span>
               </button>
 
               <button
@@ -3801,6 +3817,12 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
           </div>
         </div>
       )}
+      {/* WhatsApp Share Modal */}
+      <WhatsAppShareModal
+        isOpen={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
+        documentTitle={whatsAppDocTitle}
+      />
     </div>
   );
 };

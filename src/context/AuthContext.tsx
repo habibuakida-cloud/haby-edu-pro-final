@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { collection, query, where, getDocs, doc, getDoc, setDoc } from 'firebase/firestore';
 import { onAuthStateChanged } from 'firebase/auth';
-import { db, auth, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
+import { db, auth, supabase, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
 import { UserAccount, UserRole } from '../types';
 
 interface AuthContextType {
@@ -15,6 +15,7 @@ interface AuthContextType {
   loginAsDemo: (role: UserRole) => void;
   switchSchool: (schoolId: string) => Promise<void>;
   createSchoolUser: (email: string, password: string, displayName: string, role: UserRole) => Promise<boolean>;
+  loginWithFingerprint: (teacherId: string | number) => Promise<void>;
 }
 
 export const SUPERADMIN_EMAIL = 'habibuakida@gmail.com';
@@ -410,12 +411,94 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     await auth.signOut().catch(() => {});
   };
 
-  const refreshUserAccount = async () => { 
-    if (auth.currentUser) await fetchOrCreateUserAccount({ user: auth.currentUser }); 
+  const refreshUserAccount = async () => {
+    if (auth.currentUser) await fetchOrCreateUserAccount({ user: auth.currentUser });
+  };
+
+  const loginWithFingerprint = async (teacherId: string | number) => {
+    const schoolId = sessionStorage.getItem('haby_school_id') || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
+    const { data: teacherRows } = await supabase
+      .from('teachers')
+      .select('*')
+      .eq('school_id', schoolId);
+
+    const match = (teacherRows || []).find((t: any) => String(t.id) === String(teacherId) || String(t.numeric_id || t.numericId) === String(teacherId));
+    if (!match) {
+      throw new Error("Mwalimu hakupatikana kwenye mfumo wa shule.");
+    }
+    if (!match.fingerprint_enrolled && !match.fingerprintEnrolled) {
+      throw new Error("Alama ya vidole haijasajiliwa na Mkuu wa Shule (Admin Fingerprint Enrollment required). Tafadhali mwambie Admin akusajili.");
+    }
+
+    // Record / Update Teacher Attendance (Arrival vs Departure time via Fingerprint Scan)
+    try {
+      const now = new Date();
+      const todayDateStr = now.toISOString().split('T')[0];
+      const timeStr = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+      const dayName = now.toLocaleDateString('en-US', { weekday: 'long' });
+
+      const { data: existingAttendance } = await supabase
+        .from('teacher_attendance')
+        .select('*')
+        .eq('school_id', schoolId)
+        .eq('teacher_id', match.id)
+        .eq('date', todayDateStr);
+
+      if (existingAttendance && existingAttendance.length > 0) {
+        // Record already exists for today -> Update Departure (Check-Out) Time
+        const recordId = existingAttendance[0].id;
+        await supabase
+          .from('teacher_attendance')
+          .update({
+            check_out_time: timeStr,
+            remarks: `Biometric Check-Out (Departure Time: ${timeStr})`,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', recordId);
+      } else {
+        // No record for today -> Record Arrival (Check-In) Time
+        const newAttId = `tatt_${schoolId}_${todayDateStr}_${match.id}`;
+        await supabase
+          .from('teacher_attendance')
+          .upsert({
+            id: newAttId,
+            school_id: schoolId,
+            teacher_id: match.id,
+            teacher_name: match.name,
+            school_role: match.school_role || match.schoolRole || 'Subject Teacher',
+            date: todayDateStr,
+            day_of_week: dayName,
+            status: 'PRESENT',
+            check_in_time: timeStr,
+            check_out_time: '15:30',
+            remarks: `Biometric Check-In (Arrival Time: ${timeStr})`,
+            marked_by: 'Biometric Kiosk'
+          }, { onConflict: 'id' });
+      }
+    } catch (attErr) {
+      console.warn("Error logging teacher biometric attendance:", attErr);
+    }
+
+    const teacherAccount: UserAccount = {
+      id: match.id,
+      email: match.email || `${match.name.toLowerCase().replace(/\s+/g, '')}@school.ac.tz`,
+      fullName: match.name,
+      role: 'TEACHER',
+      schoolId: schoolId,
+      school_id: schoolId,
+      assignedSubjects: match.subjects || []
+    };
+
+    if (typeof window !== 'undefined') {
+      safeRemoveItem(window.sessionStorage, 'haby_explicit_logout');
+      safeSetItem(window.sessionStorage, 'haby_school_id', schoolId);
+      safeSetItem(window.localStorage, 'currentSchoolId', schoolId);
+    }
+    setPersistedAccount(teacherAccount);
   };
 
   return (
-    <AuthContext.Provider value={{ userAccount, user: userAccount, loading, logout, refreshUserAccount, signInWithGoogle, signInWithEmail, loginAsDemo, switchSchool, createSchoolUser }}>
+    <AuthContext.Provider value={{ userAccount, user: userAccount, loading, logout, refreshUserAccount, signInWithGoogle, signInWithEmail, loginAsDemo, switchSchool, createSchoolUser, loginWithFingerprint }}>
       {children}
     </AuthContext.Provider>
   );

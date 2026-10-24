@@ -19,9 +19,15 @@ import {
   Link,
   Loader2,
   ExternalLink,
-  ArrowRight
+  ArrowRight,
+  Printer,
+  TrendingUp
 } from 'lucide-react';
 import { db } from '../lib/firebaseClient';
+import { printFormattedSection } from '../utils/export';
+import { 
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, Legend 
+} from 'recharts';
 
 // Common NECTA Exam Types
 const EXAM_TYPES = ['STNA', 'SFNA', 'PSLE', 'FTNA', 'CSEE', 'ACSEE'];
@@ -60,6 +66,14 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
   const [subjectsList, setSubjectsList] = useState([]);
   const [saveStatus, setSaveStatus] = useState(null); // { type: 'success' | 'error', message: string }
   const [isSavingToDb, setIsSavingToDb] = useState(false);
+
+  // College recommendations searchable directory filter states
+  const [collegeSearchQuery, setCollegeSearchQuery] = useState('');
+  const [selectedFieldFilter, setSelectedFieldFilter] = useState('ALL');
+  const [minSubjectReqFilter, setMinSubjectReqFilter] = useState('ALL');
+
+  // Trend analysis student selector state
+  const [selectedTrendStudentCno, setSelectedTrendStudentCno] = useState('');
 
   // Restore saved analyzer state on mount to prevent data loss on page update/refresh
   useEffect(() => {
@@ -175,7 +189,7 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
         ];
 
         setSubjectsList(orderedSubjects);
-        setParsedData(parsedRows);
+        setParsedData(sortCandidatesByExamType(parsedRows, data.examType || selectedExamType));
 
         setSaveStatus({
           type: 'success',
@@ -322,7 +336,7 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
         ];
 
         setSubjectsList(orderedSubjects);
-        setParsedData(parsedRows);
+        setParsedData(sortCandidatesByExamType(parsedRows, selectedExamType));
         setSaveStatus({
           type: 'success',
           message: `Watahiniwa ${parsedRows.length} wameingizwa na kuchakatwa kutoka kwenye faili la CSV/Excel kikamilifu! Masomo yaliyotambuliwa: ${orderedSubjects.length}`
@@ -435,7 +449,7 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
     ];
 
     setSubjectsList(orderedSubjects);
-    setParsedData(parsedRows);
+    setParsedData(sortCandidatesByExamType(parsedRows, selectedExamType));
     setSaveStatus({
       type: 'success',
       message: `Watahiniwa ${parsedRows.length} wamechakatwa kikamilifu! Masomo yaliyotambuliwa: ${orderedSubjects.length}`
@@ -548,6 +562,307 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
     ];
   }, [parsedData]);
 
+  // TASK 4: FORM 5 BALANCED COMBINATIONS SUMMARY (Multiple Valid Options Support including Fine Art, Agriculture, Computer Studies, Music, Theatre Arts, etc.)
+  const form5BalancedSummary = useMemo(() => {
+    if (!parsedData || parsedData.length === 0) return [];
+    const qualifying = parsedData.filter(d => ['I', 'II', 'III'].includes(String(d.div || '').toUpperCase()));
+    return qualifying.map(c => {
+      const subs = c.subjects || {};
+      const passed = (sList) => {
+        const list = Array.isArray(sList) ? sList : [sList];
+        return list.some(s => ['A', 'B', 'C', 'D'].includes(subs[s]));
+      };
+      
+      const combos = [];
+      // Sciences & Tech
+      if (passed(['PHY']) && passed(['CHEM']) && (passed(['B/MATH', 'MATH']))) combos.push('PCM (Physics, Chemistry, Advanced Mathematics)');
+      if (passed(['PHY']) && passed(['CHEM']) && passed(['BIO'])) combos.push('PCB (Physics, Chemistry, Biology)');
+      if (passed(['PHY']) && passed(['GEO']) && (passed(['B/MATH', 'MATH']))) combos.push('PGM (Physics, Geography, Mathematics)');
+      if (passed(['CHEM']) && passed(['BIO']) && passed(['GEO'])) combos.push('CBG (Chemistry, Biology, Geography)');
+      if (passed(['CHEM']) && passed(['BIO']) && (passed(['AGRI', 'AGRIC']))) combos.push('CBA (Chemistry, Biology, Agriculture)');
+      if (passed(['PHY']) && (passed(['COMP', 'CSC'])) && (passed(['B/MATH', 'MATH']))) combos.push('PCM-ICT (Physics, Computer Studies, Mathematics)');
+
+      // Arts, Languages & Humanities
+      if (passed(['HIST']) && passed(['GEO']) && passed(['LIT', 'ENGL', 'KISW'])) combos.push('HGL (History, Geography, Language/Literature)');
+      if (passed(['ECO']) && passed(['GEO']) && (passed(['B/MATH', 'MATH']))) combos.push('EGM (Economics, Geography, Mathematics)');
+      if (passed(['HIST']) && passed(['GEO']) && passed(['ECO'])) combos.push('HGE (History, Geography, Economics)');
+      if (passed(['HIST']) && passed(['KISW']) && passed(['LIT', 'ENGL'])) combos.push('HKL (History, Kiswahili, Literature)');
+
+      // Fine Art & Creative Arts / Modern Combinations
+      if (passed(['HIST']) && passed(['LIT']) && (passed(['FINE_ART', 'ART', 'F/ART']))) combos.push('HLA / HFA (History, Literature, Fine Art)');
+      if (passed(['GEO']) && passed(['LIT']) && (passed(['FINE_ART', 'ART', 'F/ART']))) combos.push('GFA (Geography, Literature, Fine Art)');
+      if (passed(['HIST']) && (passed(['FINE_ART', 'ART', 'F/ART'])) && (passed(['MUS', 'MUSIC']))) combos.push('HFA-MUS (History, Fine Art, Music)');
+      if (passed(['HIST']) && (passed(['THEATRE', 'TA'])) && passed(['LIT'])) combos.push('HTL (History, Theatre Arts, Literature)');
+      if (passed(['AGRI']) && passed(['GEO']) && passed(['BIO'])) combos.push('AGB (Agriculture, Geography, Biology)');
+
+      if (combos.length === 0) {
+        combos.push('HGE (History, Geography, Economics)');
+        combos.push('PCB (Physics, Chemistry, Biology)');
+      }
+
+      const isBalanced = combos.length > 0;
+
+      return {
+        cno: c.cno,
+        sex: c.sex,
+        div: c.div,
+        aggt: c.aggt,
+        isBalanced,
+        balancedCombos: combos.slice(0, 3)
+      };
+    });
+  }, [parsedData]);
+
+  // Helper for sorting candidates by exam type (Secondary: Girls first, Primary: Boys first)
+  const sortCandidatesByExamType = (rows, examType) => {
+    const isPrimary = ['STNA', 'SFNA', 'PSLE'].includes(examType);
+    return [...rows].sort((a, b) => {
+      const sexA = String(a.sex || '').toUpperCase();
+      const sexB = String(b.sex || '').toUpperCase();
+      if (sexA !== sexB) {
+        if (isPrimary) {
+          if (sexA === 'M') return -1;
+          if (sexB === 'M') return 1;
+        } else {
+          if (sexA === 'F') return -1;
+          if (sexB === 'F') return 1;
+        }
+      }
+      return (a.cno || '').localeCompare(b.cno || '');
+    });
+  };
+
+  // TOP 10 RANKING COMPUTATIONS (General, Boys, Girls)
+  const rankStudents = (list) => {
+    const divRank = { 'I': 1, 'II': 2, 'III': 3, 'IV': 4, '0': 5 };
+    return sortCandidatesByExamType(list, selectedExamType).sort((a, b) => {
+      const divA = String(a.div || '0').toUpperCase();
+      const divB = String(b.div || '0').toUpperCase();
+      const rA = divRank[divA] || 6;
+      const rB = divRank[divB] || 6;
+      if (rA !== rB) return rA - rB;
+
+      const aggtA = parseInt(a.aggt, 10);
+      const aggtB = parseInt(b.aggt, 10);
+      const validAggtA = !isNaN(aggtA);
+      const validAggtB = !isNaN(aggtB);
+      if (validAggtA && validAggtB) {
+        if (aggtA !== aggtB) return aggtA - aggtB;
+      } else if (validAggtA) {
+        return -1;
+      } else if (validAggtB) {
+        return 1;
+      }
+      return (a.cno || '').localeCompare(b.cno || '');
+    });
+  };
+
+  const topTenGeneral = useMemo(() => rankStudents(parsedData).slice(0, 10), [parsedData]);
+  const topTenBoys = useMemo(() => rankStudents(parsedData.filter(d => d.sex === 'M')).slice(0, 10), [parsedData]);
+  const topTenGirls = useMemo(() => rankStudents(parsedData.filter(d => d.sex === 'F')).slice(0, 10), [parsedData]);
+
+  // TASK 5: MID-LEVEL COLLEGES (VYUO VYA KATI / NACTVET) COURSE RECOMMENDATIONS & PASSED SUBJECTS
+  const midLevelCollegeSummary = useMemo(() => {
+    if (!parsedData || parsedData.length === 0) return [];
+    return parsedData.map(c => {
+      const subs = c.subjects || {};
+      const passedEntries = Object.entries(subs).filter(([s, g]) => ['A', 'B', 'C', 'D'].includes(String(g).toUpperCase()));
+      const passedSubjectsFormatted = passedEntries.map(([s, g]) => `${s} (${g})`).join(', ');
+      const passCount = passedEntries.length;
+      const isEligible = passCount >= 4; // At least 4 D passes required for NACTVET mid-level diploma/certificate courses
+
+      const passed = (s) => ['A', 'B', 'C', 'D'].includes(subs[s]);
+      const bioPass = passed('BIO');
+      const chemPass = passed('CHEM');
+      const phyPass = passed('PHY');
+      const mathPass = passed('B/MATH') || passed('MATH');
+      const engPass = passed('ENGL');
+      const kiswPass = passed('KISW');
+      const civPass = passed('CIV');
+      const histPass = passed('HIST');
+      const geoPass = passed('GEO');
+
+      const recommendedCourses = [];
+
+      // NACTVET Mid-Level College criteria matching:
+      if (bioPass && chemPass) {
+        recommendedCourses.push('Diploma in Nursing and Midwifery (Uuguzi na Ukunga)');
+        recommendedCourses.push('Diploma in Clinical Medicine (Tabibu)');
+        recommendedCourses.push('Certificate in Medical Laboratory Sciences');
+      }
+      if (mathPass || phyPass || chemPass) {
+        recommendedCourses.push('Diploma in Information and Communication Technology (ICT)');
+        recommendedCourses.push('Diploma in Electronics & Electrical Engineering');
+      }
+      if (engPass || kiswPass || civPass || histPass) {
+        recommendedCourses.push('Diploma in Business Administration & Accountancy');
+        recommendedCourses.push('Diploma in Community Development & Social Work');
+        recommendedCourses.push('Diploma in Procurement & Logistics Management');
+      }
+      if (geoPass && bioPass) {
+        recommendedCourses.push('Diploma in Agriculture & Agricultural Production');
+      }
+
+      if (recommendedCourses.length === 0) {
+        recommendedCourses.push('Certificate in Business Studies');
+        recommendedCourses.push('Certificate in Secretarial Studies & Computer Applications');
+        recommendedCourses.push('Certificate in Community Development');
+      }
+
+      let qualificationType = 'Diploma & Certificate Courses (NACTVET)';
+      const div = String(c.div || '').toUpperCase();
+      if (div === 'IV' || div === '0' || !isEligible) {
+        qualificationType = isEligible ? 'Certificate Courses / VETA' : 'Not Eligible (< 4 D Passes)';
+      } else if (div === 'III') {
+        qualificationType = 'Ordinary Diploma (NTA Level 5 / 6)';
+      }
+
+      return {
+        cno: c.cno,
+        sex: c.sex,
+        div: c.div,
+        aggt: c.aggt,
+        passCount,
+        isEligible,
+        qualificationType,
+        passedSubjectsFormatted: passedSubjectsFormatted || 'None (Pass F)',
+        courses: recommendedCourses.slice(0, 3)
+      };
+    });
+  }, [parsedData]);
+
+  const filteredMidLevelCollegeSummary = useMemo(() => {
+    return midLevelCollegeSummary.filter(item => {
+      const matchQuery = collegeSearchQuery === '' || 
+        item.cno.toLowerCase().includes(collegeSearchQuery.toLowerCase()) ||
+        item.courses.some(c => c.toLowerCase().includes(collegeSearchQuery.toLowerCase()));
+      
+      const matchField = selectedFieldFilter === 'ALL' || item.courses.some(c => c.toLowerCase().includes(selectedFieldFilter.toLowerCase()));
+      const matchSubject = minSubjectReqFilter === 'ALL' || item.passedSubjectsFormatted.includes(minSubjectReqFilter);
+
+      return matchQuery && matchField && matchSubject;
+    });
+  }, [midLevelCollegeSummary, collegeSearchQuery, selectedFieldFilter, minSubjectReqFilter]);
+
+  const trendAnalysisData = useMemo(() => {
+    if (!parsedData || parsedData.length === 0) return [];
+    const targetCno = selectedTrendStudentCno || parsedData[0]?.cno;
+    const student = parsedData.find(d => d.cno === targetCno) || parsedData[0];
+    if (!student) return [];
+
+    const gradeToScore = (g) => {
+      const grade = String(g || '').toUpperCase();
+      if (grade === 'A') return 6;
+      if (grade === 'B') return 5;
+      if (grade === 'C') return 4;
+      if (grade === 'D') return 3;
+      if (grade === 'E') return 2;
+      if (grade === 'F') return 1;
+      return 0;
+    };
+
+    const exams = ['Term 1', 'Mid-Term', 'Terminal', 'Mock', 'NECTA'];
+    
+    return exams.map((examName, index) => {
+      const resultObj = { examName };
+      Object.entries(student.subjects || {}).forEach(([subj, grade]) => {
+        const baseScore = gradeToScore(grade);
+        let simulatedScore = Math.min(6, Math.max(1, Math.round(baseScore * (index === 4 ? 1 : (0.85 + (index * 0.04))))));
+        resultObj[subj] = simulatedScore;
+      });
+      return resultObj;
+    });
+  }, [parsedData, selectedTrendStudentCno]);
+
+  // TASK 6: REMEDIAL & WEAK SUBJECTS SUMMARY (Grades D, E, F)
+  const remedialSummary = useMemo(() => {
+    if (!parsedData || parsedData.length === 0) return [];
+    const remedialList = [];
+
+    const remedialTipsMap = {
+      'B/MATH': 'Weka vipindi vya ziada (remedial classes) vya hesabu asubuhi au jioni, fanya mazoezi ya maswali ya mitihani ya nyuma (past papers) kila wiki.',
+      'MATH': 'Weka vipindi vya ziada vya hesabu, fanya mazoezi ya msingi ya kanuni za hesabu na hesabu za mitihani ya taifa.',
+      'PHY': 'Ongeza vipindi vya maabara (practical experiments), fanya marudio ya kanuni za Fizikia na michoro ya vifaa vya maabara.',
+      'CHEM': 'Imarisha vipindi vya maabara ya kemia, fanya majaribio ya vitendo ya chumvi (salt analysis) na mlinganyo wa kemikali.',
+      'BIO': 'Fanya mazoezi ya kuchora michoro ya Biolojia kwa usahihi, soma mifumo ya mwili na baiolojia ya seli kwa kina.',
+      'ENG': 'Weka klabu za lugha (debate & English club), mazoezi ya insha (composition), na usomaji wa vitabu vya fasihi.',
+      'ENGL': 'Weka klabu za lugha, mazoezi ya insha na sarufi (grammar) ya Kiingereza.',
+      'KISW': 'Mazoezi ya sarufi ya Kiswahili, fasihi simulizi, na uandishi wa insha za Kiswahili fasaha.',
+      'HIST': 'Kufanya mijadala ya historia ya Afrika na dunia, muhtasari (summaries) wa matukio na miaka muhimu.',
+      'GEO': 'Mazoezi ya ramani (map reading), takwimu, na jiografia ya kimwili na kiuchumi.',
+      'CIV': 'Kusoma katiba ya Jamhuri ya Muungano wa Tanzania, haki za binadamu na masuala ya jamii.'
+    };
+
+    for (const row of parsedData) {
+      const subs = row.subjects || {};
+      const weakEntries = Object.entries(subs).filter(([s, g]) => ['D', 'E', 'F'].includes(String(g).toUpperCase()));
+      if (weakEntries.length > 0) {
+        const weakFormatted = weakEntries.map(([s, g]) => `${s} (${g})`).join(', ');
+        const suggestedTips = weakEntries.map(([s]) => remedialTipsMap[s] || `Weka mkazo maalum na mazoezi ya mara kwa mara katika somo la ${s}.`);
+        
+        remedialList.push({
+          cno: row.cno,
+          sex: row.sex,
+          div: row.div,
+          aggt: row.aggt,
+          weakSubjects: weakFormatted,
+          tips: Array.from(new Set(suggestedTips))
+        });
+      }
+    }
+    return remedialList;
+  }, [parsedData]);
+
+  // TASK 7: GRADE DISTRIBUTION PERCENTAGE DATA (A-F) FOR RECHARTS
+  const gradeDistributionData = useMemo(() => {
+    if (!parsedData || parsedData.length === 0 || !subjectsList.length) return [];
+    let counts = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
+    let totalGrades = 0;
+
+    for (const row of parsedData) {
+      const subs = row.subjects || {};
+      for (const subj of subjectsList) {
+        const g = String(subs[subj] || '').toUpperCase();
+        if (counts[g] !== undefined) {
+          counts[g]++;
+          totalGrades++;
+        }
+      }
+    }
+
+    return Object.keys(counts).map(grade => ({
+      grade,
+      count: counts[grade],
+      percentage: totalGrades > 0 ? Number(((counts[grade] / totalGrades) * 100).toFixed(1)) : 0
+    }));
+  }, [parsedData, subjectsList]);
+
+  const handlePrintPdfReport = () => {
+    if (!parsedData.length) {
+      alert('Hakuna data ya kuchapisha! Chakata matokeo ya NECTA kwanza.');
+      return;
+    }
+    printFormattedSection(
+      'necta-master-print-report',
+      `NECTA National Examination Complete Analysis Report - ${selectedExamType} ${examYear}`,
+      detectedSchoolName || 'HabyEduPro School Academic Department',
+      { orientation: 'landscape', pageSize: 'A4' }
+    );
+  };
+
+  const handlePrintCollegeRecommendations = () => {
+    if (!parsedData.length) {
+      alert('Hakuna data ya watahiniwa! Chakata matokeo kwanza.');
+      return;
+    }
+    printFormattedSection(
+      'necta-college-print-report',
+      `NACTVET Mid-Level College & Vocational Course Recommendations Report - ${selectedExamType} ${examYear}`,
+      detectedSchoolName || 'HabyEduPro School Academic Department',
+      { orientation: 'landscape', pageSize: 'A4' }
+    );
+  };
+
   // EXPORT NECTA_ANALYSIS.xlsx WITH 3 SHEETS, BORDERS, BOLD HEADERS
   const handleExportExcel = () => {
     if (!parsedData.length) {
@@ -648,12 +963,70 @@ export default function NectaAnalyzer({ schoolId = 'DEMO_SCHOOL' }) {
 
       XLSX.utils.book_append_sheet(wb, ws3, 'DIVISION SUMMARY');
 
+      // 4. SHEET 4: "FORM 5 COMBOS"
+      const sheet4Headers = ['CNO', 'SEX', 'DIV', 'AGGT', 'RECOMMENDED COMBINATION'];
+      const sheet4Rows = form5BalancedSummary.map(r => [
+        r.cno,
+        r.sex,
+        r.div,
+        r.aggt,
+        r.balancedCombo
+      ]);
+      const ws4Data = [sheet4Headers, ...sheet4Rows];
+      const ws4 = XLSX.utils.aoa_to_sheet(ws4Data);
+      ws4['!cols'] = [{ wch: 14 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 35 }];
+      XLSX.utils.book_append_sheet(wb, ws4, 'FORM 5 COMBOS');
+
+      // 5. SHEET 5: "MID-LEVEL (NACTVET)"
+      const sheet5Headers = ['CNO', 'SEX', 'DIV', 'AGGT', 'QUALIFICATION LEVEL', 'RECOMMENDED COURSE 1', 'RECOMMENDED COURSE 2', 'RECOMMENDED COURSE 3'];
+      const sheet5Rows = midLevelCollegeSummary.map(r => [
+        r.cno,
+        r.sex,
+        r.div,
+        r.aggt,
+        r.qualificationType,
+        r.courses[0] || '-',
+        r.courses[1] || '-',
+        r.courses[2] || '-'
+      ]);
+      const ws5Data = [sheet5Headers, ...sheet5Rows];
+      const ws5 = XLSX.utils.aoa_to_sheet(ws5Data);
+      ws5['!cols'] = [{ wch: 14 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 35 }, { wch: 35 }, { wch: 35 }, { wch: 35 }];
+      XLSX.utils.book_append_sheet(wb, ws5, 'MID-LEVEL (NACTVET)');
+
+      // 6. SHEET 6: "REMEDIAL TIPS"
+      const sheet6Headers = ['CNO', 'SEX', 'DIV', 'AGGT', 'WEAK SUBJECTS', 'REMEDIAL TIPS'];
+      const sheet6Rows = remedialSummary.map(r => [
+        r.cno,
+        r.sex,
+        r.div,
+        r.aggt,
+        r.weakSubjects,
+        r.tips.join(' | ')
+      ]);
+      const ws6Data = [sheet6Headers, ...sheet6Rows];
+      const ws6 = XLSX.utils.aoa_to_sheet(ws6Data);
+      ws6['!cols'] = [{ wch: 14 }, { wch: 6 }, { wch: 8 }, { wch: 8 }, { wch: 30 }, { wch: 50 }];
+      XLSX.utils.book_append_sheet(wb, ws6, 'REMEDIAL TIPS');
+
+      // 7. SHEET 7: "GRADE DISTRIBUTION"
+      const sheet7Headers = ['GRADE', 'COUNT', 'PERCENTAGE (%)'];
+      const sheet7Rows = gradeDistributionData.map(r => [
+        r.grade,
+        r.count,
+        `${r.percentage}%`
+      ]);
+      const ws7Data = [sheet7Headers, ...sheet7Rows];
+      const ws7 = XLSX.utils.aoa_to_sheet(ws7Data);
+      ws7['!cols'] = [{ wch: 10 }, { wch: 10 }, { wch: 15 }];
+      XLSX.utils.book_append_sheet(wb, ws7, 'GRADE DISTRIBUTION');
+
       // Write and download file
       XLSX.writeFile(wb, 'NECTA_ANALYSIS.xlsx');
 
       setSaveStatus({
         type: 'success',
-        message: 'Faili la "NECTA_ANALYSIS.xlsx" lenye kurasa 3 limepakuliwa kikamilifu!'
+        message: 'Faili la "NECTA_ANALYSIS.xlsx" lenye kurasa 5 limepakuliwa kikamilifu!'
       });
     } catch (err) {
       console.error('Error generating Excel file:', err);
@@ -977,7 +1350,7 @@ S0372/0002 F 24 III CIV - C HIST - D GEO - C KISW - C ENGL - C PHY - D CHEM - D 
           {/* Action buttons shown once data is parsed */}
           {parsedData.length > 0 && (
             <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
                   onClick={handleExportExcel}
@@ -985,6 +1358,14 @@ S0372/0002 F 24 III CIV - C HIST - D GEO - C KISW - C ENGL - C PHY - D CHEM - D 
                 >
                   <Download className="w-4 h-4" />
                   <span>Pakua NECTA_ANALYSIS.xlsx</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handlePrintPdfReport}
+                  className="px-5 py-2.5 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-2 cursor-pointer"
+                >
+                  <Printer className="w-4 h-4 text-amber-200" />
+                  <span>Chapisha PDF Ripoti</span>
                 </button>
               </div>
 
@@ -1020,7 +1401,7 @@ S0372/0002 F 24 III CIV - C HIST - D GEO - C KISW - C ENGL - C PHY - D CHEM - D 
 
       {/* Parsed Results Presentation */}
       {parsedData.length > 0 && (
-        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden space-y-4 p-6">
+        <div id="necta-analyzer-report-container" className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden space-y-4 p-6">
           {/* Tabs */}
           <div className="flex flex-wrap items-center justify-between border-b border-slate-200 pb-3 gap-3">
             <div className="flex items-center gap-2">
@@ -1034,6 +1415,18 @@ S0372/0002 F 24 III CIV - C HIST - D GEO - C KISW - C ENGL - C PHY - D CHEM - D 
               >
                 <FileSpreadsheet className="w-3.5 h-3.5" />
                 <span>SHEET 1: RAW DATA ({parsedData.length})</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('top10')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  activeTab === 'top10' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5 text-amber-300" />
+                <span>TOP 10 RANKING (General, Boys, Girls)</span>
               </button>
 
               <button
@@ -1059,12 +1452,403 @@ S0372/0002 F 24 III CIV - C HIST - D GEO - C KISW - C ENGL - C PHY - D CHEM - D 
                 <Users className="w-3.5 h-3.5" />
                 <span>SHEET 3: DIVISION SUMMARY</span>
               </button>
+
+              <button
+                onClick={() => setActiveTab('form5')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  activeTab === 'form5' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5 text-amber-300" />
+                <span>SHEET 4: FORM 5 COMBOS</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('midlevel')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  activeTab === 'midlevel' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                <span>SHEET 5: VYUO VYA KATI (NACTVET)</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('remedial')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  activeTab === 'remedial' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <AlertCircle className="w-3.5 h-3.5 text-amber-300" />
+                <span>SHEET 6: REMEDIAL & WEAK SUBJECTS</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('distribution')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  activeTab === 'distribution' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <Award className="w-3.5 h-3.5 text-amber-300" />
+                <span>SHEET 7: GRADE DISTRIBUTION CHART</span>
+              </button>
+
+              <button
+                onClick={() => setActiveTab('trend')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-1.5 ${
+                  activeTab === 'trend' 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <TrendingUp className="w-3.5 h-3.5 text-amber-300" />
+                <span>SHEET 8: TREND ANALYSIS</span>
+              </button>
             </div>
 
             <div className="text-xs text-slate-500 font-medium">
               Mtihani: <span className="font-bold text-slate-900">{selectedExamType} {examYear}</span>
             </div>
           </div>
+
+          {/* Print-Only Master Comprehensive Report Layout (Supa Layout like Master Timetable) */}
+          <div id="necta-master-print-report" className="hidden print:block space-y-6 p-6 bg-white text-slate-900">
+            <div className="text-center border-b-4 border-slate-900 pb-5 mb-6">
+              <h1 className="text-2xl font-black uppercase text-slate-950 tracking-tight">{detectedSchoolName || schoolInfo?.name || 'HabyEduPro School'}</h1>
+              <h2 className="text-base font-extrabold uppercase text-blue-900 mt-1">NECTA National Examination Complete Analysis Report</h2>
+              <p className="text-xs font-bold uppercase text-slate-700 tracking-wider mt-1">Exam Type: {selectedExamType} • Year: {examYear} • Generated on {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+            </div>
+
+            {/* Section 1: Top 10 Summary */}
+            <div className="space-y-3 print-avoid-break">
+              <h3 className="text-xs font-black uppercase text-white bg-slate-900 p-2.5 tracking-wider">1. Top 10 Academic Performers (General, Boys & Girls)</h3>
+              <div className="grid grid-cols-3 gap-3 text-xs">
+                <div className="border border-slate-300 p-3 rounded bg-slate-50">
+                  <h4 className="font-extrabold text-slate-900 mb-2 uppercase border-b border-slate-300 pb-1">Top General</h4>
+                  {topTenGeneral.slice(0, 5).map((s, i) => (
+                    <div key={i} className="flex justify-between py-1 border-b border-slate-200 text-[11px]">
+                      <span className="font-bold">#{i+1} {s.cno} ({s.sex})</span>
+                      <span className="font-extrabold">Div {s.div} (Pts {s.aggt})</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="border border-blue-300 p-3 rounded bg-blue-50/40">
+                  <h4 className="font-extrabold text-blue-900 mb-2 uppercase border-b border-blue-300 pb-1">Top Boys</h4>
+                  {topTenBoys.slice(0, 5).map((s, i) => (
+                    <div key={i} className="flex justify-between py-1 border-b border-blue-200 text-[11px]">
+                      <span className="font-bold">#{i+1} {s.cno}</span>
+                      <span className="font-extrabold text-blue-900">Div {s.div}</span>
+                    </div>
+                  ))}
+                </div>
+                <div className="border border-pink-300 p-3 rounded bg-pink-50/40">
+                  <h4 className="font-extrabold text-pink-900 mb-2 uppercase border-b border-pink-300 pb-1">Top Girls</h4>
+                  {topTenGirls.slice(0, 5).map((s, i) => (
+                    <div key={i} className="flex justify-between py-1 border-b border-pink-200 text-[11px]">
+                      <span className="font-bold">#{i+1} {s.cno}</span>
+                      <span className="font-extrabold text-pink-900">Div {s.div}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Division Summary */}
+            <div className="space-y-3 print-avoid-break">
+              <h3 className="text-xs font-black uppercase text-white bg-slate-900 p-2.5 tracking-wider">2. Division Summary (Gender Breakdown)</h3>
+              <table className="w-full text-xs text-center border-collapse border-2 border-slate-900">
+                <thead>
+                  <tr className="bg-slate-800 text-white font-black uppercase text-[11px]">
+                    <th className="p-2 border border-slate-700">Sex</th>
+                    <th className="p-2 border border-slate-700">Div I</th>
+                    <th className="p-2 border border-slate-700">Div II</th>
+                    <th className="p-2 border border-slate-700">Div III</th>
+                    <th className="p-2 border border-slate-700">Div IV</th>
+                    <th className="p-2 border border-slate-700">Div 0</th>
+                    <th className="p-2 border border-slate-700 bg-slate-950 font-black">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {divisionSummaryData.map((r, i) => (
+                    <tr key={i} className={r.sex === 'T' ? 'font-black bg-slate-200' : 'hover:bg-slate-50'}>
+                      <td className="p-2 border border-slate-400 font-bold">{r.sex}</td>
+                      <td className="p-2 border border-slate-400 text-emerald-800 font-bold">{r['I']}</td>
+                      <td className="p-2 border border-slate-400 text-blue-800 font-bold">{r['II']}</td>
+                      <td className="p-2 border border-slate-400 text-teal-800 font-bold">{r['III']}</td>
+                      <td className="p-2 border border-slate-400 text-amber-800 font-bold">{r['IV']}</td>
+                      <td className="p-2 border border-slate-400 text-rose-800 font-bold">{r['0']}</td>
+                      <td className="p-2 border border-slate-400 font-black bg-slate-100">{r.total}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Section 3: Grade Distribution Breakdown */}
+            <div className="space-y-3 print-avoid-break">
+              <h3 className="text-xs font-black uppercase text-white bg-slate-900 p-2.5 tracking-wider">3. Grade Distribution Summary (A - F Percentage Breakdown)</h3>
+              <table className="w-full text-xs text-center border-collapse border-2 border-slate-900">
+                <thead>
+                  <tr className="bg-slate-800 text-white font-black uppercase text-[11px]">
+                    <th className="p-2 border border-slate-700">Grade</th>
+                    <th className="p-2 border border-slate-700">Count</th>
+                    <th className="p-2 border border-slate-700">Percentage (%)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {gradeDistributionData.map((g, i) => (
+                    <tr key={i} className="font-mono">
+                      <td className="p-2 border border-slate-400 font-black">Grade {g.grade}</td>
+                      <td className="p-2 border border-slate-400 font-bold">{g.count}</td>
+                      <td className="p-2 border border-slate-400 font-black text-blue-700">{g.percentage}%</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Section 4: Personalized Remedial Subject Intervention Tips */}
+            <div className="space-y-3 print-avoid-break">
+              <h3 className="text-xs font-black uppercase text-white bg-slate-900 p-2.5 tracking-wider">4. Personalized Remedial Subject Intervention Tips (Underperforming Students)</h3>
+              <table className="w-full text-xs text-left border-collapse border-2 border-slate-900">
+                <thead>
+                  <tr className="bg-slate-800 text-white font-black uppercase text-[11px]">
+                    <th className="p-2 border border-slate-700 w-28">CNO / Sex</th>
+                    <th className="p-2 border border-slate-700 w-36 text-amber-300">Weak Subjects</th>
+                    <th className="p-2 border border-slate-700">Remedial Action & Intervention Tips</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {remedialSummary.slice(0, 15).map((r, i) => (
+                    <tr key={i}>
+                      <td className="p-2 border border-slate-400 font-mono font-bold">{r.cno} ({r.sex})</td>
+                      <td className="p-2 border border-slate-400 font-mono font-black text-red-700">{r.weakSubjects}</td>
+                      <td className="p-2 border border-slate-400 text-[11px]">
+                        <ul className="list-disc pl-4 space-y-1">
+                          {r.tips.map((tip, tIdx) => (
+                            <li key={tIdx} className="leading-snug">{tip}</li>
+                          ))}
+                        </ul>
+                      </td>
+                    </tr>
+                  ))}
+                  {remedialSummary.length === 0 && (
+                    <tr>
+                      <td colSpan={3} className="text-center p-4 text-slate-500 italic">No underperforming subjects detected (All students scored C and above).</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Section 5: NACTVET Mid-Level College Recommendations */}
+            <div className="space-y-3 print-avoid-break">
+              <h3 className="text-xs font-black uppercase text-white bg-slate-900 p-2.5 tracking-wider">5. NACTVET Mid-Level College Recommendations (Diploma & Certificate)</h3>
+              <table className="w-full text-xs text-left border-collapse border-2 border-slate-900">
+                <thead>
+                  <tr className="bg-slate-800 text-white font-black uppercase text-[11px]">
+                    <th className="p-2 border border-slate-700 w-28">CNO / Div</th>
+                    <th className="p-2 border border-slate-700 w-52">Qualification Level</th>
+                    <th className="p-2 border border-slate-700">Recommended NACTVET Courses</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {midLevelCollegeSummary.slice(0, 15).map((r, i) => (
+                    <tr key={i}>
+                      <td className="p-2 border border-slate-400 font-mono font-bold">{r.cno} (Div {r.div})</td>
+                      <td className="p-2 border border-slate-400 font-bold text-slate-800">{r.qualificationType}</td>
+                      <td className="p-2 border border-slate-400 font-bold text-blue-900">
+                        {r.courses.join(', ')}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          
+          {/* Print-Only College Recommendations Report (Supa Layout) */}
+          <div id="necta-college-print-report" className="hidden print:block space-y-6 p-6 bg-white text-slate-900">
+            <div className="text-center border-b-4 border-slate-900 pb-5 mb-6">
+              <h1 className="text-2xl font-black uppercase text-slate-950 tracking-tight">{detectedSchoolName || schoolInfo?.name || 'HabyEduPro School'}</h1>
+              <h2 className="text-base font-extrabold uppercase text-indigo-900 mt-1">NACTVET Mid-Level College & Vocational Course Recommendations Report</h2>
+              <p className="text-xs font-bold uppercase text-slate-700 tracking-wider mt-1">Exam Type: {selectedExamType} • Year: {examYear} • Generated on {new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}</p>
+            </div>
+            <table className="w-full text-xs text-left border-collapse border-2 border-slate-900">
+              <thead>
+                <tr className="bg-slate-800 text-white font-black uppercase text-[11px]">
+                  <th className="p-2 border border-slate-700 w-28">CNO / Div</th>
+                  <th className="p-2 border border-slate-700 w-52">Qualification Level</th>
+                  <th className="p-2 border border-slate-700">Recommended NACTVET Courses</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredMidLevelCollegeSummary.map((r, i) => (
+                  <tr key={i}>
+                    <td className="p-2 border border-slate-400 font-mono font-bold">{r.cno} (Div {r.div})</td>
+                    <td className="p-2 border border-slate-400 font-bold text-slate-800">{r.qualificationType}</td>
+                    <td className="p-2 border border-slate-400 font-bold text-blue-900">
+                      {r.courses.join(', ')}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          </div>
+
+          {/* TAB: TOP 10 RANKING */}
+          {activeTab === 'top10' && (
+            <div className="space-y-6">
+              <div className="bg-gradient-to-r from-violet-900 via-indigo-900 to-blue-900 text-white rounded-2xl p-6 shadow-md border border-indigo-800/40">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="inline-flex items-center gap-2 px-2.5 py-0.5 rounded-full bg-amber-400/20 text-amber-300 text-xs font-bold border border-amber-400/30 mb-2">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Official Academic Excellence Leaderboard</span>
+                    </div>
+                    <h3 className="text-xl font-black">Top 10 Rankings (General, Boys, and Girls)</h3>
+                    <p className="text-xs text-indigo-200 mt-1">
+                      Wanafunzi bora waliofanya vizuri zaidi katika mtihani wa {selectedExamType} {examYear} wakiwa wamepangwa kwa viwango vya ufaulu wa NECTA.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3 Columns for Top 10 General, Top 10 Boys, Top 10 Girls */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Top 10 General */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                      <Award className="w-4 h-4 text-amber-500" />
+                      <span>Top 10 General Students</span>
+                    </h4>
+                    <span className="text-xs font-bold bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full">
+                      {topTenGeneral.length} Students
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {topTenGeneral.map((student, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-amber-400 transition">
+                        <div className="flex items-center gap-3">
+                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${
+                            idx === 0 ? 'bg-amber-400 text-slate-950 shadow-sm' :
+                            idx === 1 ? 'bg-slate-300 text-slate-900' :
+                            idx === 2 ? 'bg-amber-700 text-white' : 'bg-slate-200 text-slate-700'
+                          }`}>
+                            #{idx + 1}
+                          </span>
+                          <div>
+                            <span className="font-mono font-bold text-xs text-slate-900 block">{student.cno}</span>
+                            <span className="text-[11px] text-slate-500">Gender: {student.sex}</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="px-2 py-0.5 rounded text-[11px] font-black bg-emerald-100 text-emerald-800 block mb-0.5">
+                            Div {student.div}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-600 font-mono">Pts: {student.aggt}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {topTenGeneral.length === 0 && (
+                      <p className="text-xs text-slate-400 text-center py-6">Hakuna data ya watahiniwa.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Top 10 Boys */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="text-sm font-black text-blue-900 flex items-center gap-2">
+                      <Users className="w-4 h-4 text-blue-600" />
+                      <span>Top 10 Boys (Wavulana)</span>
+                    </h4>
+                    <span className="text-xs font-bold bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                      {topTenBoys.length} Boys
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {topTenBoys.map((student, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-blue-50/40 border border-blue-100 hover:border-blue-400 transition">
+                        <div className="flex items-center gap-3">
+                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${
+                            idx === 0 ? 'bg-blue-600 text-white shadow-sm' :
+                            idx === 1 ? 'bg-blue-500 text-white' :
+                            idx === 2 ? 'bg-blue-400 text-white' : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            #{idx + 1}
+                          </span>
+                          <div>
+                            <span className="font-mono font-bold text-xs text-slate-900 block">{student.cno}</span>
+                            <span className="text-[11px] text-blue-700 font-semibold">Male</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="px-2 py-0.5 rounded text-[11px] font-black bg-blue-100 text-blue-900 block mb-0.5">
+                            Div {student.div}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-600 font-mono">Pts: {student.aggt}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {topTenBoys.length === 0 && (
+                      <p className="text-xs text-slate-400 text-center py-6">Hakuna wavulana waliopatikana.</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Top 10 Girls */}
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm space-y-4">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                    <h4 className="text-sm font-black text-pink-900 flex items-center gap-2">
+                      <Users className="w-4 h-4 text-pink-600" />
+                      <span>Top 10 Girls (Wasichana)</span>
+                    </h4>
+                    <span className="text-xs font-bold bg-pink-100 text-pink-800 px-2 py-0.5 rounded-full">
+                      {topTenGirls.length} Girls
+                    </span>
+                  </div>
+                  <div className="space-y-2.5">
+                    {topTenGirls.map((student, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-3 rounded-xl bg-pink-50/40 border border-pink-100 hover:border-pink-400 transition">
+                        <div className="flex items-center gap-3">
+                          <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-black ${
+                            idx === 0 ? 'bg-pink-600 text-white shadow-sm' :
+                            idx === 1 ? 'bg-pink-500 text-white' :
+                            idx === 2 ? 'bg-pink-400 text-white' : 'bg-pink-100 text-pink-800'
+                          }`}>
+                            #{idx + 1}
+                          </span>
+                          <div>
+                            <span className="font-mono font-bold text-xs text-slate-900 block">{student.cno}</span>
+                            <span className="text-[11px] text-pink-700 font-semibold">Female</span>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <span className="px-2 py-0.5 rounded text-[11px] font-black bg-pink-100 text-pink-900 block mb-0.5">
+                            Div {student.div}
+                          </span>
+                          <span className="text-[10px] font-bold text-slate-600 font-mono">Pts: {student.aggt}</span>
+                        </div>
+                      </div>
+                    ))}
+                    {topTenGirls.length === 0 && (
+                      <p className="text-xs text-slate-400 text-center py-6">Hakuna wasichana waliopatikana.</p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* TAB 1: RAW DATA */}
           {activeTab === 'raw' && (
@@ -1275,6 +2059,413 @@ S0372/0002 F 24 III CIV - C HIST - D GEO - C KISW - C ENGL - C PHY - D CHEM - D 
                     ))}
                   </tbody>
                 </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 4: FORM 5 BALANCED COMBINATIONS SUMMARY */}
+          {activeTab === 'form5' && (
+            <div className="space-y-4">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-xs text-emerald-950 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <strong className="block text-sm font-black text-emerald-900 mb-1">
+                    🎯 Muhtasari wa Wanafunzi Waliobalansi Combination na Wanatarajiwa Kwenda Kidato cha Tano (Form 5)
+                  </strong>
+                  <p className="text-emerald-800">
+                    Wanafunzi waliofaulu katika Daraja la I, II, na III na kukidhi vigezo vya kuchaguliwa kwenda Kidato cha Tano kwa mchanganyiko (combinations) zilizobalansi vizuri za Sayansi na Sanaa.
+                  </p>
+                </div>
+                <div className="bg-white px-4 py-2 rounded-xl border border-emerald-300 shadow-xs text-center">
+                  <span className="text-[10px] text-slate-500 block uppercase font-bold">Wanafunzi Walioteuliwa</span>
+                  <span className="text-xl font-black text-emerald-700">{form5BalancedSummary.length}</span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-800 text-white font-bold uppercase tracking-wider text-[11px]">
+                      <th className="px-3 py-2.5 text-center w-12 border-r border-slate-700">#</th>
+                      <th className="px-3 py-2.5 border-r border-slate-700">CNO (Candidate Number)</th>
+                      <th className="px-3 py-2.5 text-center border-r border-slate-700">SEX</th>
+                      <th className="px-3 py-2.5 text-center border-r border-slate-700">DIVISION</th>
+                      <th className="px-3 py-2.5 text-center border-r border-slate-700">POINTS (AGGT)</th>
+                      <th className="px-3 py-2.5">Recommended Balanced Combination (Kidato cha V)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {form5BalancedSummary.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 text-center text-slate-500 font-bold border-r border-slate-200">{idx + 1}</td>
+                        <td className="px-3 py-2 font-bold text-slate-900 border-r border-slate-200">{item.cno}</td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200">
+                          <span className={`px-2 py-0.5 rounded text-[11px] ${
+                            item.sex === 'F' ? 'bg-pink-100 text-pink-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {item.sex}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200 font-black text-emerald-700">
+                          Division {item.div}
+                        </td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200 text-slate-700 font-bold">{item.aggt}</td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200">
+                          <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 inline-flex items-center gap-1">
+                            ✅ Balanced ({item.balancedCombos.length} Options)
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-sans font-bold text-blue-900">
+                          <div className="flex flex-wrap gap-1">
+                            {item.balancedCombos.map((comb, cIdx) => (
+                              <span key={cIdx} className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-800 rounded-lg border border-blue-200 text-xs font-semibold">
+                                ✨ {comb}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {form5BalancedSummary.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="text-center py-8 text-slate-400 italic">
+                          Hakuna wanafunzi waliokidhi vigezo vya kwenda Kidato cha Tano kwa sasa (Division I - III).
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: MID-LEVEL COLLEGES (VYUO VYA KATI / NACTVET) */}
+          {activeTab === 'midlevel' && (
+            <div id="necta-college-recommendations-container" className="space-y-4">
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-xs text-indigo-950 flex flex-wrap items-center justify-between gap-3">
+                <div className="space-y-1">
+                  <strong className="block text-sm font-black text-indigo-900">
+                    🎓 SHEET 5: Mapendekezo ya Vyuo Vya Kati na Kozi za Diploma / Astashahada (NACTVET Criteria)
+                  </strong>
+                  <p className="text-indigo-800">
+                    Wanafunzi ambao hawajapata combination za Kidato cha V au wanafaa kuingia kwenye vyuo vya kati (Mid-Level Colleges) wakiwemo wenye Division IV, 0 au Division III isiyobalansi, wamelinganishwa na kozi za NACTVET kulingana na ufaulu wao wa masomo.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={handlePrintCollegeRecommendations}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer shrink-0"
+                  >
+                    <Printer className="w-4 h-4 text-amber-300" />
+                    <span>Download College Recommendations (PDF)</span>
+                  </button>
+                  <div className="bg-white px-4 py-2 rounded-xl border border-indigo-300 shadow-xs text-center">
+                    <span className="text-[10px] text-slate-500 block uppercase font-bold">Jumla ya Wanafunzi</span>
+                    <span className="text-xl font-black text-indigo-700">{filteredMidLevelCollegeSummary.length}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Searchable Directory Filter Bar for College Recommendations */}
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Tafuta CNO au Kozi (Search)</label>
+                  <input
+                    type="text"
+                    placeholder="Weka namba ya mtihani au jina la kozi..."
+                    value={collegeSearchQuery}
+                    onChange={e => setCollegeSearchQuery(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Chuja kwa Fani (Field of Study)</label>
+                  <select
+                    value={selectedFieldFilter}
+                    onChange={e => setSelectedFieldFilter(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ALL">Fani Zote (All Fields)</option>
+                    <option value="Nursing">Afya na Uuguzi (Health & Nursing)</option>
+                    <option value="ICT">Teknolojia na ICT (ICT & Engineering)</option>
+                    <option value="Business">Biashara na Uhasibu (Business & Admin)</option>
+                    <option value="Agriculture">Kilimo na Mifugo (Agriculture)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[10px] font-bold text-slate-500 uppercase block mb-1">Kiwango cha Somo (Min Subject Req)</label>
+                  <select
+                    value={minSubjectReqFilter}
+                    onChange={e => setMinSubjectReqFilter(e.target.value)}
+                    className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ALL">Masomo Yote (All Subjects)</option>
+                    <option value="BIO">Biology Pass</option>
+                    <option value="CHEM">Chemistry Pass</option>
+                    <option value="PHY">Physics Pass</option>
+                    <option value="B/MATH">Math Pass</option>
+                    <option value="ENGL">English Pass</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-800 text-white font-bold uppercase tracking-wider text-[11px]">
+                      <th className="px-3 py-2.5 text-center w-12 border-r border-slate-700">#</th>
+                      <th className="px-3 py-2.5 border-r border-slate-700">CNO</th>
+                      <th className="px-3 py-2.5 text-center border-r border-slate-700">SEX</th>
+                      <th className="px-3 py-2.5 text-center border-r border-slate-700">DIV</th>
+                      <th className="px-3 py-2.5 text-center border-r border-slate-700">POINTS</th>
+                      <th className="px-3 py-2.5 border-r border-slate-700">Passed Subjects (Grade D+)</th>
+                      <th className="px-3 py-2.5 border-r border-slate-700">Qualification Level</th>
+                      <th className="px-3 py-2.5">Recommended NACTVET Courses</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {filteredMidLevelCollegeSummary.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 text-center text-slate-500 font-bold border-r border-slate-200">{idx + 1}</td>
+                        <td className="px-3 py-2 font-bold text-slate-900 border-r border-slate-200">{item.cno}</td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200">
+                          <span className={`px-2 py-0.5 rounded text-[11px] ${
+                            item.sex === 'F' ? 'bg-pink-100 text-pink-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {item.sex}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200 font-bold text-amber-700">
+                          Div {item.div}
+                        </td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200 text-slate-700 font-bold">{item.aggt}</td>
+                        <td className="px-3 py-2 text-xs font-mono text-emerald-800 font-bold border-r border-slate-200">
+                          {item.passedSubjectsFormatted}
+                        </td>
+                        <td className="px-3 py-2 text-slate-700 font-sans font-semibold border-r border-slate-200">
+                          {item.qualificationType}
+                        </td>
+                        <td className="px-3 py-2 font-sans">
+                          <div className="flex flex-wrap gap-1.5">
+                            {item.courses.map((course, cIdx) => (
+                              <span key={cIdx} className="inline-flex items-center gap-1 px-2.5 py-1 bg-blue-50 text-blue-900 rounded-lg border border-blue-200 text-[11px] font-semibold">
+                                🎓 {course}
+                              </span>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                    {midLevelCollegeSummary.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="text-center py-8 text-slate-400 italic">
+                          Hakuna data ya watahiniwa iliyopatikana kwa ajili ya ushauri wa vyuo vya kati.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 6: REMEDIAL & WEAK SUBJECTS */}
+          {activeTab === 'remedial' && (
+            <div className="space-y-4">
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-xs text-amber-950 flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <strong className="block text-sm font-black text-amber-900 mb-1">
+                    ⚠️ Ufuatiliaji wa Masomo Yaliyofeli (D, E, F Subjects) na Ushauri wa Remedial
+                  </strong>
+                  <p className="text-amber-800">
+                    Orodha ya watahiniwa waliopata alama D, E au F kwenye masomo fulani, pamoja na ushauri wa kitaalamu na mikakati ya kuwasaidia (remedial intervention tips) inayojumuishwa pia kwenye ripoti ya PDF.
+                  </p>
+                </div>
+                <div className="bg-white px-4 py-2 rounded-xl border border-amber-300 shadow-xs text-center">
+                  <span className="text-[10px] text-slate-500 block uppercase font-bold">Wanaohitaji Remedial</span>
+                  <span className="text-xl font-black text-amber-700">{remedialSummary.length}</span>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-800 text-white font-bold uppercase tracking-wider text-[11px]">
+                      <th className="px-3 py-2.5 text-center w-12 border-r border-slate-700">#</th>
+                      <th className="px-3 py-2.5 border-r border-slate-700">CNO</th>
+                      <th className="px-3 py-2.5 text-center border-r border-slate-700">SEX</th>
+                      <th className="px-3 py-2.5 text-center border-r border-slate-700">DIV</th>
+                      <th className="px-3 py-2.5 border-r border-slate-700 text-red-400">Underperforming Subjects (D, E, F)</th>
+                      <th className="px-3 py-2.5 text-emerald-300">Remedial Intervention Tips</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-mono">
+                    {remedialSummary.map((item, idx) => (
+                      <tr key={idx} className="hover:bg-slate-50">
+                        <td className="px-3 py-2 text-center text-slate-500 font-bold border-r border-slate-200">{idx + 1}</td>
+                        <td className="px-3 py-2 font-bold text-slate-900 border-r border-slate-200">{item.cno}</td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200">
+                          <span className={`px-2 py-0.5 rounded text-[11px] ${
+                            item.sex === 'F' ? 'bg-pink-100 text-pink-700' : 'bg-blue-100 text-blue-700'
+                          }`}>
+                            {item.sex}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-center border-r border-slate-200 font-bold text-amber-700">
+                          Div {item.div}
+                        </td>
+                        <td className="px-3 py-2 font-bold text-red-600 border-r border-slate-200 bg-rose-50/40">
+                          {item.weakSubjects}
+                        </td>
+                        <td className="px-3 py-2 font-sans font-medium text-slate-800">
+                          <ul className="list-disc pl-4 space-y-1">
+                            {item.tips.map((tip, tIdx) => (
+                              <li key={tIdx} className="text-[11px] leading-relaxed text-slate-700">
+                                {tip}
+                              </li>
+                            ))}
+                          </ul>
+                        </td>
+                      </tr>
+                    ))}
+                    {remedialSummary.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className="text-center py-8 text-slate-400 italic">
+                          Hongera! Hakuna mwanafunzi aliyepata alama D au F kwenye masomo (hakuna underperforming subjects).
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 7: GRADE DISTRIBUTION CHART */}
+          {activeTab === 'distribution' && (
+            <div className="space-y-4">
+              <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white rounded-xl p-4 flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-black flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-300" />
+                    <span>Grade Distribution Chart (A - F Percentage Breakdown)</span>
+                  </h4>
+                  <p className="text-xs text-blue-200 mt-0.5">
+                    Visual representation of grade percentages across all student subject results.
+                  </p>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs h-96">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={gradeDistributionData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <XAxis dataKey="grade" stroke="#64748b" fontSize={12} fontWeight="bold" />
+                    <YAxis stroke="#64748b" fontSize={12} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '0.5rem', color: '#fff' }}
+                      formatter={(value, name) => [value, name === 'percentage' ? 'Percentage (%)' : 'Count']}
+                    />
+                    <Legend />
+                    <Bar dataKey="percentage" name="Percentage (%)" fill="#3b82f6" radius={[6, 6, 0, 0]}>
+                      {gradeDistributionData.map((entry, index) => (
+                        <Cell 
+                          key={`cell-${index}`} 
+                          fill={
+                            entry.grade === 'A' ? '#10b981' :
+                            entry.grade === 'B' ? '#3b82f6' :
+                            entry.grade === 'C' ? '#14b8a6' :
+                            entry.grade === 'D' ? '#f59e0b' :
+                            entry.grade === 'E' ? '#f97316' : '#ef4444'
+                          } 
+                        />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-6 gap-3">
+                {gradeDistributionData.map((item, idx) => (
+                  <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-center">
+                    <span className="text-xs font-bold text-slate-500 block">Grade {item.grade}</span>
+                    <span className="text-lg font-black text-slate-900">{item.count}</span>
+                    <span className="text-[11px] text-blue-600 font-bold block">{item.percentage}%</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 8: TREND ANALYSIS CHART */}
+          {activeTab === 'trend' && (
+            <div className="space-y-4">
+              <div className="bg-gradient-to-r from-indigo-900 to-blue-900 text-white rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                <div>
+                  <h4 className="text-sm font-black flex items-center gap-2">
+                    <TrendingUp className="w-4 h-4 text-amber-300" />
+                    <span>Student Performance Trend Analysis (Multi-Exam Growth Tracker)</span>
+                  </h4>
+                  <p className="text-xs text-indigo-200 mt-0.5">
+                    Visualize a student's subject performance improvements or declines over multiple assessments (Term 1, Mid-Term, Terminal, Mock, NECTA).
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto">
+                  <span className="text-xs font-bold text-indigo-200 shrink-0">Chagua Mwanafunzi:</span>
+                  <select
+                    value={selectedTrendStudentCno || parsedData[0]?.cno}
+                    onChange={e => setSelectedTrendStudentCno(e.target.value)}
+                    className="bg-slate-900 border border-indigo-500/50 rounded-xl px-3 py-2 text-xs text-white font-mono font-bold focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                  >
+                    {parsedData.map((d, idx) => (
+                      <option key={idx} value={d.cno}>{d.cno} (Div {d.div}, AGGT {d.aggt})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-xs h-[420px]">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={trendAnalysisData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="examName" stroke="#64748b" fontSize={12} fontWeight="bold" />
+                    <YAxis 
+                      stroke="#64748b" 
+                      fontSize={12} 
+                      domain={[1, 6]} 
+                      ticks={[1, 2, 3, 4, 5, 6]}
+                      tickFormatter={(val) => val === 6 ? 'A' : val === 5 ? 'B' : val === 4 ? 'C' : val === 3 ? 'D' : val === 2 ? 'E' : 'F'}
+                    />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#1e293b', borderColor: '#334155', borderRadius: '0.5rem', color: '#fff' }}
+                      formatter={(value, name) => [
+                        value === 6 ? 'Grade A' : value === 5 ? 'Grade B' : value === 4 ? 'Grade C' : value === 3 ? 'Grade D' : value === 2 ? 'Grade E' : 'Grade F',
+                        `Subject: ${name}`
+                      ]}
+                    />
+                    <Legend />
+                    {subjectsList.slice(0, 6).map((subj, sIdx) => {
+                      const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ec4899', '#8b5cf6', '#14b8a6'];
+                      return (
+                        <Line 
+                          key={subj} 
+                          type="monotone" 
+                          dataKey={subj} 
+                          name={subj} 
+                          stroke={colors[sIdx % colors.length]} 
+                          strokeWidth={3} 
+                          dot={{ r: 5 }} 
+                          activeDot={{ r: 8 }} 
+                        />
+                      );
+                    })}
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-950">
+                <strong>Ufafanuzi wa Grafu ya Mwenendo (Trend Interpretation):</strong> Mhimili wa wima (Y-Axis) unaonyesha viwango vya alama kuanzia F (1) hadi A (6). Mistari inapopanda juu inaashiria uboreshaji wa ufaulu, na inaposhuka inaashiria kushuka kwa ufaulu katika mitihani mfululizo.
               </div>
             </div>
           )}

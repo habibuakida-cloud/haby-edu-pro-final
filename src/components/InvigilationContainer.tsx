@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { 
   ShieldCheck, 
   Plus, 
@@ -36,7 +36,8 @@ import {
   Teacher, 
   Supervisor, 
   SchoolInfo,
-  SavedInvigilationRecord
+  SavedInvigilationRecord,
+  UserAccount
 } from '../types';
 import { SUBJECT_LIST, DEFAULT_CLASSES } from '../constants/defaults';
 import { getTeacherColor, getSubjectColor, getDayTheme } from '../utils/colors';
@@ -59,6 +60,9 @@ interface InvigilationContainerProps {
   timetableReleased: boolean;
   schoolInfo: SchoolInfo;
   dayThemes?: Record<string, string>;
+  currentUser?: UserAccount | null;
+  initialTab?: 'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'teacher' | 'personal' | 'saved';
+  initialTeacherId?: number;
   onUpdateSessions: (sessions: InvigilationSession[]) => void;
   onUpdateSupervisors: (supervisors: Supervisor[]) => void;
   onUpdateSelectedInvigilators: (ids: number[]) => void;
@@ -66,6 +70,7 @@ interface InvigilationContainerProps {
   onUpdateSavedInvigilationRecords?: (records: SavedInvigilationRecord[]) => void;
   onToggleRelease: () => void;
   onNavigateToSittingPlan?: () => void;
+  onNavigateToCalendar?: () => void;
 }
 
 export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
@@ -78,16 +83,37 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
   timetableReleased,
   schoolInfo,
   dayThemes,
+  currentUser,
+  initialTab,
+  initialTeacherId,
   onUpdateSessions,
   onUpdateSupervisors,
   onUpdateSelectedInvigilators,
   onUpdateInvigilationAssignments,
   onUpdateSavedInvigilationRecords,
   onToggleRelease,
-  onNavigateToSittingPlan
+  onNavigateToSittingPlan,
+  onNavigateToCalendar
 }) => {
+  const isTeacherRole = currentUser?.role === 'TEACHER' && !currentUser?.isSuperAdmin;
+
+  const matchedTeacherId = useMemo(() => {
+    if (initialTeacherId) return initialTeacherId;
+    if (currentUser?.fullName) {
+      const match = teachers.find(t =>
+        (currentUser.email && t.email && t.email.toLowerCase() === currentUser.email.toLowerCase()) ||
+        t.name.toLowerCase().includes(currentUser.fullName.toLowerCase()) ||
+        currentUser.fullName.toLowerCase().includes(t.name.toLowerCase())
+      );
+      if (match) return match.id;
+    }
+    return teachers[0]?.id || 0;
+  }, [currentUser, teachers, initialTeacherId]);
+
   // Navigation tabs matching TimetableContainer aesthetic
-  const [activeTab, setActiveTab] = useState<'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'teacher' | 'personal' | 'saved'>('general');
+  const [activeTab, setActiveTab] = useState<'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'teacher' | 'personal' | 'saved'>(
+    initialTab || (isTeacherRole ? 'teacher' : 'general')
+  );
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [snapshotTitle, setSnapshotTitle] = useState('Midterm Examination Invigilation Timetable');
   
@@ -101,10 +127,17 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
 
   // Teacher schedule states
-  const [selectedTeacherForPersonal, setSelectedTeacherForPersonal] = useState<number>(teachers[0]?.id || 0);
+  const [selectedTeacherForPersonal, setSelectedTeacherForPersonal] = useState<number>(matchedTeacherId);
   const [teacherViewMode, setTeacherViewMode] = useState<'matrix' | 'table' | 'allTeachers'>('matrix');
   const [teacherSearchTerm, setTeacherSearchTerm] = useState('');
   const [onlyTeachersWithDuties, setOnlyTeachersWithDuties] = useState(false);
+
+  // Sync selected teacher if user or matchedTeacherId changes
+  useEffect(() => {
+    if (matchedTeacherId) {
+      setSelectedTeacherForPersonal(matchedTeacherId);
+    }
+  }, [matchedTeacherId]);
 
   // Class invigilation selected class
   const [selectedClassForInvig, setSelectedClassForInvig] = useState('Form 1');
@@ -540,16 +573,29 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
           </span>
         </button>
 
-        {onNavigateToSittingPlan && (
-          <button
-            onClick={onNavigateToSittingPlan}
-            className="ml-auto px-4 py-2.5 rounded-lg text-xs sm:text-sm font-black bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-700 hover:to-amber-600 text-white transition-all flex items-center gap-2 cursor-pointer shadow-xs"
-            title="Open Official NECTA Sitting Plan Generator"
-          >
-            <Grid className="w-4 h-4" />
-            NECTA Sitting Plan
-          </button>
-        )}
+        <div className="ml-auto flex items-center gap-2">
+          {onNavigateToCalendar && (
+            <button
+              onClick={onNavigateToCalendar}
+              className="px-4 py-2.5 rounded-lg text-xs sm:text-sm font-black bg-gradient-to-r from-blue-700 to-indigo-600 hover:from-blue-800 hover:to-indigo-700 text-white transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+              title="Tazama Kalenda ya Mwezi ya Usimamizi wa Mitihani"
+            >
+              <Calendar className="w-4 h-4 text-amber-300" />
+              <span>Kalenda ya Mwezi</span>
+            </button>
+          )}
+
+          {onNavigateToSittingPlan && (
+            <button
+              onClick={onNavigateToSittingPlan}
+              className="px-4 py-2.5 rounded-lg text-xs sm:text-sm font-black bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-700 hover:to-amber-600 text-white transition-all flex items-center gap-2 cursor-pointer shadow-xs"
+              title="Open Official NECTA Sitting Plan Generator"
+            >
+              <Grid className="w-4 h-4" />
+              <span>NECTA Sitting Plan</span>
+            </button>
+          )}
+        </div>
       </div>
 
       {/* 2. SUMMARY METRICS CARDS (Just like Timetable stats) */}

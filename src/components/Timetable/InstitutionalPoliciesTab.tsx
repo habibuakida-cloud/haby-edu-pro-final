@@ -28,6 +28,7 @@ const DEFAULT_POLICY: InstitutionalPolicy = {
     noTeacherTwoClassesSameTime: true,
     noClassTwoTeachersSameTime: true,
     noSameSubjectTwiceSameDay: true,
+    allowParallelElectiveSubjects: true,
   }
 };
 
@@ -296,6 +297,38 @@ export const InstitutionalPoliciesTab: React.FC<InstitutionalPoliciesTabProps> =
                   rules: { ...formData.rules, noSameSubjectTwiceSameDay: e.target.checked }
                 })}
                 className="w-5 h-5 accent-blue-600 cursor-pointer mt-0.5 rounded"
+              />
+            </div>
+
+            {/* Rule 4: Parallel Elective Subjects (Masomo Sambamba ya Michepuo) */}
+            <div className="p-3.5 bg-gradient-to-r from-emerald-50 to-teal-50/60 border-2 border-emerald-300 rounded-xl flex items-start justify-between gap-3 shadow-xs">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="font-black text-xs text-emerald-950 block">
+                    4. Ruhusu Masomo Sambamba ya Mchepuo kwa Wakati Mmoja (Allow Parallel / Elective Subjects)
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-200 text-emerald-900">
+                    Michepuo / Electives
+                  </span>
+                </div>
+                <p className="text-[11px] text-emerald-900 leading-relaxed font-medium">
+                  Inaruhusu kupanga masomo mawili (au zaidi) kwa darasa moja kwa wakati mmoja bila mfumo kuweka mgongano (conflict).
+                  Inafaa pale darasa moja linapokuwa na wanafunzi wa mikondo tofauti (mfano: <strong>Sayansi - Physics</strong> wakati wengine wanasoma <strong>Biashara - Commerce</strong>, au <strong>Dini ya Kiislamu</strong> na <strong>Dini ya Kikristo</strong>).
+                </p>
+                <div className="flex items-center gap-2 pt-1 text-[10px] text-emerald-700 font-bold">
+                  <span>✔ Huwezesha kuingiza walimu na masomo sambamba kwenye ratiba</span>
+                  <span>•</span>
+                  <span>✔ Huondoa onyo la Class Double-Booking kwa masomo ya mchepuo</span>
+                </div>
+              </div>
+              <input
+                type="checkbox"
+                checked={formData.rules.allowParallelElectiveSubjects ?? true}
+                onChange={(e) => setFormData({
+                  ...formData,
+                  rules: { ...formData.rules, allowParallelElectiveSubjects: e.target.checked }
+                })}
+                className="w-5 h-5 accent-emerald-600 cursor-pointer mt-1 rounded shrink-0"
               />
             </div>
           </div>

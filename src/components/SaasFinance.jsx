@@ -438,7 +438,7 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
         'CNO',
         'STUDENT NAME',
         'CLASS',
-        ...contributionTypes.map(t => t.name.toUpperCase()),
+        ...contributionTypes.map(t => (t.name || '').toUpperCase()),
         'TOTAL REQUIRED',
         'TOTAL PAID',
         'TOTAL BALANCE'
@@ -854,7 +854,7 @@ export default function SaasFinance({ schoolId = 'DEMO_SCHOOL', currentUser = nu
               <span className="px-2.5 py-1 bg-white border border-slate-300 rounded font-mono font-bold text-slate-800">CLASS</span>
               {contributionTypes.map(t => (
                 <span key={t.id} className="px-2.5 py-1 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded font-mono font-bold">
-                  {t.name.toUpperCase()}
+                  {(t.name || '').toUpperCase()}
                 </span>
               ))}
               <span className="px-2.5 py-1 bg-blue-50 border border-blue-300 text-blue-800 rounded font-mono font-bold">TOTAL REQUIRED</span>

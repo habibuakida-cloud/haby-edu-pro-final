@@ -138,6 +138,61 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   const [replyText, setReplyText] = useState<string>('');
   const [selectedInboxMessage, setSelectedInboxMessage] = useState<any | null>(null);
 
+  // Additional states moved to top to avoid Temporal Dead Zone (TDZ) issues
+  const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
+  const [smsLogs, setSmsLogs] = useState<any[]>([]);
+  const [isSendingResults, setIsSendingResults] = useState<boolean>(false);
+  const [sendProgress, setSendProgress] = useState<{ current: number; total: number } | null>(null);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [selectedPackage, setSelectedPackage] = useState<{ sms: number; price: number; name: string }>({
+    sms: 500,
+    price: 11000,
+    name: 'Standard Bundle'
+  });
+  const [paymentPhone, setPaymentPhone] = useState<string>('');
+  const [paymentProvider, setPaymentProvider] = useState<'MPESA' | 'TIGOPESA' | 'AIRTEL'>('MPESA');
+  const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
+  const [paymentSuccessMsg, setPaymentSuccessMsg] = useState<string | null>(null);
+  const [paymentLogs, setPaymentLogs] = useState<any[]>([]);
+  const [paymentHistory, setPaymentHistory] = useState<any[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
+  const [isRetryingFailed, setIsRetryingFailed] = useState<boolean>(false);
+
+  const paymentInsightsData = useMemo(() => {
+    const months = Array.from({ length: 12 }, (_, i) => {
+      const d = new Date();
+      d.setMonth(d.getMonth() - (11 - i));
+      return {
+        monthKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
+        name: d.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
+        success: 0,
+        failed: 0,
+        totalAmount: 0
+      };
+    });
+
+    const map = new Map<string, typeof months[0]>();
+    months.forEach(m => map.set(m.monthKey, m));
+
+    (paymentHistory || []).forEach((h: any) => {
+      if (!h.created_at) return;
+      const d = new Date(h.created_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      const entry = map.get(key);
+      if (entry) {
+        if ((h.status || '').toUpperCase() === 'SUCCESS' || (h.status || '').toUpperCase() === 'SENT') {
+          entry.success += 1;
+          entry.totalAmount += Number(h.amount || 0);
+        } else {
+          entry.failed += 1;
+        }
+      }
+    });
+
+    return months;
+  }, [paymentHistory]);
+
+
   const loadAdminAnnouncements = async () => {
     try {
       const { data } = await supabase
@@ -258,25 +313,10 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     if (activeTab === 'inbox') loadInbox();
     if (activeTab === 'announcements') loadAdminAnnouncements();
   }, [activeTab]);
-  const [loadingLogs, setLoadingLogs] = useState<boolean>(false);
-  const [smsLogs, setSmsLogs] = useState<any[]>([]);
+  // Dispatch Status & Progress (Removed from here - moved to top)
 
-  // Dispatch Status & Progress
-  const [isSendingResults, setIsSendingResults] = useState<boolean>(false);
-  const [sendProgress, setSendProgress] = useState<{ current: number; total: number } | null>(null);
-  const [notification, setNotification] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  // Top-up State (Removed from here - moved to top)
 
-  // Top-up State
-  const [selectedPackage, setSelectedPackage] = useState<{ sms: number; price: number; name: string }>({
-    sms: 500,
-    price: 11000,
-    name: 'Standard Bundle'
-  });
-  const [paymentPhone, setPaymentPhone] = useState<string>('');
-  const [paymentProvider, setPaymentProvider] = useState<'MPESA' | 'TIGOPESA' | 'AIRTEL'>('MPESA');
-  const [isProcessingPayment, setIsProcessingPayment] = useState<boolean>(false);
-  const [paymentSuccessMsg, setPaymentSuccessMsg] = useState<string | null>(null);
-  const [paymentLogs, setPaymentLogs] = useState<any[]>([]);
 
   // 0. Add diagnostic log
   const addDiagnosticLog = (message: string, data?: any) => {
@@ -288,44 +328,8 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     }, ...prev].slice(0, 50));
   };
 
-  // Payment History State
-  const [paymentHistory, setPaymentHistory] = useState<any[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState<boolean>(false);
-  const [isRetryingFailed, setIsRetryingFailed] = useState<boolean>(false);
+  // Payment History State (Removed from here - moved to top)
 
-  const paymentInsightsData = useMemo(() => {
-    const months = Array.from({ length: 12 }, (_, i) => {
-      const d = new Date();
-      d.setMonth(d.getMonth() - (11 - i));
-      return {
-        monthKey: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`,
-        name: d.toLocaleString('en-US', { month: 'short', year: '2-digit' }),
-        success: 0,
-        failed: 0,
-        totalAmount: 0
-      };
-    });
-
-    const map = new Map<string, typeof months[0]>();
-    months.forEach(m => map.set(m.monthKey, m));
-
-    paymentHistory.forEach((h: any) => {
-      if (!h.created_at) return;
-      const d = new Date(h.created_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      const entry = map.get(key);
-      if (entry) {
-        if ((h.status || '').toUpperCase() === 'SUCCESS') {
-          entry.success += 1;
-          entry.totalAmount += Number(h.amount || 0);
-        } else {
-          entry.failed += 1;
-        }
-      }
-    });
-
-    return months;
-  }, [paymentHistory]);
 
   const handleExportInsightsCSV = () => {
     const headers = ['Month', 'Successful Renewals', 'Failed Renewals', 'Total Amount (TZS)'];
@@ -552,7 +556,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
         if (!cno) return;
         
         const cleanPhone = phone.trim();
-        const cleanCno = cno.toUpperCase().trim();
+        const cleanCno = (cno || '').toUpperCase().trim();
         
         map.set(cleanPhone, {
           id: `student_parent_${cleanCno}`,
@@ -597,7 +601,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     const map = new Map<string, ParentItem>();
     allParentsMerged.forEach(p => {
       if (p.student_cno) {
-        map.set(p.student_cno.toUpperCase().trim(), p);
+        map.set(p.student_cno.toString().toUpperCase().trim(), p);
       }
     });
     return map;
@@ -606,7 +610,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
   // Filter exam records by selected exam_type and year
   const filteredExamRecords = useMemo(() => {
     return examRecords.filter(r => {
-      const matchType = !selectedExamType || r.exam_type.toUpperCase() === selectedExamType.toUpperCase();
+      const matchType = !selectedExamType || (r.exam_type || '').toUpperCase() === (selectedExamType || '').toUpperCase();
       const matchYear = !selectedYear || String(r.year) === String(selectedYear);
       return matchType && matchYear;
     });
@@ -617,7 +621,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     let withPhone = 0;
     let missingPhone = 0;
     filteredExamRecords.forEach(rec => {
-      const parent = parentsMap.get(rec.student_cno.toUpperCase().trim());
+      const parent = parentsMap.get((rec.student_cno || '').toString().toUpperCase().trim());
       if (parent && parent.phone_255 && parent.phone_255.trim().length >= 9) {
         withPhone++;
       } else {
@@ -663,7 +667,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     try {
       // Build recipients list
       const recipientsPayload = filteredExamRecords.map(rec => {
-        const parent = parentsMap.get(rec.student_cno.toUpperCase().trim());
+        const parent = parentsMap.get((rec.student_cno || '').toString().toUpperCase().trim());
         const phone = parent?.phone_255 || '';
         return {
           student_cno: rec.student_cno,
@@ -759,14 +763,14 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
       if (announcementTarget === 'All school') return true;
       
       // Dynamic parent-student matching by phone suffix or student registration number
-      const student = students?.find(st => {
-        const parentPhone = st.parentPhone || st.phone || (st as any).parent_phone || '';
-        const cleanPPhone = (p.phone_255 || p.phone || '').trim();
-        return (
-          (p.student_cno && st.regNo?.toUpperCase().trim() === p.student_cno.toUpperCase().trim()) ||
-          (cleanPPhone && parentPhone.includes(cleanPPhone.slice(-9)))
-        );
-      });
+        const student = students?.find(st => {
+          const parentPhone = st.parentPhone || st.phone || (st as any).parent_phone || '';
+          const cleanPPhone = (p.phone_255 || p.phone || '').trim();
+          return (
+            (p.student_cno && st.regNo?.toUpperCase().trim() === (p.student_cno || '').toString().toUpperCase().trim()) ||
+            (cleanPPhone && parentPhone.includes(cleanPPhone.slice(-9)))
+          );
+        });
       
       const studentClass = student?.className || p.class_level || p.class_name || 'All';
       return studentClass.toLowerCase().includes(announcementTarget.toLowerCase()) || 
@@ -861,7 +865,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
     }
 
     const cleanPhone = phone.trim();
-    const cleanCno = cno.toUpperCase().trim();
+    const cleanCno = (cno || '').toString().toUpperCase().trim();
     const cleanName = name?.trim() || 'Mzazi / Mlezi';
 
     try {
@@ -1547,7 +1551,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                 onClick={() => {
                   if (filteredExamRecords.length > 0) {
                     const first = filteredExamRecords[0];
-                    const parent = parentsMap.get(first.student_cno.toUpperCase().trim());
+                    const parent = parentsMap.get((first.student_cno || '').toString().toUpperCase().trim());
                     if (parent && parent.phone_255) {
                        const msg = generateResultsMessage(first, schoolInfo.name || 'HABY EDU PRO');
                        sendSmsViaDevice(parent.phone_255, msg);
@@ -1602,7 +1606,7 @@ export const SmsModule: React.FC<SmsModuleProps> = ({
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredExamRecords.map((rec) => {
-                      const parent = parentsMap.get(rec.student_cno.toUpperCase().trim());
+                      const parent = parentsMap.get((rec.student_cno || '').toString().toUpperCase().trim());
                       const hasPhone = Boolean(parent && parent.phone_255);
 
                       return (

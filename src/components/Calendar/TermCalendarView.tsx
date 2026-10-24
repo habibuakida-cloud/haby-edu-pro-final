@@ -1,6 +1,7 @@
 import React from 'react';
 import { Calendar, Clock, ArrowRight, ShieldCheck, Info, Sparkles, MapPin } from 'lucide-react';
 import { AcademicTermDates } from '../../types';
+import { calculateAcademicDays } from '../../utils/dateUtils';
 
 interface TermCalendarViewProps {
   academicTermDates?: AcademicTermDates;
@@ -256,7 +257,7 @@ export const TermCalendarView: React.FC<TermCalendarViewProps> = ({
                   <span className="text-slate-500">Muhula wa I:</span>
                   <span className="text-blue-700">
                     {academicTermDates.yearOpeningDate && academicTermDates.terminalBreakStart 
-                      ? `${Math.floor((new Date(academicTermDates.terminalBreakStart).getTime() - new Date(academicTermDates.yearOpeningDate).getTime()) / (1000 * 60 * 60 * 24))} siku`
+                      ? `${calculateAcademicDays(academicTermDates.yearOpeningDate, academicTermDates.terminalBreakStart, academicTermDates.midTerm1BreakStart, academicTermDates.midTerm1BreakEnd)} siku`
                       : 'TBD'}
                   </span>
                 </div>
@@ -264,7 +265,7 @@ export const TermCalendarView: React.FC<TermCalendarViewProps> = ({
                   <span className="text-slate-500">Muhula wa II:</span>
                   <span className="text-blue-700">
                     {academicTermDates.terminalBreakEnd && academicTermDates.annualBreakStart 
-                      ? `${Math.floor((new Date(academicTermDates.annualBreakStart).getTime() - new Date(academicTermDates.terminalBreakEnd).getTime()) / (1000 * 60 * 60 * 24))} siku`
+                      ? `${calculateAcademicDays(academicTermDates.terminalBreakEnd, academicTermDates.annualBreakStart, academicTermDates.midTerm2BreakStart, academicTermDates.midTerm2BreakEnd)} siku`
                       : 'TBD'}
                   </span>
                 </div>
@@ -272,7 +273,8 @@ export const TermCalendarView: React.FC<TermCalendarViewProps> = ({
                   <span className="text-slate-700 uppercase">Jumla ya Masomo:</span>
                   <span className="text-blue-900">
                     {academicTermDates.yearOpeningDate && academicTermDates.terminalBreakStart && academicTermDates.terminalBreakEnd && academicTermDates.annualBreakStart
-                      ? `${Math.floor(((new Date(academicTermDates.terminalBreakStart).getTime() - new Date(academicTermDates.yearOpeningDate).getTime()) + (new Date(academicTermDates.annualBreakStart).getTime() - new Date(academicTermDates.terminalBreakEnd).getTime())) / (1000 * 60 * 60 * 24))} Siku za Shule`
+                      ? `${calculateAcademicDays(academicTermDates.yearOpeningDate, academicTermDates.terminalBreakStart, academicTermDates.midTerm1BreakStart, academicTermDates.midTerm1BreakEnd) + 
+                          calculateAcademicDays(academicTermDates.terminalBreakEnd, academicTermDates.annualBreakStart, academicTermDates.midTerm2BreakStart, academicTermDates.midTerm2BreakEnd)} Siku za Shule`
                       : '---'}
                   </span>
                 </div>

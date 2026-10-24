@@ -50,12 +50,14 @@ import { CommandPaletteModal } from './common/CommandPaletteModal';
 import { QuickAddStudentModal } from './Students/QuickAddStudentModal';
 import { SmartDashboardWidget } from './SmartDashboardWidget';
 import { ActivityFeed } from './common/ActivityFeed';
+import { UpcomingInvigilationWidget } from './Dashboard/UpcomingInvigilationWidget';
 
 interface DashboardViewProps {
   students: Student[];
   teachers: Teacher[];
   exams: Exam[];
   sessions: InvigilationSession[];
+  invigilationAssignments?: Record<string, number>;
   timetableAssignments?: TimetableAssignment[];
   periodSettings?: PeriodSetting[];
   streamSettings?: StreamSetting[];
@@ -83,6 +85,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   teachers = [],
   exams = [],
   sessions = [],
+  invigilationAssignments = {},
   timetableAssignments = [],
   periodSettings = [],
   streamSettings = [],
@@ -156,9 +159,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     return remedialEntries.filter(item => {
       if (remedialMode === 'STUDENT') {
         const matchClass = isSameClass(item.class_name, selectedRemedialClass);
-        const matchStream = selectedRemedialStream === 'ALL' || 
+        const matchStream = !selectedRemedialStream || selectedRemedialStream === 'ALL' || 
           item.stream === 'All Streams' || 
-          item.stream.toUpperCase() === selectedRemedialStream.toUpperCase();
+          ((item.stream || '').toUpperCase() === (selectedRemedialStream || '').toUpperCase());
         return matchClass && matchStream;
       }
       if (remedialMode === 'TEACHER') {
@@ -617,6 +620,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         examinationRecords={examinationRecords}
         onNavigate={handleNavigate}
         isLoading={isLoading}
+      />
+
+      {/* UPCOMING INVIGILATION SUMMARY WIDGET */}
+      <UpcomingInvigilationWidget
+        sessions={sessions}
+        invigilationAssignments={invigilationAssignments}
+        teachers={teachers}
+        currentUser={currentUser}
+        onNavigateToCalendar={() => handleNavigate('invigilation-calendar')}
+        onNavigateToInvigilation={() => handleNavigate('invigilation')}
       />
 
       {/* Main Executive Cards Grid */}

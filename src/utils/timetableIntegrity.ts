@@ -1,4 +1,5 @@
-import { TimetableAssignment, Teacher, PeriodSetting, StreamSetting } from '../types';
+import { TimetableAssignment, Teacher, PeriodSetting, StreamSetting, SubjectPeriodAllocation } from '../types';
+import { computeStreamSubjectProgression, getAllStreamsForClassHelper } from '../lib/timetableService';
 
 export type ConflictSeverity = 'CRITICAL' | 'WARNING' | 'ADVISORY';
 
@@ -13,7 +14,11 @@ export type ConflictCategory =
   | 'CONSECUTIVE_PERIOD_FATIGUE'   // Advisory: 4+ consecutive teaching periods with no break
   | 'BREAK_TIME_ENCROACHMENT'      // Advisory: Academic lesson scheduled during designated break/lunch
   | 'UNASSIGNED_TEACHER'           // Advisory: Academic lesson has no teacher assigned
-  | 'SAME_SUBJECT_OVERLOAD';       // Advisory: Same subject 3+ times in one day for a class stream
+  | 'SAME_SUBJECT_OVERLOAD'        // Advisory: Same subject 3+ times in one day for a class stream
+  | 'CURRICULUM_MISSING_SUBJECT'   // Warning: Required subject has 0 scheduled periods in General Timetable
+  | 'CURRICULUM_PERIOD_DEFICIT'    // Warning: Scheduled periods are fewer than expected weekly period count
+  | 'CURRICULUM_PERIOD_EXCESS'     // Advisory: Scheduled periods exceed expected weekly period count
+  | 'CURRICULUM_UNREGISTERED_SUBJECT'; // Advisory: Subject in General Timetable is not in Required Subjects
 
 export interface IntegrityPolicySettings {
   maxPeriodsPerTeacherPerDay: number;      // default: 5
@@ -29,6 +34,8 @@ export interface IntegrityPolicySettings {
   checkBreakEncroachment: boolean;         // default: true
   checkUnassignedLessons: boolean;         // default: true
   checkSameSubjectOverload: boolean;       // default: true
+  checkCurriculumLoad: boolean;            // default: true
+  allowParallelElectiveSubjects?: boolean; // default: true (permits parallel track subjects e.g. Science vs Business)
 }
 
 export const DEFAULT_INTEGRITY_POLICIES: IntegrityPolicySettings = {
@@ -44,7 +51,9 @@ export const DEFAULT_INTEGRITY_POLICIES: IntegrityPolicySettings = {
   checkTeacherWorkload: true,
   checkBreakEncroachment: true,
   checkUnassignedLessons: true,
-  checkSameSubjectOverload: true
+  checkSameSubjectOverload: true,
+  checkCurriculumLoad: true,
+  allowParallelElectiveSubjects: true
 };
 
 export interface InvolvedSlotInfo {
@@ -102,6 +111,13 @@ export interface ClassCoverageAudit {
   subjectsTaught: string[];
   hasClash: boolean;
   clashCount: number;
+  expectedSubjectsCount?: number;
+  expectedPeriodsCount?: number;
+  curriculumCompletionPct?: number;
+  hasCurriculumLoadMismatch?: boolean;
+  missingRequiredSubjects?: string[];
+  deficitSubjects?: { subject: string; entered: number; expected: number }[];
+  excessSubjects?: { subject: string; entered: number; expected: number }[];
 }
 
 export interface TimetableIntegrityReportResult {
@@ -190,7 +206,8 @@ export function generateTimetableIntegrityReport(
   teachers: Teacher[],
   periodSettings: PeriodSetting[] = [],
   streamSettings: StreamSetting[] = [],
-  customPolicies: Partial<IntegrityPolicySettings> = {}
+  customPolicies: Partial<IntegrityPolicySettings> = {},
+  subjectPeriodAllocations: SubjectPeriodAllocation[] = []
 ): TimetableIntegrityReportResult {
   const policies: IntegrityPolicySettings = {
     ...DEFAULT_INTEGRITY_POLICIES,
@@ -377,6 +394,15 @@ export function generateTimetableIntegrityReport(
           );
 
           if (isSamePeriod || hasTimeOverlap) {
+            const isParallelAllowed = policies.allowParallelElectiveSubjects ?? true;
+            const isParallelElectivePair = (slotA.isParallelElective || slotB.isParallelElective) ||
+              (isParallelAllowed && slotA.subject !== slotB.subject);
+
+            // If parallel elective tracks are allowed and the subjects differ (or are explicitly marked as parallel electives), do not treat as an error clash
+            if (isParallelElectivePair) {
+              continue;
+            }
+
             const conflictKey = `c_clash_${slotA.id}_${slotB.id}`;
             const tA = slotA.teacherId ? teacherMap.get(slotA.teacherId) : undefined;
             const tB = slotB.teacherId ? teacherMap.get(slotB.teacherId) : undefined;
@@ -420,8 +446,8 @@ export function generateTimetableIntegrityReport(
                   tB ? { teacherId: tB.id, teacherName: tB.name } : undefined
                 ].filter(Boolean) as any[],
                 involvedRooms: [slotA.room, slotB.room].filter(Boolean) as string[],
-                policyRule: 'Class Schedule Integrity: A single class stream cannot have two distinct lessons or teachers assigned at the exact same period.',
-                recommendation: `Move either ${slotA.subject} or ${slotB.subject} to an open period on ${slotA.day} or another day of the week.`
+                policyRule: 'Class Schedule Integrity: A single class stream cannot have two distinct lessons or teachers assigned at the exact same period without elective authorization.',
+                recommendation: `Move either ${slotA.subject} or ${slotB.subject} to an open period on ${slotA.day} or another day of the week, or enable Parallel Electives.`
               });
             }
           }
@@ -873,6 +899,74 @@ export function generateTimetableIntegrityReport(
         });
       }
 
+      const progression = computeStreamSubjectProgression(
+        ss.className,
+        stream,
+        subjectPeriodAllocations,
+        safeAssignments,
+        safePeriodSettings,
+        safeTeachers
+      );
+
+      if (policies.checkCurriculumLoad && progression.totalRequiredSubjects > 0) {
+        progression.missingSubjects.forEach(ms => {
+          addConflict({
+            id: `curr_missing_${ss.className}_${stream}_${ms.subject}`,
+            severity: 'WARNING',
+            category: 'CURRICULUM_MISSING_SUBJECT',
+            title: `Missing Required Subject: ${ms.subject} (${ss.className} ${stream})`,
+            description: `"${ms.subject}" is configured as a Required Subject (${ms.requiredPeriods} periods/week) for ${ss.className} ${stream}, but has 0 periods scheduled in the General Timetable.`,
+            day: 'Weekly Load',
+            period: `0 / ${ms.requiredPeriods} Periods`,
+            periodName: 'Curriculum Gap',
+            assignmentIds: [],
+            involvedSlots: [],
+            involvedTeachers: [],
+            involvedRooms: [],
+            policyRule: `Curriculum Load Requirement: Every required subject defined in Class/Stream settings must have its expected weekly period count scheduled in the General Timetable.`,
+            recommendation: `Schedule ${ms.requiredPeriods} weekly period(s) of "${ms.subject}" for ${ss.className} ${stream} in the General Timetable.`
+          });
+        });
+
+        progression.incompleteSubjects.forEach(inc => {
+          addConflict({
+            id: `curr_deficit_${ss.className}_${stream}_${inc.subject}`,
+            severity: 'WARNING',
+            category: 'CURRICULUM_PERIOD_DEFICIT',
+            title: `Curriculum Period Deficit: ${inc.subject} (${ss.className} ${stream})`,
+            description: `${ss.className} ${stream} has ${inc.enteredPeriods} of ${inc.requiredPeriods} expected weekly periods scheduled for "${inc.subject}" (${inc.remainingPeriods} period(s) short — ${inc.percentage}% complete).`,
+            day: 'Weekly Load',
+            period: `${inc.enteredPeriods} / ${inc.requiredPeriods} Periods`,
+            periodName: `${inc.remainingPeriods} Deficit`,
+            assignmentIds: [],
+            involvedSlots: [],
+            involvedTeachers: [],
+            involvedRooms: [],
+            policyRule: `Expected Period Count Policy: General Timetable entries for "${inc.subject}" must match the ${inc.requiredPeriods} periods/week configured for ${ss.className} ${stream}.`,
+            recommendation: `Add ${inc.remainingPeriods} more period(s) of "${inc.subject}" for ${ss.className} ${stream} to reach 100% curriculum load.`
+          });
+        });
+
+        progression.excessSubjects.forEach(exc => {
+          addConflict({
+            id: `curr_excess_${ss.className}_${stream}_${exc.subject}`,
+            severity: 'ADVISORY',
+            category: 'CURRICULUM_PERIOD_EXCESS',
+            title: `Curriculum Period Excess: ${exc.subject} (${ss.className} ${stream})`,
+            description: `${ss.className} ${stream} has ${exc.enteredPeriods} periods of "${exc.subject}" in the General Timetable, exceeding the expected load of ${exc.requiredPeriods} periods/week (+${exc.excessPeriods} extra).`,
+            day: 'Weekly Load',
+            period: `${exc.enteredPeriods} / ${exc.requiredPeriods} Periods`,
+            periodName: `+${exc.excessPeriods} Excess`,
+            assignmentIds: [],
+            involvedSlots: [],
+            involvedTeachers: [],
+            involvedRooms: [],
+            policyRule: `Curriculum Load Balance: Scheduled periods should align with the expected weekly count (${exc.requiredPeriods} periods/week) configured in Class/Stream settings.`,
+            recommendation: `Remove ${exc.excessPeriods} excess period(s) of "${exc.subject}" or update the Expected Period Count in Class/Stream settings.`
+          });
+        });
+      }
+
       classCoverages.push({
         className: ss.className,
         stream,
@@ -882,10 +976,87 @@ export function generateTimetableIntegrityReport(
         unassignedLessons: unassigned.length,
         subjectsTaught: Array.from(subjectsSet),
         hasClash: classClashes.length > 0,
-        clashCount: classClashes.length
+        clashCount: classClashes.length,
+        expectedSubjectsCount: progression.totalRequiredSubjects,
+        expectedPeriodsCount: progression.totalRequiredPeriods,
+        curriculumCompletionPct: progression.overallPercentage,
+        hasCurriculumLoadMismatch:
+          progression.totalRequiredSubjects > 0 && !progression.isFullyComplete,
+        missingRequiredSubjects: progression.missingSubjects.map(m => m.subject),
+        deficitSubjects: progression.incompleteSubjects.map(i => ({
+          subject: i.subject,
+          entered: i.enteredPeriods,
+          expected: i.requiredPeriods
+        })),
+        excessSubjects: progression.excessSubjects.map(e => ({
+          subject: e.subject,
+          entered: e.enteredPeriods,
+          expected: e.requiredPeriods
+        }))
       });
     });
   });
+
+  // Also check classes that have subjectPeriodAllocations configured even if not in streamSettings
+  if (policies.checkCurriculumLoad && Array.isArray(subjectPeriodAllocations) && subjectPeriodAllocations.length > 0) {
+    const allocClasses = Array.from(new Set(subjectPeriodAllocations.map(a => a.className).filter(Boolean)));
+    allocClasses.forEach(cName => {
+      const streams = getAllStreamsForClassHelper(cName, streamSettings, safeAssignments, subjectPeriodAllocations);
+      streams.forEach(stream => {
+        const classKey = `${cName}|${stream}`;
+        if (processedClasses.has(classKey)) return;
+        processedClasses.add(classKey);
+
+        const progression = computeStreamSubjectProgression(
+          cName,
+          stream,
+          subjectPeriodAllocations,
+          safeAssignments,
+          safePeriodSettings,
+          safeTeachers
+        );
+        if (progression.totalRequiredSubjects === 0) return;
+
+        progression.missingSubjects.forEach(ms => {
+          addConflict({
+            id: `curr_missing_${cName}_${stream}_${ms.subject}`,
+            severity: 'WARNING',
+            category: 'CURRICULUM_MISSING_SUBJECT',
+            title: `Missing Required Subject: ${ms.subject} (${cName} ${stream})`,
+            description: `"${ms.subject}" is configured as a Required Subject (${ms.requiredPeriods} periods/week) for ${cName} ${stream}, but has 0 periods scheduled in the General Timetable.`,
+            day: 'Weekly Load',
+            period: `0 / ${ms.requiredPeriods} Periods`,
+            periodName: 'Curriculum Gap',
+            assignmentIds: [],
+            involvedSlots: [],
+            involvedTeachers: [],
+            involvedRooms: [],
+            policyRule: `Curriculum Load Requirement: Every required subject defined in Class/Stream settings must have its expected weekly period count scheduled in the General Timetable.`,
+            recommendation: `Schedule ${ms.requiredPeriods} weekly period(s) of "${ms.subject}" for ${cName} ${stream} in the General Timetable.`
+          });
+        });
+
+        progression.incompleteSubjects.forEach(inc => {
+          addConflict({
+            id: `curr_deficit_${cName}_${stream}_${inc.subject}`,
+            severity: 'WARNING',
+            category: 'CURRICULUM_PERIOD_DEFICIT',
+            title: `Curriculum Period Deficit: ${inc.subject} (${cName} ${stream})`,
+            description: `${cName} ${stream} has ${inc.enteredPeriods} of ${inc.requiredPeriods} expected weekly periods scheduled for "${inc.subject}" (${inc.remainingPeriods} period(s) short — ${inc.percentage}% complete).`,
+            day: 'Weekly Load',
+            period: `${inc.enteredPeriods} / ${inc.requiredPeriods} Periods`,
+            periodName: `${inc.remainingPeriods} Deficit`,
+            assignmentIds: [],
+            involvedSlots: [],
+            involvedTeachers: [],
+            involvedRooms: [],
+            policyRule: `Expected Period Count Policy: General Timetable entries for "${inc.subject}" must match the ${inc.requiredPeriods} periods/week configured for ${cName} ${stream}.`,
+            recommendation: `Add ${inc.remainingPeriods} more period(s) of "${inc.subject}" for ${cName} ${stream} to reach 100% curriculum load.`
+          });
+        });
+      });
+    });
+  }
 
   // Check break time encroachment
   if (policies.checkBreakEncroachment) {

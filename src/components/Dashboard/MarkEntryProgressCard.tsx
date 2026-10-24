@@ -291,9 +291,10 @@ export const MarkEntryProgressCard: React.FC<MarkEntryProgressCardProps> = ({
         // Find students in this class and stream taking this subject
         const targetStudents = students.filter(s => {
           const matchClass = isSameClass(s.className, pair.className);
-          const matchStream = pair.stream === 'All' || !s.stream || 
-            s.stream.toUpperCase().replace(/^STREAM\s+/i, '') === pair.stream.toUpperCase().replace(/^STREAM\s+/i, '') ||
-            s.stream.toUpperCase().includes(pair.stream.toUpperCase());
+          const pairStreamUpper = (pair.stream || 'All').toUpperCase();
+          const matchStream = pairStreamUpper === 'ALL' || !s.stream || 
+            (s.stream || '').toUpperCase().replace(/^STREAM\s+/i, '') === pairStreamUpper.replace(/^STREAM\s+/i, '') ||
+            (s.stream || '').toUpperCase().includes(pairStreamUpper);
           const matchSubject = (s.subjects || []).some(
             sub => sub.toLowerCase().trim() === pair.subject.toLowerCase().trim()
           ) || (s.subjects && s.subjects.length === 0);

@@ -10,6 +10,7 @@ import {
   getPrimarySubjectGradeInfo,
   cleanAndFilterMarksForClass
 } from '../../utils/reportCardUtils';
+import { calculateAcademicDays } from '../../utils/dateUtils';
 import { 
   GraduationCap, 
   Award, 
@@ -214,6 +215,21 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
                     {Math.max(0, periodSetting.totalPeriods - periodSetting.attendedPeriods)}
                   </div>
                 </div>
+                {academicTermDates && (
+                  <div className="col-span-3 mt-1.5 pt-1.5 border-t border-slate-100 flex justify-between items-center px-1">
+                    <span className="text-[8px] font-black text-slate-400 uppercase">Jumla ya Siku za Shule (Weekday Only):</span>
+                    <span className="text-[10px] font-black text-blue-900">
+                      {periodSetting.termName === 'Term 1' || periodSetting.termName === 'Muhula wa I'
+                        ? (academicTermDates.yearOpeningDate && academicTermDates.terminalBreakStart 
+                            ? calculateAcademicDays(academicTermDates.yearOpeningDate, academicTermDates.terminalBreakStart, academicTermDates.midTerm1BreakStart, academicTermDates.midTerm1BreakEnd)
+                            : '---')
+                        : (academicTermDates.terminalBreakEnd && academicTermDates.annualBreakStart 
+                            ? calculateAcademicDays(academicTermDates.terminalBreakEnd, academicTermDates.annualBreakStart, academicTermDates.midTerm2BreakStart, academicTermDates.midTerm2BreakEnd)
+                            : '---')
+                      } Siku
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -497,6 +513,21 @@ export const ReportCardDocument: React.FC<ReportCardDocumentProps> = ({
               {periodSetting.attendedPeriods} / {periodSetting.totalPeriods} ({attendanceRate}%)
             </span>
           </div>
+          {academicTermDates && (
+            <div className="flex justify-between border-b border-slate-200 pb-0.5">
+              <span className="text-slate-500 font-semibold uppercase text-[10px]">Official School Days:</span>
+              <span className="font-bold text-blue-900">
+                {periodSetting.termName === 'Term 1' || periodSetting.termName === 'Muhula wa I'
+                  ? (academicTermDates.yearOpeningDate && academicTermDates.terminalBreakStart 
+                      ? calculateAcademicDays(academicTermDates.yearOpeningDate, academicTermDates.terminalBreakStart, academicTermDates.midTerm1BreakStart, academicTermDates.midTerm1BreakEnd)
+                      : '---')
+                  : (academicTermDates.terminalBreakEnd && academicTermDates.annualBreakStart 
+                      ? calculateAcademicDays(academicTermDates.terminalBreakEnd, academicTermDates.annualBreakStart, academicTermDates.midTerm2BreakStart, academicTermDates.midTerm2BreakEnd)
+                      : '---')
+                } Days (Mon-Fri)
+              </span>
+            </div>
+          )}
           <div className="flex justify-between">
             <span className="text-slate-500 font-semibold uppercase text-[10px]">Date of Birth:</span>
             <span className="font-bold text-slate-800">{student.dob || '—'}</span>

@@ -1,8 +1,10 @@
 import React, { useState, useMemo } from 'react';
 import { TimetableAssignment, Teacher, PeriodSetting, StreamSetting } from '../../types';
 import { DAYS_OF_WEEK, DEFAULT_CLASSES } from '../../constants/defaults';
-import { getSubjectColor } from '../../utils/colors';
-import { Calendar, Clock, Layers, User, MapPin } from 'lucide-react';
+import { getSubjectColor, getSubjectShortName } from '../../utils/colors';
+import { Calendar, Clock, Layers, User, MapPin, Lock } from 'lucide-react';
+import { isSameClass } from '../../utils/reportCardUtils';
+import { isSameStream, isSamePeriod, getConfiguredDays } from '../../lib/timetableService';
 
 interface GraphicalTimetableGridProps {
   assignments: TimetableAssignment[];
@@ -26,14 +28,14 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
 
   const availableStreams = useMemo(() => {
     const fromSettings = (streamSettings || [])
-      .filter(s => s && s.className === activeClass)
+      .filter(s => s && isSameClass(s.className, activeClass))
       .flatMap(s => s.streams || []);
     if (fromSettings.length > 0) return fromSettings;
 
     const fromAssignments = Array.from(
       new Set(
         (assignments || [])
-          .filter(a => a && a.className === activeClass && a.stream)
+          .filter(a => a && isSameClass(a.className, activeClass) && a.stream)
           .map(a => a.stream)
       )
     );
@@ -49,9 +51,11 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
     }
   }, [availableStreams, activeStream]);
 
+  const configuredDays = useMemo(() => getConfiguredDays(periodSettings), [periodSettings]);
+
   const filteredAssignments = useMemo(() => {
     return (assignments || []).filter(
-      a => a && a.className === activeClass && a.stream === activeStream
+      a => a && a.subject && isSameClass(a.className, activeClass) && isSameStream(a.stream, activeStream)
     );
   }, [assignments, activeClass, activeStream]);
 
@@ -65,7 +69,7 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
 
   const sortedPeriods = useMemo(() => {
     const list = (periodSettings || []).filter(
-      p => !p.className || p.className === activeClass || p.className === 'All Classes'
+      p => !p.className || isSameClass(p.className, activeClass) || p.className === 'All Classes'
     );
     // Unique by name
     const uniqueMap = new Map<string, PeriodSetting>();
@@ -90,19 +94,10 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
   }, [teachers]);
 
   const findAssignment = (day: string, period: PeriodSetting) => {
-    const pName = (period.name || '').toLowerCase().trim();
-    const pStart = (period.start || '').trim();
-
+    const normDay = (day || '').trim().toLowerCase();
     return filteredAssignments.find(a => {
-      if (!a || a.day !== day) return false;
-      const aName = (a.periodName || '').toLowerCase().trim();
-      const aRaw = (a.period || '').toLowerCase().trim();
-      const aNorm = (a.period ? a.period.split(' (')[0] : '').toLowerCase().trim();
-
-      if (aName === pName || aNorm === pName || aRaw === pName) return true;
-      if (aRaw.startsWith(pName) || pName.startsWith(aRaw)) return true;
-      if (pStart && aRaw.includes(pStart)) return true;
-      return false;
+      if (!a || (a.day || '').trim().toLowerCase() !== normDay) return false;
+      return isSamePeriod(a.period, a.periodName, period.name);
     });
   };
 
@@ -159,15 +154,15 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
       <div className="overflow-x-auto pb-2">
         <div
           style={{
-            gridTemplateColumns: `130px repeat(${DAYS_OF_WEEK.length}, minmax(130px, 1fr))`
+            gridTemplateColumns: `130px repeat(${configuredDays.length}, minmax(130px, 1fr))`
           }}
-          className="grid gap-2 min-w-[860px]"
+          className="grid gap-2 min-w-[760px]"
         >
           {/* Header row: Corner cell + Days */}
           <div className="font-black text-slate-700 text-xs p-3 bg-slate-100 rounded-xl flex items-center justify-center border border-slate-200">
             Kipindi / Saa
           </div>
-          {DAYS_OF_WEEK.map(day => (
+          {configuredDays.map(day => (
             <div
               key={day}
               className="font-black text-slate-900 text-xs text-center p-3 bg-slate-50 rounded-xl uppercase tracking-wider border border-slate-200"
@@ -178,7 +173,7 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
 
           {/* Body Rows: One row per period */}
           {sortedPeriods.length === 0 ? (
-            <div className="col-span-7 p-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-slate-200">
+            <div className="col-span-6 p-8 text-center text-slate-400 bg-slate-50 rounded-xl border border-slate-200">
               Hakuna vipindi vilivyosanidiwa kwa sasa. Tafadhali weka vipindi kwenye Mipangilio ya Vipindi &amp; Saa.
             </div>
           ) : (
@@ -196,24 +191,44 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
                 </div>
 
                 {/* Day Slot Cells */}
-                {DAYS_OF_WEEK.map(day => {
+                {configuredDays.map(day => {
                   const assignment = findAssignment(day, period);
                   const teacher = assignment?.teacherId ? teacherMap.get(assignment.teacherId) : null;
                   const isBreak =
                     period.name.toLowerCase().includes('break') ||
                     period.name.toLowerCase().includes('lunch') ||
                     period.name.toLowerCase().includes('chakula') ||
-                    period.name.toLowerCase().includes('mapumziko');
+                    period.name.toLowerCase().includes('mapumziko') ||
+                    period.name.toLowerCase().includes('tea');
 
-                  if (isBreak) {
+                  const isSpecialActivity = (period.isLocked || period.locked) && (
+                    period.name.toLowerCase().includes('test') ||
+                    period.name.toLowerCase().includes('environmental') ||
+                    period.name.toLowerCase().includes('debate') ||
+                    period.name.toLowerCase().includes('michezo') ||
+                    period.name.toLowerCase().includes('baraza') ||
+                    period.name.toLowerCase().includes('assembly') ||
+                    period.name.toLowerCase().includes('religion') ||
+                    period.name.toLowerCase().includes('praising')
+                  );
+
+                  if (isBreak || isSpecialActivity) {
                     return (
                       <div
                         key={`${day}-${period.id}`}
-                        className="bg-amber-50/70 border border-amber-200 rounded-xl p-2 min-h-[80px] flex flex-col items-center justify-center text-center text-amber-900"
+                        className={`${
+                          isBreak ? 'bg-amber-50/70 border-amber-200 text-amber-900' : 'bg-indigo-50/80 border-indigo-200 text-indigo-900'
+                        } border rounded-xl p-2 min-h-[80px] flex flex-col items-center justify-center text-center`}
                       >
-                        <span className="text-[10px] font-bold uppercase tracking-wide">
+                        <span className="text-[10px] font-black uppercase tracking-wider leading-tight">
                           {period.name}
                         </span>
+                        {isSpecialActivity && (
+                          <div className="mt-1 flex items-center gap-1">
+                            <Lock className="w-2.5 h-2.5 text-indigo-400" />
+                            <span className="text-[8px] font-bold uppercase text-indigo-400">Locked Activity</span>
+                          </div>
+                        )}
                       </div>
                     );
                   }
@@ -236,11 +251,16 @@ export const GraphicalTimetableGrid: React.FC<GraphicalTimetableGridProps> = ({
                           <div className="space-y-0.5">
                             <span
                               style={{ color: subColor.text }}
-                              className="font-black text-xs block leading-tight truncate"
+                              className="font-black text-xs block leading-tight truncate flex items-center gap-1"
                               title={assignment.subject}
                             >
-                              {assignment.subject}
+                              {getSubjectShortName(assignment.subject)}
+                              {assignment.isLocked && <Lock className="w-2.5 h-2.5 shrink-0" />}
                             </span>
+                            <div className="text-[10px] font-bold text-slate-800 truncate">
+                              {assignment.className.replace('Form ', '').replace('Standard ', '')}
+                              {assignment.stream ? assignment.stream.replace('STREAM ', '') : ''}
+                            </div>
                             {assignment.room && (
                               <span className="inline-flex items-center gap-0.5 text-[9px] text-slate-500 font-mono">
                                 <MapPin className="w-2.5 h-2.5 text-slate-400" />

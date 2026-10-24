@@ -8,6 +8,8 @@ import {
   InvigilationSession
 } from '../types';
 import { DAYS_OF_WEEK } from '../constants/defaults';
+import { isSameClass } from './reportCardUtils';
+import { isSameStream, isSamePeriod, getConfiguredDays } from '../lib/timetableService';
 
 interface ExcelGeneralTimetableOptions {
   schoolName: string;
@@ -22,11 +24,18 @@ interface ExcelGeneralTimetableOptions {
 }
 
 /**
- * Cleanly format periods list
+ * Cleanly format unique periods list sorted chronologically
  */
 function getNormalizedPeriods(periodSettings: PeriodSetting[]) {
   if (periodSettings && periodSettings.length > 0) {
-    return periodSettings.map(p => ({
+    const map = new Map<string, PeriodSetting>();
+    periodSettings.forEach(p => {
+      const key = (p.name || '').trim();
+      if (key && !map.has(key)) {
+        map.set(key, p);
+      }
+    });
+    return Array.from(map.values()).map(p => ({
       name: p.name,
       time: p.start && p.end ? `${p.start} - ${p.end}` : '',
       isBreak: Boolean(p.isBreak)
@@ -73,9 +82,9 @@ export function exportGeneralTimetableExcel(options: ExcelGeneralTimetableOption
   const gridRows: (string | number)[][] = [];
 
   // Header Title Banners
-  gridRows.push([`${(schoolInfo?.name || schoolName).toUpperCase()} - RATIBA RASMI YA MASOMO`]);
+  gridRows.push([`${(schoolInfo?.name || schoolName || 'SHULE').toUpperCase()} - RATIBA RASMI YA MASOMO`]);
   gridRows.push([`ANWANI: ${schoolInfo?.address || 'P.O. BOX 145, TANGA'} | SIMU: ${schoolInfo?.phone || '0717616343'} | BARUA PEPE: ${schoolInfo?.email || 'info@school.ac.tz'}`]);
-  gridRows.push([`DARASA: ${selectedClass.toUpperCase()} | MKONDO: ${selectedStream.toUpperCase()} | SIKU: ${selectedDay.toUpperCase()} | TAREHE: ${new Date().toLocaleDateString('en-GB')}`]);
+  gridRows.push([`DARASA: ${(selectedClass || '').toUpperCase()} | MKONDO: ${(selectedStream || '').toUpperCase()} | SIKU: ${(selectedDay || '').toUpperCase()} | TAREHE: ${new Date().toLocaleDateString('en-GB')}`]);
   gridRows.push([]); // blank separator
 
   // Table Column Headers: SIKU | DARASA & MKONDO | [PERIOD 1 (Time)] | ...
@@ -85,8 +94,9 @@ export function exportGeneralTimetableExcel(options: ExcelGeneralTimetableOption
   });
   gridRows.push(tableHeaderRow);
 
-  // Group assignments by Day and Class/Stream
-  const activeDays = DAYS_OF_WEEK.filter(d => selectedDay === 'All' || selectedDay === d);
+  // Group assignments by Day and Class/Stream (only configured days)
+  const configuredDays = getConfiguredDays(periodSettings);
+  const activeDays = configuredDays.filter(d => selectedDay === 'All' || selectedDay === d);
   
   // Find all unique classes/streams in assignments or defaults
   const classStreamPairs: { className: string; stream: string }[] = [];
@@ -124,19 +134,17 @@ export function exportGeneralTimetableExcel(options: ExcelGeneralTimetableOption
           return;
         }
 
-        const normPeriod = period.name.split(' (')[0].trim().toLowerCase();
         const match = assignments.find(a => {
-          if (!a) return false;
-          const matchDay = (a.day || '').toLowerCase() === day.toLowerCase();
-          const matchClass = (a.className || '').toLowerCase() === pair.className.toLowerCase();
-          const matchStream = pair.stream === 'ALL' || !a.stream || a.stream.toLowerCase().includes(pair.stream.toLowerCase());
-          const aPeriod = (a.periodName || a.period || '').split(' (')[0].trim().toLowerCase();
-          return matchDay && matchClass && matchStream && (aPeriod === normPeriod || aPeriod.includes(normPeriod));
+          if (!a || !a.subject) return false;
+          const matchDay = (a.day || '').trim().toLowerCase() === day.toLowerCase();
+          const matchClass = isSameClass(a.className, pair.className);
+          const matchStream = pair.stream === 'ALL' || isSameStream(a.stream, pair.stream);
+          return matchDay && matchClass && matchStream && isSamePeriod(a.period, a.periodName, period.name);
         });
 
         if (match) {
           const tObj = match.teacherId !== undefined ? teacherMap.get(match.teacherId) : null;
-          const tInitial = tObj?.initial || (tObj ? tObj.name.substring(0, 2).toUpperCase() : '');
+          const tInitial = tObj?.initial || (tObj ? (tObj.name || '').substring(0, 2).toUpperCase() : '');
           const label = tInitial ? `${match.subject} (${tInitial})` : match.subject;
           rowData.push(label);
         } else {
@@ -164,7 +172,7 @@ export function exportGeneralTimetableExcel(options: ExcelGeneralTimetableOption
   // SHEET 2: TEACHING LOADS (Mzigo wa Walimu)
   // ----------------------------------------------------
   const loadRows: (string | number)[][] = [
-    [`${schoolName.toUpperCase()} - UCHAMBUZI WA MZIGO WA WALIMU (TEACHING WORKLOAD)`],
+    [`${(schoolName || schoolInfo?.name || 'SHULE').toUpperCase()} - UCHAMBUZI WA MZIGO WA WALIMU (TEACHING WORKLOAD)`],
     [`TAREHE: ${new Date().toLocaleDateString('en-GB')}`],
     [],
     ['#', 'JINA LA MWALIMU', 'INITIAL', 'CHEO CHA SHULE', 'MASOMO ANAYOFUNDISHA', 'VIPINDI VILIVYOPANGWA', 'KIWANGO CHA WIKI', 'HALI']
@@ -209,7 +217,7 @@ export function exportGeneralTimetableExcel(options: ExcelGeneralTimetableOption
   // SHEET 3: ORODHA YA VIPINDI VYOTE (Itemized Schedule)
   // ----------------------------------------------------
   const listRows: (string | number)[][] = [
-    [`${schoolName.toUpperCase()} - ORODHA KAMILI YA VIPINDI VYOTE VILIVYOPANGWA`],
+    [`${(schoolName || schoolInfo?.name || 'SHULE').toUpperCase()} - ORODHA KAMILI YA VIPINDI VYOTE VILIVYOPANGWA`],
     [`JUMLA YA VIPINDI: ${assignments.length}`],
     [],
     ['#', 'SIKU', 'MUDA NA KIPINDI', 'DARASA', 'MKONDO', 'SOMO', 'MWALIMU', 'INITIAL YA MWALIMU', 'CHUMBA / ENEO']
@@ -276,28 +284,27 @@ export function exportClassTimetableExcel(options: {
 
   const wb = XLSX.utils.book_new();
   const rows: (string | number)[][] = [
-    [`${(schoolInfo?.name || schoolName).toUpperCase()} - RATIBA YA DARASA`],
-    [`DARASA: ${className.toUpperCase()} - MKONDO: ${stream.toUpperCase()}`],
+    [`${(schoolInfo?.name || schoolName || 'SHULE').toUpperCase()} - RATIBA YA DARASA`],
+    [`DARASA: ${(className || '').toUpperCase()} - MKONDO: ${(stream || '').toUpperCase()}`],
     [`TAREHE: ${new Date().toLocaleDateString('en-GB')}`],
     [],
     ['SIKU (DAY)', ...periods.map(p => (p.time ? `${p.name}\n(${p.time})` : p.name))]
   ];
 
-  DAYS_OF_WEEK.forEach(day => {
+  const configuredDays = getConfiguredDays(periodSettings);
+  configuredDays.forEach(day => {
     const row: (string | number)[] = [day.toUpperCase()];
     periods.forEach(p => {
       if (p.isBreak) {
         row.push(`[${p.name}]`);
         return;
       }
-      const normPeriod = p.name.split(' (')[0].trim().toLowerCase();
       const match = assignments.find(a => {
-        if (!a) return false;
-        const matchDay = (a.day || '').toLowerCase() === day.toLowerCase();
-        const matchClass = (a.className || '').toLowerCase() === className.toLowerCase();
-        const matchStream = stream === 'All' || !a.stream || a.stream.toLowerCase().includes(stream.toLowerCase());
-        const aPeriod = (a.periodName || a.period || '').split(' (')[0].trim().toLowerCase();
-        return matchDay && matchClass && matchStream && (aPeriod === normPeriod || aPeriod.includes(normPeriod));
+        if (!a || !a.subject) return false;
+        const matchDay = (a.day || '').trim().toLowerCase() === day.toLowerCase();
+        const matchClass = isSameClass(a.className, className);
+        const matchStream = stream === 'All' || isSameStream(a.stream, stream);
+        return matchDay && matchClass && matchStream && isSamePeriod(a.period, a.periodName, p.name);
       });
 
       if (match) {
@@ -350,25 +357,25 @@ export function exportTeacherTimetableExcel(options: {
 
   // Sheet 1: Matrix view
   const matrixRows: (string | number)[][] = [
-    [`${(schoolInfo?.name || schoolName).toUpperCase()} - RATIBA BINAFSI YA MWALIMU`],
-    [`MWALIMU: ${teacher.name.toUpperCase()} (INITIAL: ${teacher.initial || '--'}) | CHEO: ${teacher.schoolRole || 'Teacher'}`],
+    [`${(schoolInfo?.name || schoolName || 'SHULE').toUpperCase()} - RATIBA BINAFSI YA MWALIMU`],
+    [`MWALIMU: ${(teacher.name || '').toUpperCase()} (INITIAL: ${teacher.initial || '--'}) | CHEO: ${teacher.schoolRole || 'Teacher'}`],
     [`MASOMO: ${teacher.subjects?.join(', ') || 'N/A'} | JUMLA YA VIPINDI: ${teacherAssignments.length} / ${teacher.maxPeriodsPerWeek || 20} KWA WIKI`],
     [],
     ['SIKU (DAY)', ...periods.map(p => (p.time ? `${p.name}\n(${p.time})` : p.name))]
   ];
 
-  DAYS_OF_WEEK.forEach(day => {
+  const configuredDays = getConfiguredDays(periodSettings);
+  configuredDays.forEach(day => {
     const row: (string | number)[] = [day.toUpperCase()];
     periods.forEach(p => {
       if (p.isBreak) {
         row.push(`[${p.name}]`);
         return;
       }
-      const normPeriod = p.name.split(' (')[0].trim().toLowerCase();
       const match = teacherAssignments.find(a => {
-        const matchDay = (a.day || '').toLowerCase() === day.toLowerCase();
-        const aPeriod = (a.periodName || a.period || '').split(' (')[0].trim().toLowerCase();
-        return matchDay && (aPeriod === normPeriod || aPeriod.includes(normPeriod));
+        if (!a || !a.subject) return false;
+        const matchDay = (a.day || '').trim().toLowerCase() === day.toLowerCase();
+        return matchDay && isSamePeriod(a.period, a.periodName, p.name);
       });
 
       if (match) {
@@ -389,7 +396,7 @@ export function exportTeacherTimetableExcel(options: {
 
   // Sheet 2: Itemized List
   const listRows: (string | number)[][] = [
-    [`${schoolName.toUpperCase()} - ORODHA YA VIPINDI VYA ${teacher.name.toUpperCase()}`],
+    [`${(schoolName || schoolInfo?.name || 'SHULE').toUpperCase()} - ORODHA YA VIPINDI VYA ${(teacher.name || '').toUpperCase()}`],
     [],
     ['#', 'SIKU', 'KIPINDI NA MUDA', 'DARASA NA MKONDO', 'SOMO', 'CHUMBA']
   ];
@@ -436,7 +443,7 @@ export function exportInvigilationTimetableExcel(options: {
 
   const wb = XLSX.utils.book_new();
   const rows: (string | number)[][] = [
-    [`${(schoolInfo?.name || schoolName).toUpperCase()} - RATIBA YA USIMAMIZI WA MITIHANI (INVIGILATION TIMETABLE)`],
+    [`${(schoolInfo?.name || schoolName || 'SHULE').toUpperCase()} - RATIBA YA USIMAMIZI WA MITIHANI (INVIGILATION TIMETABLE)`],
     [`TAREHE YA KUTOLEWA: ${new Date().toLocaleDateString('en-GB')}`],
     [],
     ['#', 'TAREHE', 'SIKU', 'KIPINDI (SESSION)', 'DARASA', 'MKONDO', 'SOMO', 'VYUMBA (ROOMS)', 'WASIMAMIZI (INVIGILATORS)']
@@ -518,8 +525,8 @@ export function exportTeacherInvigilationExcel(options: {
   const wb = XLSX.utils.book_new();
   const rows: (string | number)[][] = [];
 
-  rows.push([`${(schoolInfo?.name || schoolName).toUpperCase()} - RATIBA BINAFSI YA USIMAMIZI WA MTIHANI`]);
-  rows.push([`MWALIMU: ${teacher.name.toUpperCase()} (INITIAL: ${teacher.initial || '--'}) | WADHIFA: ${teacher.schoolRole || 'Msimamizi wa Mtihani'}`]);
+  rows.push([`${(schoolInfo?.name || schoolName || 'SHULE').toUpperCase()} - RATIBA BINAFSI YA USIMAMIZI WA MTIHANI`]);
+  rows.push([`MWALIMU: ${(teacher.name || '').toUpperCase()} (INITIAL: ${teacher.initial || '--'}) | WADHIFA: ${teacher.schoolRole || 'Msimamizi wa Mtihani'}`]);
   rows.push([`JUMLA YA VIPINDI VYA USIMAMIZI: ${teacherDuties.length} | TAREHE: ${new Date().toLocaleDateString('en-GB')}`]);
   rows.push([]);
 

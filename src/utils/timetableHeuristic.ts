@@ -75,7 +75,15 @@ const DEFAULT_DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
  * Safe for client-side and server-side execution.
  */
 export function generateHeuristicTimetable(req: GenerateTimetableRequest): GenerateTimetableResponse {
-  const targetDays = req.targetDays && req.targetDays.length > 0 ? req.targetDays : DEFAULT_DAYS;
+  const configuredDaysSet = new Set(
+    (req.periodSettings || [])
+      .map(p => (p.day || '').trim().toLowerCase())
+      .filter(d => d.length > 0 && d !== 'all')
+  );
+  const rawTargetDays = req.targetDays && req.targetDays.length > 0 ? req.targetDays : DEFAULT_DAYS;
+  const targetDays = configuredDaysSet.size > 0
+    ? rawTargetDays.filter(d => configuredDaysSet.has(d.trim().toLowerCase()))
+    : rawTargetDays;
   const targetClass = req.targetClass || 'ALL';
   const targetStream = req.targetStream || 'ALL';
   const overwriteAcademic = req.options?.overwriteAcademic ?? false;
@@ -157,10 +165,10 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
 
   const periodsByDay: Record<string, typeof req.periodSettings> = {};
   targetDays.forEach(d => {
-    const list = req.periodSettings.filter(p => p.day === d);
+    const list = req.periodSettings.filter(p => (p.day || '').trim().toLowerCase() === d.trim().toLowerCase());
     if (list.length > 0) {
       periodsByDay[d] = list;
-    } else {
+    } else if (!req.periodSettings || req.periodSettings.length === 0) {
       periodsByDay[d] = [
         { id: 1, day: d, name: 'Period 1', start: '08:00', end: '08:40' },
         { id: 2, day: d, name: 'Period 2', start: '08:40', end: '09:20' },
@@ -170,6 +178,9 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
         { id: 6, day: d, name: 'Period 6', start: '12:00', end: '12:40' },
         { id: 7, day: d, name: 'Period 7', start: '14:00', end: '14:40' }
       ];
+    } else {
+      // Explicitly exclude unconfigured days
+      periodsByDay[d] = [];
     }
   });
 
@@ -206,72 +217,30 @@ export function generateHeuristicTimetable(req: GenerateTimetableRequest): Gener
           }
         }
 
-        const lowerName = p.name.toLowerCase();
-        if (lowerName.includes('break') || lowerName.includes('chai') || lowerName.includes('recess')) {
-          generatedAssignments.push({
-            id: ++nextId,
-            className: target.className,
-            stream: target.stream,
-            day,
-            period: periodKey,
-            periodName: p.name,
-            subject: 'Morning Break',
-            activityType: 'breakfast',
-            room: 'Dining Hall / Grounds'
-          });
-          return;
-        }
-        if (lowerName.includes('lunch') || lowerName.includes('chakula')) {
-          generatedAssignments.push({
-            id: ++nextId,
-            className: target.className,
-            stream: target.stream,
-            day,
-            period: periodKey,
-            periodName: p.name,
-            subject: 'Lunch',
-            activityType: 'lunch',
-            room: 'Dining Hall'
-          });
+        // Skip if break, locked, or remedial
+        const lowerPeriodName = (p.name || '').toLowerCase();
+        if (
+          Boolean((p as any).isBreak) ||
+          Boolean((p as any).isLocked) ||
+          Boolean((p as any).locked) ||
+          lowerPeriodName.includes('remedial') ||
+          lowerPeriodName.includes('break') ||
+          lowerPeriodName.includes('lunch') ||
+          lowerPeriodName.includes('mapumziko') ||
+          lowerPeriodName.includes('chakula')
+        ) {
           return;
         }
 
-        if (day === 'Wednesday' && (lowerName.includes('period 7') || p.start >= '14:00')) {
-          const sportsTeacher = req.teachers.find(t => 
-            t.schoolRole?.toLowerCase().includes('sports') || 
-            t.subjects.some(s => s.toLowerCase().includes('physical') || s.toLowerCase().includes('sport'))
-          );
-          generatedAssignments.push({
-            id: ++nextId,
-            className: target.className,
-            stream: target.stream,
-            day,
-            period: periodKey,
-            periodName: p.name,
-            subject: 'Sports and Games',
-            activityType: 'sports',
-            teacherId: sportsTeacher?.id,
-            room: 'Sports Grounds'
-          });
-          return;
-        }
-
-        if (day === 'Friday' && (lowerName.includes('period 5') || p.start === '11:20')) {
-          generatedAssignments.push({
-            id: ++nextId,
-            className: target.className,
-            stream: target.stream,
-            day,
-            period: periodKey,
-            periodName: p.name,
-            subject: 'Religion / Devotion',
-            activityType: 'religion',
-            room: 'Mosque / Chapel / Hall'
-          });
-          return;
-        }
-
+        // Try to pick a subject that is not the same as the previous one
         let chosenSubject = standardSubjects[subjectCycleIndex % standardSubjects.length];
+        const lastAssignment = generatedAssignments.length > 0 ? generatedAssignments[generatedAssignments.length - 1] : null;
+        
+        if (lastAssignment && lastAssignment.subject === chosenSubject) {
+            subjectCycleIndex++;
+            chosenSubject = standardSubjects[subjectCycleIndex % standardSubjects.length];
+        }
+        
         subjectCycleIndex++;
 
         let chosenTeacher: (typeof req.teachers)[0] | undefined;

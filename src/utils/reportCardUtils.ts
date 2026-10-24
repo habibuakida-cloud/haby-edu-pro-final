@@ -862,9 +862,9 @@ export function isSameClass(c1?: string, c2?: string): boolean {
   const n2 = c2.trim().toLowerCase().replace(/\s+/g, ' ');
   if (n1 === n2) return true;
 
-  // Distinguish Secondary (Form 1-6) vs Primary (Standard / Class 1-7) vs Nursery
-  const isForm1 = /(?:form|kidato|f)\s*(\d+|iv|iii|ii|i|vi|v)/i.test(n1);
-  const isForm2 = /(?:form|kidato|f)\s*(\d+|iv|iii|ii|i|vi|v)/i.test(n2);
+  const formRegex = /(?:form|kidato|f)\s*(\d+|iv|iii|ii|i|vi|v)\b|^(iv|iii|ii|i|vi|v)(?:\s*[a-z])?$/i;
+  const isForm1 = formRegex.test(n1);
+  const isForm2 = formRegex.test(n2);
   if (isForm1 !== isForm2) {
     // One is secondary Form and the other is Primary Class -> NEVER MATCH!
     return false;
@@ -872,9 +872,9 @@ export function isSameClass(c1?: string, c2?: string): boolean {
 
   if (isForm1 && isForm2) {
     const getFormNum = (s: string) => {
-      const m = s.match(/(?:form|kidato|f)\s*(\d+|iv|iii|ii|i|vi|v)/i);
+      const m = s.match(formRegex);
       if (!m) return null;
-      const val = m[1].toLowerCase();
+      const val = (m[1] || m[2] || '').toLowerCase();
       if (val === 'iv') return '4';
       if (val === 'iii') return '3';
       if (val === 'ii') return '2';

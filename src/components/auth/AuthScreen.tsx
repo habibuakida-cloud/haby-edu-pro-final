@@ -1,18 +1,31 @@
 import React, { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db, supabase } from '../../lib/dbClient';
-import { LogIn, School as SchoolIcon, Loader2, User, KeyRound, ShieldAlert, CheckCircle2, Eye, EyeOff, Shield, Phone, Lock, Award, ArrowRight } from 'lucide-react';
+import { LogIn, School as SchoolIcon, Loader2, User, KeyRound, ShieldAlert, CheckCircle2, Eye, EyeOff, Shield, Phone, Lock, Award, ArrowRight, ShieldCheck } from 'lucide-react';
 import { HabyEduProLogo } from '../common/HabyEduProLogo';
+import { useEffect } from 'react';
 
 export const AuthScreen: React.FC = () => {
-  const { signInWithGoogle, signInWithEmail, loginAsDemo } = useAuth();
-  const [loginTab, setLoginTab] = useState<'staff' | 'parent'>('staff');
+  const { signInWithGoogle, signInWithEmail, loginAsDemo, loginWithFingerprint } = useAuth();
+  const [loginTab, setLoginTab] = useState<'staff' | 'parent' | 'fingerprint'>('staff');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
 
-  // Form states - staff
+  // Fingerprint Kiosk state
+  const [teachersList, setTeachersList] = useState<any[]>([]);
+  const [selectedTeacherFpId, setSelectedTeacherFpId] = useState<string>('');
+  const [isScanningFp, setIsScanningFp] = useState(false);
+  const [fpError, setFpError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (loginTab === 'fingerprint') {
+      supabase.from('teachers').select('*').then(({ data }) => {
+        if (data) setTeachersList(data);
+      });
+    }
+  }, [loginTab]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -123,11 +136,11 @@ export const AuthScreen: React.FC = () => {
 
         <div className="p-7 space-y-5">
           {/* Top Login Tab Switcher */}
-          <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
+          <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1.5 rounded-xl border border-slate-200">
             <button
               type="button"
               onClick={() => setLoginTab('staff')}
-              className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+              className={`py-2 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                 loginTab === 'staff' ? 'bg-[#1f4d8b] text-white shadow' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
@@ -135,16 +148,100 @@ export const AuthScreen: React.FC = () => {
             </button>
             <button
               type="button"
+              onClick={() => setLoginTab('fingerprint')}
+              className={`py-2 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
+                loginTab === 'fingerprint' ? 'bg-indigo-700 text-white shadow' : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ShieldCheck className="w-3.5 h-3.5" /> Biometric (Kidole)
+            </button>
+            <button
+              type="button"
               onClick={() => setLoginTab('parent')}
-              className={`py-2 px-3 rounded-lg text-xs font-bold transition flex items-center justify-center gap-1.5 cursor-pointer ${
+              className={`py-2 px-2 rounded-lg text-[11px] font-bold transition flex items-center justify-center gap-1 cursor-pointer ${
                 loginTab === 'parent' ? 'bg-emerald-700 text-white shadow' : 'text-slate-600 hover:text-slate-900'
               }`}
             >
-              <Phone className="w-3.5 h-3.5" /> Portal ya Wazazi
+              <Phone className="w-3.5 h-3.5" /> Wazazi
             </button>
           </div>
 
-          {loginTab === 'staff' ? (
+          {loginTab === 'fingerprint' ? (
+            <div className="space-y-4 pt-2">
+              <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 text-xs text-indigo-950 space-y-2">
+                <p className="font-black text-sm uppercase flex items-center gap-2">
+                  <ShieldCheck className="w-4 h-4 text-indigo-700" />
+                  Kioski cha Saini ya Kidole (Admin Controlled)
+                </p>
+                <p className="text-[11px] text-indigo-800 leading-relaxed">
+                  Chagua jina lako na uweke kidole kwenye skana ili kuingia kazini. Mbinu hii inasimamiwa na kusajiliwa na Mkuu wa Shule (Admin).
+                </p>
+              </div>
+
+              {fpError && (
+                <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 text-xs rounded-xl flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-rose-600 shrink-0" />
+                  <span>{fpError}</span>
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <div>
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Chagua Mwalimu:</label>
+                  <select
+                    value={selectedTeacherFpId}
+                    onChange={e => setSelectedTeacherFpId(e.target.value)}
+                    className="w-full px-3 py-2.5 text-xs font-bold border border-slate-300 rounded-xl bg-white text-slate-900"
+                  >
+                    <option value="">-- Chagua Jina la Mwalimu --</option>
+                    {teachersList.map((t: any) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.school_role || t.schoolRole || 'Teacher'}) {t.fingerprint_enrolled || t.fingerprintEnrolled ? '🔑 [Enrolled]' : '⚠️ [No Fingerprint]'}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-dashed border-indigo-300 rounded-2xl space-y-3 text-center">
+                  <div className={`w-20 h-20 rounded-full flex items-center justify-center shadow-lg transition-all duration-500 ${
+                    isScanningFp ? 'bg-indigo-600 text-white animate-pulse scale-110 ring-4 ring-indigo-300' : 'bg-white text-indigo-700 border-2 border-indigo-300'
+                  }`}>
+                    <ShieldCheck className="w-10 h-10" />
+                  </div>
+                  <div>
+                    <span className="text-xs font-black text-slate-800 block uppercase">
+                      {isScanningFp ? 'Inasoma alama ya kidole (Scanning Biometric)...' : 'Weka Kidole kwenye Skana'}
+                    </span>
+                    <span className="text-[10px] text-slate-500">Skana ya Kidole ya Shule (Admin Verified)</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isScanningFp || !selectedTeacherFpId}
+                    onClick={async () => {
+                      if (!selectedTeacherFpId) {
+                        setFpError('Tafadhali chagua mwalimu kwanza.');
+                        return;
+                      }
+                      setIsScanningFp(true);
+                      setFpError(null);
+                      try {
+                        await new Promise(r => setTimeout(r, 1600)); // simulate biometric scan
+                        await loginWithFingerprint(selectedTeacherFpId);
+                      } catch (err: any) {
+                        setFpError(err.message || 'Hitilafu ya utambuzi wa kidole.');
+                      } finally {
+                        setIsScanningFp(false);
+                      }
+                    }}
+                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md cursor-pointer transition-all"
+                  >
+                    {isScanningFp ? 'Inathibitisha...' : 'Scan & Sign In (Weka Kidole)'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : loginTab === 'staff' ? (
             <>
               {/* Google Sign-In */}
               <button

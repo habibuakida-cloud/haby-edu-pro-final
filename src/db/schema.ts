@@ -190,6 +190,8 @@ export const schoolData = pgTable('school_data', {
   disciplineRecords: jsonb('discipline_records').default([]),
   dutyRosterData: jsonb('duty_roster_data').default({}),
   academicTermDates: jsonb('academic_term_dates').default({}),
+  teacherAttendance: jsonb('teacher_attendance').default({}),
+  staffPayroll: jsonb('staff_payroll').default({}),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
@@ -643,9 +645,7 @@ export const examResults = pgTable('exam_results', {
   term: text('term').notNull(),
   marks: numeric('marks').notNull(),
   createdAt: timestamp('created_at').defaultNow(),
-}, (table) => ({
-  uniqueConstraint: unique('unique_exam_result').on(table.studentId, table.subjectId, table.examType, table.year, table.term),
-}));
+});
 
 // 14. ACTIVITY LOGS & SMS WALLET / BILLING TABLES
 export const activityLogs = pgTable('activity_logs', {
@@ -787,4 +787,58 @@ export const pastPapers = pgTable('past_papers', {
   markingSchemeUrl: text('marking_scheme_url'),
   createdAt: timestamp('created_at').defaultNow(),
 });
+
+// 16. TEACHER ATTENDANCE & STAFF PAYROLL TABLES
+export const teacherAttendance = pgTable('teacher_attendance', {
+  id: text('id').primaryKey(),
+  schoolId: text('school_id').notNull(),
+  teacherId: integer('teacher_id').notNull(),
+  teacherName: text('teacher_name').notNull(),
+  schoolRole: text('school_role').default('Subject Teacher'),
+  date: date('date').notNull(),
+  dayOfWeek: text('day_of_week').notNull(),
+  status: text('status').default('PRESENT'),
+  checkInTime: text('check_in_time').default('07:30'),
+  checkOutTime: text('check_out_time').default('15:30'),
+  remarks: text('remarks'),
+  markedBy: text('marked_by').default('Admin'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const staffPayroll = pgTable('staff_payroll', {
+  id: text('id').primaryKey(),
+  schoolId: text('school_id').notNull(),
+  teacherId: integer('teacher_id').notNull(),
+  teacherName: text('teacher_name').notNull(),
+  schoolRole: text('school_role').default('Subject Teacher'),
+  monthYear: text('month_year').notNull(),
+  basicSalary: numeric('basic_salary').default('0'),
+  housingAllowance: numeric('housing_allowance').default('0'),
+  transportAllowance: numeric('transport_allowance').default('0'),
+  responsibilityAllowance: numeric('responsibility_allowance').default('0'),
+  bonusAmount: numeric('bonus_amount').default('0'),
+  bonusReason: text('bonus_reason'),
+  workingDays: integer('working_days').default(22),
+  daysPresent: integer('days_present').default(22),
+  daysLate: integer('days_late').default(0),
+  daysExcused: integer('days_excused').default(0),
+  daysAbsent: integer('days_absent').default(0),
+  attendanceDeduction: numeric('attendance_deduction').default('0'),
+  taxDeduction: numeric('tax_deduction').default('0'),
+  nssfDeduction: numeric('nssf_deduction').default('0'),
+  healthInsurance: numeric('health_insurance').default('0'),
+  loanAdvanceDeduction: numeric('loan_advance_deduction').default('0'),
+  grossSalary: numeric('gross_salary').default('0'),
+  totalDeductions: numeric('total_deductions').default('0'),
+  netSalary: numeric('net_salary').default('0'),
+  paymentStatus: text('payment_status').default('PENDING'),
+  paymentMethod: text('payment_method').default('Bank Transfer'),
+  bankName: text('bank_name'),
+  bankAccount: text('bank_account'),
+  paidAt: text('paid_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 

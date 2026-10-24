@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import { Teacher, SchoolStaffRole, SchoolInfo } from '../../types';
 import { STAFF_ROLES_LIST, INVIGILATOR_COLORS, SUBJECT_LIST } from '../../constants/defaults';
+import { SubjectRegistry } from '../../constants/SubjectRegistry';
+
 import { formatPhoneNumber, getTanzanianCarrier } from '../../utils/phoneUtils';
 import { computeTeacherInitial } from '../../utils/teacherInitials';
 import { escapeCSV, downloadFile } from '../../utils/export';
@@ -40,21 +42,8 @@ interface TeacherRowDraft {
   excludeInvigilation: boolean;
 }
 
-const DEFAULT_SUBJECTS_SUGGESTIONS = [
-  'Mathematics',
-  'Basic Mathematics',
-  'English Language',
-  'Kiswahili',
-  'Biology',
-  'Chemistry',
-  'Physics',
-  'Geography',
-  'History',
-  'Civics',
-  'Commerce',
-  'Book Keeping',
-  'ICT / TEHAMA'
-];
+const DEFAULT_SUBJECTS_SUGGESTIONS = SubjectRegistry.getPopular();
+
 
 export const MultipleTeacherRegistrationModal: React.FC<MultipleTeacherRegistrationModalProps> = ({
   isOpen,
@@ -500,14 +489,34 @@ export const MultipleTeacherRegistrationModal: React.FC<MultipleTeacherRegistrat
                       </td>
 
                       {/* Subjects */}
-                      <td className="p-2 border-r border-slate-200">
+                      <td className="p-2 border-r border-slate-200 space-y-1">
                         <input
                           type="text"
                           value={row.subjects}
                           onChange={(e) => updateRow(row.id, { subjects: e.target.value })}
-                          placeholder="mf. Mathematics, Physics"
+                          placeholder="mf. Elimu ya Dini ya Kiislamu, Fine Art"
                           className="w-full p-1.5 text-xs font-medium text-slate-800 border border-slate-300 rounded bg-white"
                         />
+                        <select
+                          value=""
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            if (!val) return;
+                            const existingList = row.subjects
+                              ? row.subjects.split(/[;,]/).map(s => s.trim()).filter(Boolean)
+                              : [];
+                            if (!existingList.includes(val)) {
+                              const nextStr = existingList.length > 0 ? `${existingList.join(', ')}, ${val}` : val;
+                              updateRow(row.id, { subjects: nextStr });
+                            }
+                          }}
+                          className="w-full p-1 text-[11px] font-semibold text-blue-800 border border-blue-200 rounded bg-blue-50/60 cursor-pointer"
+                        >
+                          <option value="">+ Chagua Somo Kwenye Orodha...</option>
+                          {DEFAULT_SUBJECTS_SUGGESTIONS.map(subName => (
+                            <option key={subName} value={subName}>{subName}</option>
+                          ))}
+                        </select>
                       </td>
 
                       {/* Max Weekly Periods */}

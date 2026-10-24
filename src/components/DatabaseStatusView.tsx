@@ -34,6 +34,7 @@ import { db as firestoreDb } from '../lib/firebaseClient';
 import { collection, getDocs, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 import { SchoolInfo, Student, Teacher, TimetableAssignment } from '../types';
+import { AutomatedBackupManager } from './common/AutomatedBackupManager';
 
 interface SupabaseStatusData {
   success: boolean;
@@ -1067,6 +1068,12 @@ export const DatabaseStatusView: React.FC<DatabaseStatusViewProps> = ({
           ))}
         </div>
       </div>
+
+      {/* 6. AUTOMATED DAILY BACKUP & SUPABASE STORAGE SNAPSHOTS */}
+      <AutomatedBackupManager
+        schoolId={localStorage.getItem('currentSchoolId') || '02dff10d-78fb-4af6-ab5a-db1d275d7e06'}
+        schoolData={{ schoolInfo, students, teachers, timetableAssignments: assignments }}
+      />
     </div>
   );
 };

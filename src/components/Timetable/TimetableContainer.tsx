@@ -37,7 +37,9 @@ import {
   LayoutGrid,
   Save,
   CheckCircle2,
-  Settings
+  Settings,
+  BarChart3,
+  X
 } from 'lucide-react';
 import { 
   TimetableAssignment, 
@@ -51,7 +53,9 @@ import {
   SchoolInfo,
   UserAccount,
   Student,
-  SavedTimetableRecord
+  SavedTimetableRecord,
+  InvigilationSession,
+  Supervisor
 } from '../../types';
 import { 
   DAYS_OF_WEEK, 
@@ -81,7 +85,7 @@ import { exportGeneralTimetableExcel } from '../../utils/timetableExcelExport';
 import { saveSchoolData } from '../../lib/dataService';
 import { getCurrentSchoolId } from '../../lib/dbBridge';
 import { isSameClass } from '../../utils/reportCardUtils';
-import { isSameStream } from '../../lib/timetableService';
+import { isSameStream, isSamePeriod, normalizeStreamName, getConfiguredDays, isPeriodLocked, isAcademicReligiousSubject, computeStreamSubjectProgression, getRegisteredSubjectsForTeacher, isSameSubjectName } from '../../lib/timetableService';
 import { detectTimetableConflicts } from '../../utils/conflicts';
 import { generateTimetableIntegrityReport } from '../../utils/timetableIntegrity';
 import { 
@@ -90,6 +94,7 @@ import {
   DEFAULT_CONSTRAINTS_CONFIG,
   TimetableConstraintsConfig 
 } from '../../utils/timetableConstraintValidator';
+import { WhatsAppShareModal } from '../common/WhatsAppShareModal';
 import { EditSlotModal } from './EditSlotModal';
 import { PeriodSettingsManager } from './PeriodSettingsManager';
 import { ScheduleExtraCurricularModal } from './ScheduleExtraCurricularModal';
@@ -97,6 +102,7 @@ import { TimetableIntegrityReportModal } from './TimetableIntegrityReportModal';
 import { InstitutionalPoliciesTab } from './InstitutionalPoliciesTab';
 import { ConstraintConfigurationPanel } from './ConstraintConfigurationPanel';
 import { SubjectPeriodAllocationTab } from './SubjectPeriodAllocationTab';
+import { ClassStreamCurriculumConfig } from './ClassStreamCurriculumConfig';
 import { TeacherAssignmentsTab } from './TeacherAssignmentsTab';
 import { ClassJournalTab } from './ClassJournalTab';
 import { AITimetableAssistantModal } from './AITimetableAssistantModal';
@@ -139,6 +145,9 @@ interface TimetableContainerProps {
   schoolInfo?: SchoolInfo;
   currentUser?: UserAccount | null;
   students?: Student[];
+  sessions?: InvigilationSession[];
+  invigilationAssignments?: Record<string, number>;
+  supervisors?: Supervisor[];
   initialTab?: 'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings' | 'saved';
   journalRecords?: Record<string, any>;
   onUpdateJournal?: (records: Record<string, any>) => void;
@@ -167,6 +176,9 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   schoolInfo,
   currentUser,
   students = [],
+  sessions = [],
+  invigilationAssignments = {},
+  supervisors = [],
   initialTab,
   onUpdateAssignments = () => {},
   onUpdatePeriodSettings = () => {},
@@ -184,6 +196,9 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
     'general' | 'class' | 'teacher' | 'master' | 'journal' | 'policies' | 'constraints' | 'allocations' | 'teacherAssignments' | 'integrity' | 'settings' | 'graphical' | 'teacherEntry' | 'generalEntry' | 'saved'
   >(initialTab || 'general');
 
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [whatsAppDocTitle, setWhatsAppDocTitle] = useState('Timetable Document');
+
   React.useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
@@ -197,6 +212,22 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
   const [selectedLevelFilter, setSelectedLevelFilter] = useState<'ALL' | 'SECONDARY' | 'PRIMARY' | 'NURSERY'>('SECONDARY');
   const [activeWholeSchoolDay, setActiveWholeSchoolDay] = useState<string>('Monday');
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState<number>(teachers?.[0]?.id || 0);
+  const [allocInitialClass, setAllocInitialClass] = useState<string | undefined>(undefined);
+  const [allocInitialStream, setAllocInitialStream] = useState<string | undefined>(undefined);
+  const [allocInitialSubView, setAllocInitialSubView] = useState<'progression' | 'teacher_progression' | 'register'>('progression');
+
+  const handleManageStreamSubjects = (
+    className: string,
+    stream: string,
+    mode: 'progression' | 'teacher_progression' | 'register' = 'register'
+  ) => {
+    setAllocInitialClass(className);
+    setAllocInitialStream(stream);
+    setAllocInitialSubView(mode);
+    setActiveTab('allocations');
+  };
+
+  const configuredDays = useMemo(() => getConfiguredDays(periodSettings), [periodSettings]);
 
   React.useEffect(() => {
     if ((!selectedTeacherFilter || selectedTeacherFilter === 0) && teachers && teachers.length > 0) {
@@ -211,16 +242,51 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
     day: string;
     period: string;
     assignment?: TimetableAssignment;
+    slotAssignments?: TimetableAssignment[];
   } | null>(null);
 
   // Drag and drop state
   const [draggedAssignment, setDraggedAssignment] = useState<TimetableAssignment | null>(null);
   const [dragOverKey, setDragOverKey] = useState<string | null>(null);
 
-  const [printOrientation, setPrintOrientation] = useState<'portrait' | 'landscape'>('landscape');
+  const [printOrientation, setPrintOrientation] = useState<'portrait' | 'landscape'>(() => {
+    try {
+      const saved = localStorage.getItem('haby_timetable_print_settings');
+      if (saved) return JSON.parse(saved).orientation || 'landscape';
+    } catch (e) {}
+    return 'landscape';
+  });
+
+  const [printMargin, setPrintMargin] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('haby_timetable_print_settings');
+      if (saved) return JSON.parse(saved).margin || '6mm';
+    } catch (e) {}
+    return '6mm';
+  });
+
+  const [printOptimizedCss, setPrintOptimizedCss] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('haby_timetable_print_settings');
+      if (saved) return JSON.parse(saved).optimizedCss ?? true;
+    } catch (e) {}
+    return true;
+  });
+
+  const handleSavePrintSettings = () => {
+    try {
+      localStorage.setItem('haby_timetable_print_settings', JSON.stringify({
+        orientation: printOrientation,
+        margin: printMargin,
+        optimizedCss: printOptimizedCss
+      }));
+      alert('Timetable print layout settings saved successfully!');
+    } catch (e) {}
+  };
   
   // Timetable Integrity Report Modal state
   const [integrityReportModalOpen, setIntegrityReportModalOpen] = useState(false);
+  const [conflictListModalOpen, setConflictListModalOpen] = useState(false);
 
   // AI Timetable Assistant Modal state
   const [aiModalOpen, setAiModalOpen] = useState(false);
@@ -260,7 +326,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
   const handlePrintTimetable = (forceMaster: boolean = false) => {
     // If printing master timetable or currently in a non-grid configuration tab, switch to general tab first
-    if (forceMaster || !['general', 'class', 'teacher', 'journal'].includes(activeTab)) {
+    if (forceMaster || !['general', 'class', 'teacher', 'journal', 'allocations'].includes(activeTab)) {
       if (activeTab !== 'general') {
         setActiveTab('general');
         setTimeout(() => {
@@ -316,15 +382,17 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     });
   };
 
-  // Comprehensive Timetable Integrity Analysis
+  // Comprehensive Timetable Integrity Analysis (includes Curriculum Load Mismatch checks)
   const integrityReport = useMemo(() => {
     return generateTimetableIntegrityReport(
       assignments,
       teachers,
       periodSettings,
-      streamSettings
+      streamSettings,
+      undefined,
+      subjectPeriodAllocations
     );
-  }, [assignments, teachers, periodSettings, streamSettings]);
+  }, [assignments, teachers, periodSettings, streamSettings, subjectPeriodAllocations]);
 
   // User-Defined Constraints & Heuristic Validation Engine
   const [constraintsConfig, setConstraintsConfig] = useState<TimetableConstraintsConfig>(DEFAULT_CONSTRAINTS_CONFIG);
@@ -343,7 +411,11 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
 
   // Conflict detection
-  const conflicts = detectTimetableConflicts(assignments, teachers);
+  const conflicts = detectTimetableConflicts(
+    assignments,
+    teachers,
+    institutionalPolicy?.rules?.allowParallelElectiveSubjects ?? true
+  );
   const totalConflicts = Object.keys(conflicts).length;
 
   // Resolve all conflicts by unassigning teachers from redundant slots
@@ -382,10 +454,46 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     }
   };
 
-  // Helpers for class streams (only return explicitly registered streams)
+  // Direct quick-fix handler for a conflicting assignment from ConflictListModal or grid
+  const handleQuickFixConflict = (assignmentId: number | string) => {
+    const targetAssignment = assignments.find(a => a && String(a.id) === String(assignmentId));
+    if (targetAssignment) {
+      const matchingSlotAssignments = assignments.filter(a => 
+        a &&
+        a.className === targetAssignment.className && 
+        a.stream === targetAssignment.stream && 
+        a.day === targetAssignment.day && 
+        (a.period === targetAssignment.period || a.periodName === targetAssignment.periodName)
+      );
+      setConflictListModalOpen(false);
+      setEditingSlot({
+        className: targetAssignment.className,
+        stream: targetAssignment.stream,
+        day: targetAssignment.day,
+        period: targetAssignment.period || targetAssignment.periodName,
+        assignment: targetAssignment,
+        slotAssignments: matchingSlotAssignments
+      });
+    }
+  };
+
+  // Helpers for class streams (return registered streams + any streams with active assignments for this class)
   const getStreamsForClass = (className: string): string[] => {
-    const setting = streamSettings.find(s => s.className === className);
-    return setting && Array.isArray(setting.streams) ? setting.streams : [];
+    const setting = streamSettings.find(s => s && isSameClass(s.className, className));
+    const configured = setting && Array.isArray(setting.streams) ? [...setting.streams] : [];
+    const seenNorm = new Set(configured.map(st => normalizeStreamName(st)));
+
+    (assignments || []).forEach(a => {
+      if (a && isSameClass(a.className, className) && a.stream) {
+        const norm = normalizeStreamName(a.stream);
+        if (norm && norm !== 'all' && !seenNorm.has(norm)) {
+          seenNorm.add(norm);
+          configured.push(`STREAM ${norm.toUpperCase()}`);
+        }
+      }
+    });
+
+    return configured;
   };
 
   // Drag handlers
@@ -429,21 +537,44 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       return;
     }
 
+    // NEW: Check if either the source or the target is locked
+    if (draggedAssignment.isLocked && !isAcademicReligiousSubject(draggedAssignment.subject)) {
+      alert('Kipindi hiki kimefungwa (Locked). Huwezi kukisogeza.');
+      setDraggedAssignment(null);
+      return;
+    }
+
+    // Check Global Period Lock for target
+    const targetNorm = targetPeriod ? targetPeriod.split(' (')[0].trim() : '';
+    const isGlobalLocked = isPeriodLocked(targetDay, targetNorm, periodSettings, assignments, {
+      className: targetClass,
+      stream: targetStream
+    }).isLocked;
+
+    if (isGlobalLocked) {
+      alert('Kipindi hiki kimefungwa kimfumo kwenye Mipangilio. Huwezi kuweka kipindi hapa.');
+      setDraggedAssignment(null);
+      return;
+    }
+
     // Check if target already has an assignment
-    const targetNorm = targetPeriod ? targetPeriod.split(' (')[0] : '';
     const targetExisting = (assignments || []).find(
       a => {
         if (!a) return false;
-        const aPeriodStr = a.period || '';
-        const aPeriodNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
         return (
           isSameClass(a.className, targetClass) &&
           isSameStream(a.stream, targetStream) &&
-          a.day === targetDay &&
-          (a.period === targetPeriod || a.periodName === targetPeriod || aPeriodNorm === targetNorm || (targetNorm && aPeriodStr.startsWith(targetNorm)))
+          (a.day || '').toLowerCase() === targetDay.toLowerCase() &&
+          isSamePeriod(a.period, a.periodName, targetPeriod)
         );
       }
     );
+
+    if (targetExisting && targetExisting.isLocked && !isAcademicReligiousSubject(targetExisting.subject)) {
+      alert('Lengo la kipindi hiki kimefungwa (Locked). Huwezi kuweka kipindi hapa.');
+      setDraggedAssignment(null);
+      return;
+    }
 
     let updated: TimetableAssignment[];
 
@@ -492,6 +623,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
   // Slot Save from Modal
   const handleSaveSlot = (data: {
+    assignmentId?: number | string;
     className: string;
     stream: string;
     day: string;
@@ -502,8 +634,36 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     activityType: ActivityType;
     customNote?: string;
     applySchoolWide?: boolean;
+    isManual?: boolean;
+    isLocked?: boolean;
+    allocationMode?: 'manual' | 'auto';
+    isParallelElective?: boolean;
+    parallelElectiveTrack?: string;
+    isNewParallel?: boolean;
   }) => {
-    if (data.applySchoolWide) {
+    // Check Global Period Lock before saving
+    const dataPeriodNorm = data.period ? data.period.split(' (')[0].trim() : '';
+    const isGlobalLocked = isPeriodLocked(data.day, dataPeriodNorm, periodSettings, assignments, {
+      className: data.className,
+      stream: data.stream,
+      teacherId: data.teacherId
+    }).isLocked;
+
+    if (isGlobalLocked && data.activityType === 'academic') {
+      alert('Huwezi kuhifadhi kipindi cha darasani kwa sababu kipindi hiki kimefungwa kwenye Mipangilio ya Saa.');
+      return;
+    }
+
+    if (data.activityType === 'academic' && data.teacherId) {
+      const tObj = (teachers || []).find(t => t && Number(t.id) === Number(data.teacherId));
+      const allowedSubs = getRegisteredSubjectsForTeacher(tObj, teacherAssignments);
+      if (!allowedSubs.some(s => isSameSubjectName(s, data.subject))) {
+        alert(`Mwalimu ${tObj?.name || ''} hajasajiliwa kufundisha somo la "${data.subject}". Chagua somo alilosajiliwa tu.`);
+        return;
+      }
+    }
+
+    if (data.applySchoolWide && !isAcademicReligiousSubject(data.subject)) {
       // Apply to ALL streams across ALL classes for this day + period
       const newItems: TimetableAssignment[] = [];
       const updatedList = assignments.filter(a => !(a.day === data.day && a.period === data.period));
@@ -521,32 +681,70 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             teacherId: data.teacherId,
             room: data.room,
             activityType: data.activityType,
-            customNote: data.customNote
+            customNote: data.customNote,
+            isParallelElective: data.isParallelElective,
+            parallelElectiveTrack: data.parallelElectiveTrack
           });
         });
       });
 
       onUpdateAssignments([...updatedList, ...newItems]);
+    } else if (data.isNewParallel) {
+      // Add as an additional parallel / elective subject in this exact slot
+      const newParallelItem: TimetableAssignment = {
+        id: Date.now() + Math.floor(Math.random() * 10000),
+        className: data.className,
+        stream: data.stream,
+        day: data.day,
+        period: data.period,
+        subject: data.subject,
+        teacherId: data.teacherId,
+        room: data.room,
+        activityType: data.activityType,
+        customNote: data.customNote,
+        isManual: true,
+        isLocked: data.isLocked,
+        allocationMode: 'manual',
+        isParallelElective: true,
+        parallelElectiveTrack: data.parallelElectiveTrack
+      };
+
+      // Ensure existing assignments in this slot are also flagged as isParallelElective
+      const updatedList = assignments.map(a => {
+        if (
+          isSameClass(a.className, data.className) &&
+          isSameStream(a.stream, data.stream) &&
+          (a.day || '').toLowerCase() === data.day.toLowerCase() &&
+          isSamePeriod(a.period, a.periodName, data.period)
+        ) {
+          return { ...a, isParallelElective: true };
+        }
+        return a;
+      });
+
+      onUpdateAssignments([...updatedList, newParallelItem]);
+    } else if (data.assignmentId) {
+      // Update specific existing assignment by ID
+      onUpdateAssignments(
+        assignments.map(a => (a.id === data.assignmentId ? { ...a, ...data, id: a.id } : a))
+      );
     } else {
       // Apply to single slot
-      const dataPeriodNorm = data.period ? data.period.split(' (')[0] : '';
       const existing = (assignments || []).find(
         a => {
           if (!a) return false;
-          const aPeriodStr = a.period || '';
-          const aPeriodNorm = a.periodName || (a.period ? a.period.split(' (')[0] : '');
           return (
             isSameClass(a.className, data.className) &&
             isSameStream(a.stream, data.stream) &&
-            a.day === data.day &&
-            (a.period === data.period || a.periodName === data.period || aPeriodNorm === dataPeriodNorm || (dataPeriodNorm && aPeriodStr.startsWith(dataPeriodNorm)))
+            (a.day || '').toLowerCase() === data.day.toLowerCase() &&
+            isSamePeriod(a.period, a.periodName, data.period)
           );
         }
       );
 
       if (existing) {
         onUpdateAssignments(
-          assignments.map(a => (a.id === existing.id ? { ...a, ...data } : a))
+          assignments.map(a => (a.id === existing.id ? { ...a, ...data, id: a.id } : a))
         );
       } else {
         onUpdateAssignments([
@@ -560,7 +758,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     }
   };
 
-  const handleDeleteSlot = (id: number) => {
+  const handleDeleteSlot = (id: number | string) => {
     onUpdateAssignments(assignments.filter(a => a.id !== id));
   };
 
@@ -587,10 +785,20 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     customNote?: string;
     syncToPeriodSettings: boolean;
   }) => {
-    // 1. Sync or add to PeriodSettings if requested
-    if (data.syncToPeriodSettings) {
+    const isReligiousSub =
+      isAcademicReligiousSubject(data.activity.name) ||
+      isAcademicReligiousSubject(data.periodName) ||
+      data.activity.id === 'religion';
+
+    // 1. Sync or add to PeriodSettings if requested (do NOT lock globally if class-specific or religious subject)
+    if (data.syncToPeriodSettings && !isReligiousSub) {
+      const targetClassScope = data.isSchoolWide ? 'All Classes' : (data.targetClass || 'All Classes');
+      const targetStreamScope = data.isSchoolWide ? 'All Streams' : (data.targetStream || 'All Streams');
       const existingIndex = periodSettings.findIndex(
-        p => p.day === data.day && (p.name.toLowerCase() === data.periodName.toLowerCase() || (p.start === data.startTime && p.end === data.endTime))
+        p =>
+          p.day === data.day &&
+          (p.className || 'All Classes') === targetClassScope &&
+          (p.name.toLowerCase() === data.periodName.toLowerCase() || (p.start === data.startTime && p.end === data.endTime))
       );
       let updatedPeriods = [...periodSettings];
       if (existingIndex >= 0) {
@@ -598,7 +806,12 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           ...updatedPeriods[existingIndex],
           name: data.periodName,
           start: data.startTime,
-          end: data.endTime
+          end: data.endTime,
+          className: targetClassScope,
+          streamName: targetStreamScope,
+          isLocked: data.isSchoolWide,
+          locked: data.isSchoolWide,
+          activityType: data.activity.id as ActivityType
         };
       } else {
         updatedPeriods.push({
@@ -606,7 +819,12 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           day: data.day,
           name: data.periodName,
           start: data.startTime,
-          end: data.endTime
+          end: data.endTime,
+          className: targetClassScope,
+          streamName: targetStreamScope,
+          isLocked: data.isSchoolWide,
+          locked: data.isSchoolWide,
+          activityType: data.activity.id as ActivityType
         });
       }
       onUpdatePeriodSettings(updatedPeriods);
@@ -619,7 +837,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
     let newItems: TimetableAssignment[] = [];
     let updatedList = assignments.filter(a => {
       if (a.day !== data.day) return true;
-      if (data.isSchoolWide) {
+      if (data.isSchoolWide && !isReligiousSub) {
         return a.period !== periodKey && a.period !== data.periodName && a.periodName !== data.periodName;
       } else {
         return !(
@@ -630,7 +848,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       }
     });
 
-    if (data.isSchoolWide) {
+    if (data.isSchoolWide && !isReligiousSub) {
       DEFAULT_CLASSES.forEach(cName => {
         const streams = getStreamsForClass(cName);
         streams.forEach(sName => {
@@ -645,7 +863,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             activityType: data.activity.id as ActivityType,
             teacherId: data.teacherId,
             room: data.room,
-            customNote: data.customNote
+            customNote: data.customNote,
+            isLocked: true
           });
         });
       });
@@ -658,10 +877,11 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         period: periodKey,
         periodName: data.periodName,
         subject: data.activity.name,
-        activityType: data.activity.id as ActivityType,
+        activityType: isReligiousSub ? 'academic' : (data.activity.id as ActivityType),
         teacherId: data.teacherId,
         room: data.room,
-        customNote: data.customNote
+        customNote: data.customNote,
+        isLocked: !isReligiousSub
       });
     }
 
@@ -673,18 +893,65 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
   const [newStreamLevel, setNewStreamLevel] = useState<'CSEE' | 'ACSEE'>('CSEE');
   const [newStreamNames, setNewStreamNames] = useState('STREAM A, STREAM B');
 
+  // Helper to get strictly registered subjects for a teacher
+  const getTeacherSubjectsForId = React.useCallback((tid: number): string[] => {
+    const tObj = (teachers || []).find(t => t && Number(t.id) === Number(tid));
+    return getRegisteredSubjectsForTeacher(tObj, teacherAssignments);
+  }, [teacherAssignments, teachers]);
+
   // Master Assignment Form state
   const [assignClass, setAssignClass] = useState('Form 1');
   const [assignStream, setAssignStream] = useState('STREAM A');
   const [assignDay, setAssignDay] = useState('Monday');
   const [assignPeriod, setAssignPeriod] = useState('');
   const [assignTeacher, setAssignTeacher] = useState<number>(teachers?.[0]?.id || 0);
-  const [assignSubject, setAssignSubject] = useState(teachers?.[0]?.subjects?.[0] || 'Mathematics');
+  const [assignSubject, setAssignSubject] = useState<string>(() => {
+    const subs = getRegisteredSubjectsForTeacher(teachers?.[0], teacherAssignments);
+    return subs.length === 1 ? subs[0] : '';
+  });
+
+  // Sync assignSubject when assignTeacher or teacher list changes:
+  // Auto-fill ONLY if teacher has 1 subject; if multiple subjects, require user selection from dropdown
+  React.useEffect(() => {
+    const subs = getTeacherSubjectsForId(assignTeacher);
+    if (subs.length === 1) {
+      setAssignSubject(subs[0]);
+    } else if (subs.length > 1) {
+      setAssignSubject(prev => (prev && subs.some(s => isSameSubjectName(s, prev)) ? prev : ''));
+    } else {
+      setAssignSubject('');
+    }
+  }, [assignTeacher, getTeacherSubjectsForId]);
 
   const handleMasterAssign = (e: React.FormEvent) => {
     e.preventDefault();
     if (!assignPeriod) {
-      alert('Please select a period.');
+      alert('Tafadhali chagua kipindi (Please select a period).');
+      return;
+    }
+
+    const teacherSubs = getTeacherSubjectsForId(assignTeacher);
+    if (teacherSubs.length === 0) {
+      alert('Mwalimu huyu hajasajiliwa somo lolote. Tafadhali msajilie masomo kwanza.');
+      return;
+    }
+
+    const resolvedSubject = teacherSubs.length === 1 ? teacherSubs[0] : assignSubject;
+
+    if (!resolvedSubject || !teacherSubs.some(s => isSameSubjectName(s, resolvedSubject))) {
+      alert('Mwalimu huyu ana masomo zaidi ya moja. Tafadhali chagua somo alilosajiliwa kufundisha kwa kipindi hiki.');
+      return;
+    }
+
+    const assignPeriodNorm = assignPeriod.split(' (')[0].trim();
+    const isGlobalLocked = isPeriodLocked(assignDay, assignPeriodNorm, periodSettings, assignments, {
+      className: assignClass,
+      stream: assignStream,
+      teacherId: assignTeacher
+    }).isLocked;
+
+    if (isGlobalLocked) {
+      alert('Huwezi kupanga hapa; kipindi hiki kimefungwa (Locked) kwenye Mipangilio.');
       return;
     }
 
@@ -694,28 +961,40 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       stream: assignStream,
       day: assignDay,
       period: assignPeriod,
+      periodName: assignPeriodNorm,
       teacherId: assignTeacher || undefined,
-      subject: assignSubject,
+      subject: resolvedSubject,
       activityType: 'academic'
     };
 
-    console.log('[TimetableContainer] INVESTIGATE SAVE - handleMasterAssign new assignment object:', JSON.stringify(data, null, 2));
+    const existing = assignments.find(
+      a =>
+        a &&
+        isSameClass(a.className, assignClass) &&
+        isSameStream(a.stream, assignStream) &&
+        (a.day || '').trim().toLowerCase() === assignDay.trim().toLowerCase() &&
+        isSamePeriod(a.period, a.periodName, assignPeriodNorm)
+    );
+
+    if (existing && existing.isLocked && !isAcademicReligiousSubject(existing.subject)) {
+      alert('Kipindi hiki kimefungwa (Locked). Tafadhali fungua kwanza kabla ya kubadilisha.');
+      return;
+    }
 
     const updated = assignments.filter(
       a =>
         !(
-          a.className === assignClass &&
-          a.stream === assignStream &&
-          a.day === assignDay &&
-          a.period === assignPeriod
+          a &&
+          isSameClass(a.className, assignClass) &&
+          isSameStream(a.stream, assignStream) &&
+          (a.day || '').trim().toLowerCase() === assignDay.trim().toLowerCase() &&
+          isSamePeriod(a.period, a.periodName, assignPeriodNorm)
         )
     );
 
     const finalAssignments = [...updated, data];
-    console.log('[TimetableContainer] INVESTIGATE SAVE - dispatching total assignments count:', finalAssignments.length);
-
     onUpdateAssignments(finalAssignments);
-    alert(`Assigned ${assignSubject} to ${assignClass} ${assignStream} on ${assignDay}!`);
+    alert(`Assigned ${resolvedSubject} to ${assignClass} ${assignStream} on ${assignDay}!`);
   };
 
   const printSettings = useMemo(() => {
@@ -749,7 +1028,9 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           #class-printable-view,
           #class-printable-view *,
           #teacher-printable-view,
-          #teacher-printable-view * {
+          #teacher-printable-view *,
+          #progression-printable-view,
+          #progression-printable-view * {
             visibility: visible !important;
           }
 
@@ -757,7 +1038,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           #master-timetable-container,
           #general-printable-view,
           #class-printable-view,
-          #teacher-printable-view {
+          #teacher-printable-view,
+          #progression-printable-view {
             position: absolute !important;
             left: 0 !important;
             top: 0 !important;
@@ -1038,9 +1320,26 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
           <button
             type="button"
+            onClick={() => {
+              setAllocInitialSubView('progression');
+              setActiveTab('allocations');
+            }}
+            className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
+              activeTab === 'allocations'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'text-emerald-800 hover:bg-emerald-100 bg-emerald-50 border border-emerald-200'
+            }`}
+            title="Sajili masomo ya kila mkondo na tazama Progression Report ya vipindi vilivyoingizwa"
+          >
+            <BarChart3 className="w-3.5 h-3.5" />
+            <span>Kipimo &amp; Progression Report</span>
+          </button>
+
+          <button
+            type="button"
             onClick={() => setActiveTab('settings')}
             className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer ${
-              ['settings', 'allocations', 'teacherAssignments', 'master', 'generalEntry', 'teacherEntry', 'saved', 'policies', 'constraints', 'integrity'].includes(activeTab)
+              ['settings', 'teacherAssignments', 'master', 'generalEntry', 'teacherEntry', 'saved', 'policies', 'constraints', 'integrity'].includes(activeTab)
                 ? 'bg-blue-600 text-white shadow-xs'
                 : 'text-slate-700 hover:bg-slate-100 bg-slate-50'
             }`}
@@ -1067,7 +1366,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 onClick={() => setActiveTab('allocations')}
                 className={`px-2.5 py-1 rounded-lg font-bold transition cursor-pointer ${activeTab === 'allocations' ? 'bg-blue-600 text-white' : 'hover:bg-slate-200 text-slate-700'}`}
               >
-                📚 Mgawanyo
+                📊 Masomo ya Mikondo &amp; Progression
               </button>
               <button
                 type="button"
@@ -1173,31 +1472,48 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         )}
       </div>
 
-      {/* Conflict Bar Alert (if any teacher is double-booked or conflicts exist) */}
-      {(totalConflicts > 0 || integrityReport.criticalCount > 0) && (
-        <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-rose-900 shadow-xs flex-wrap gap-3 no-print">
-          <div className="flex items-center gap-2.5">
-            <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
-            <div className="text-xs">
-              <strong className="font-bold">Migongano ya Walimu Imegundulika: </strong>
-              <span>
-                Kuna vipindi {integrityReport.criticalCount || totalConflicts} ambapo mwalimu mmoja amepangwa madarasa mawili kwa wakati mmoja.
-              </span>
+      {/* Conflict Bar Alert: Inamfahamisha mkuu/academic master kuhusu vipindi vinavyogongana */}
+      {totalConflicts > 0 && (
+        <div className="p-3.5 bg-gradient-to-r from-rose-50 via-red-50 to-amber-50 border-2 border-rose-300 rounded-2xl flex items-center justify-between text-rose-950 shadow-sm flex-wrap gap-3 no-print animate-in fade-in">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-xs">
+              <AlertTriangle className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <strong className="text-xs font-black uppercase tracking-wide text-rose-900">
+                  ⚠️ Tahadhari ya Migongano: Vipindi {totalConflicts} Vinagongana!
+                </strong>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-rose-200 text-rose-900 uppercase">
+                  Inahitaji Kurekebishwa
+                </span>
+              </div>
+              <p className="text-[11px] text-rose-800 font-medium mt-0.5">
+                Kuna mwalimu aliyepangwa madarasa mawili au darasa lenye masomo yanayogongana kwa saa moja. Bofya hapa chini kujua vipindi husika na kuvirekebisha.
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => setConflictListModalOpen(true)}
+              className="px-3.5 py-2 bg-rose-600 text-white rounded-xl text-xs font-black hover:bg-rose-700 transition shadow-xs flex items-center gap-1.5 cursor-pointer"
+            >
+              <AlertTriangle className="w-3.5 h-3.5" />
+              <span>Orodha ya Migongano ({totalConflicts})</span>
+            </button>
+            <button
+              type="button"
               onClick={() => setIntegrityReportModalOpen(true)}
-              className="px-3 py-1 bg-blue-600 text-white rounded-lg text-xs font-bold hover:bg-blue-700 transition shadow-xs flex items-center gap-1 cursor-pointer"
+              className="px-3 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition shadow-xs flex items-center gap-1 cursor-pointer"
             >
               <ShieldAlert className="w-3.5 h-3.5" />
-              <span>Kagua Migongano</span>
+              <span>Ripoti Kamili</span>
             </button>
             <button
               type="button"
               onClick={handleResolveConflicts}
-              className="px-3 py-1 bg-white text-rose-600 border border-rose-200 rounded-lg text-xs font-black hover:bg-rose-50 transition shadow-xs flex items-center gap-1 cursor-pointer"
+              className="px-3 py-2 bg-white text-rose-700 border border-rose-200 rounded-xl text-xs font-bold hover:bg-rose-50 transition shadow-xs flex items-center gap-1 cursor-pointer"
             >
               <RefreshCw className="w-3.5 h-3.5" />
               <span>Tatua Kiotomatiki</span>
@@ -1302,8 +1618,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     onChange={e => setSelectedDayFilter(e.target.value)}
                     className="text-xs font-bold bg-transparent text-slate-900 focus:outline-hidden cursor-pointer"
                   >
-                    <option value="All">Siku Zote (All Days)</option>
-                    {DAYS_OF_WEEK.map(d => (
+                    <option value="All">Siku Zote ({configuredDays.length} Days)</option>
+                    {configuredDays.map(d => (
                       <option key={d} value={d}>{d}</option>
                     ))}
                   </select>
@@ -1462,6 +1778,125 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             </div>
           </div>
 
+          {/* Automatic Curriculum Load Error Flagging Strip for General Timetable */}
+          {(() => {
+            const targetClasses = selectedGeneralClass === 'All'
+              ? (selectedLevelFilter === 'SECONDARY'
+                  ? SECONDARY_CLASSES
+                  : selectedLevelFilter === 'PRIMARY'
+                  ? PRIMARY_CLASSES
+                  : selectedLevelFilter === 'NURSERY'
+                  ? NURSERY_CLASSES
+                  : DEFAULT_CLASSES)
+              : [selectedGeneralClass];
+
+            const streamAudits = targetClasses.flatMap(cName => {
+              const allStreams = getStreamsForClass(cName);
+              const targetStreams = selectedGeneralStream === 'All'
+                ? allStreams
+                : allStreams.filter(st => st === selectedGeneralStream);
+              return targetStreams.map(st =>
+                computeStreamSubjectProgression(
+                  cName,
+                  st,
+                  subjectPeriodAllocations,
+                  assignments,
+                  periodSettings,
+                  teachers
+                )
+              );
+            }).filter(r => r.totalRequiredSubjects > 0);
+
+            if (streamAudits.length === 0) return null;
+
+            const totalMissing = streamAudits.reduce((acc, r) => acc + r.missingSubjects.length, 0);
+            const totalDeficit = streamAudits.reduce((acc, r) => acc + r.incompleteSubjects.length, 0);
+            const totalExcess = streamAudits.reduce((acc, r) => acc + r.excessSubjects.length, 0);
+            const totalUnreg = streamAudits.reduce((acc, r) => acc + r.unregisteredSubjects.length, 0);
+            const totalExpected = streamAudits.reduce((acc, r) => acc + r.totalRequiredPeriods, 0);
+            const totalEntered = streamAudits.reduce((acc, r) => acc + Math.min(r.totalEnteredRegisteredPeriods, r.totalRequiredPeriods), 0);
+            const overallPct = totalExpected > 0 ? Math.min(100, Math.round((totalEntered / totalExpected) * 100)) : 0;
+            const hasErrors = totalMissing > 0 || totalDeficit > 0 || totalExcess > 0 || totalUnreg > 0;
+
+            return (
+              <div
+                className={`p-3.5 rounded-xl border flex flex-col lg:flex-row lg:items-center justify-between gap-3 print:hidden ${
+                  !hasErrors
+                    ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                    : totalMissing > 0
+                    ? 'bg-rose-50 border-rose-200 text-rose-900'
+                    : 'bg-amber-50 border-amber-200 text-amber-900'
+                }`}
+              >
+                <div className="flex items-start gap-2.5">
+                  {!hasErrors ? (
+                    <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <AlertTriangle className={`w-5 h-5 shrink-0 mt-0.5 ${totalMissing > 0 ? 'text-rose-600' : 'text-amber-600'}`} />
+                  )}
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-black uppercase tracking-wide">
+                        {!hasErrors
+                          ? 'Curriculum Load Verified (100% Match with Expected Periods)'
+                          : 'Automatic Curriculum Load Error Flagging — General Timetable Mismatch'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/80 border border-current/20">
+                        {overallPct}% Completion ({totalEntered}/{totalExpected} expected weekly periods)
+                      </span>
+                    </div>
+                    {hasErrors && (
+                      <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+                        {totalMissing > 0 && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-rose-100 text-rose-800 border border-rose-200">
+                            🚩 {totalMissing} Missing Required Subject(s) (0% Entered)
+                          </span>
+                        )}
+                        {totalDeficit > 0 && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-100 text-amber-800 border border-amber-200">
+                            ⚠️ {totalDeficit} Subject(s) Under-Allocated (Period Deficit)
+                          </span>
+                        )}
+                        {totalExcess > 0 && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-purple-100 text-purple-800 border border-purple-200">
+                            ⚡ {totalExcess} Subject(s) Over-Allocated (Exceeds Expected Count)
+                          </span>
+                        )}
+                        {totalUnreg > 0 && (
+                          <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-slate-200 text-slate-800">
+                            ℹ️ {totalUnreg} Unregistered Subject(s) in General Timetable
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleManageStreamSubjects(
+                        selectedGeneralClass === 'All' ? 'Form 1' : selectedGeneralClass,
+                        selectedGeneralStream === 'All' ? 'STREAM A' : selectedGeneralStream,
+                        'progression'
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-indigo-600 hover:bg-indigo-700 text-white transition cursor-pointer shadow-2xs"
+                  >
+                    Open Progression Report (%)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('settings')}
+                    className="px-3 py-1.5 rounded-lg text-[11px] font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 transition cursor-pointer"
+                  >
+                    Class/Stream Curriculum Config
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Timetable View by Days */}
           <div id="master-timetable-container" data-alias="general-printable-view" className="space-y-8 master-timetable-container">
             {/* Official Master Timetable Letterhead Header (Visible ONLY during print) */}
@@ -1509,7 +1944,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 </div>
               </div>
             </div>
-            {DAYS_OF_WEEK.filter(day => selectedDayFilter === 'All' || selectedDayFilter === day).map(day => {
+            {configuredDays.filter(day => selectedDayFilter === 'All' || selectedDayFilter === day).map(day => {
               const dayTheme = getDayTheme(day, dayThemes);
               const timeToMinutes = (timeStr?: string) => {
                 if (!timeStr || typeof timeStr !== 'string') return 0;
@@ -1594,16 +2029,52 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                             >
                               {className}
                             </span>
-                            <div className="flex items-center gap-1">
-                              {streams.map(st => (
-                                <span
-                                  key={st}
-                                  style={{ backgroundColor: formTheme.badgeBg, color: formTheme.badgeText }}
-                                  className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                                >
-                                  {st}
-                                </span>
-                              ))}
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              {streams.map(st => {
+                                const prog = computeStreamSubjectProgression(
+                                  className,
+                                  st,
+                                  subjectPeriodAllocations,
+                                  assignments,
+                                  periodSettings,
+                                  teachers
+                                );
+                                const hasCurriculum = prog.totalRequiredSubjects > 0;
+                                const hasFlag = hasCurriculum && (
+                                  prog.missingSubjects.length > 0 ||
+                                  prog.incompleteSubjects.length > 0 ||
+                                  prog.excessSubjects.length > 0
+                                );
+                                return (
+                                  <button
+                                    key={st}
+                                    type="button"
+                                    onClick={() => handleManageStreamSubjects(className, st, 'progression')}
+                                    style={{ backgroundColor: formTheme.badgeBg, color: formTheme.badgeText }}
+                                    className="text-[10px] font-bold px-2 py-0.5 rounded-full inline-flex items-center gap-1 hover:opacity-90 cursor-pointer"
+                                    title={
+                                      hasCurriculum
+                                        ? `${className} ${st}: ${prog.overallPercentage}% Curriculum Completion (${prog.totalEnteredRegisteredPeriods}/${prog.totalRequiredPeriods} periods)`
+                                        : `Click to configure required subjects for ${className} ${st}`
+                                    }
+                                  >
+                                    <span>{st}</span>
+                                    {hasCurriculum && (
+                                      <span
+                                        className={`px-1 rounded text-[9px] font-black ${
+                                          prog.isFullyComplete && prog.excessSubjects.length === 0
+                                            ? 'bg-emerald-600 text-white'
+                                            : hasFlag
+                                            ? 'bg-rose-600 text-white'
+                                            : 'bg-amber-500 text-white'
+                                        }`}
+                                      >
+                                        {prog.overallPercentage}%
+                                      </span>
+                                    )}
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
 
@@ -1698,13 +2169,16 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
                                       {dayPeriods.map(period => {
                                         const periodKey = `${period.name} (${period.start}-${period.end})`;
-                                        const assignment = assignments.find(
+                                        const slotAssignments = (assignments || []).filter(
                                           a =>
+                                            a &&
                                             isSameClass(a.className, className) &&
                                             isSameStream(a.stream, stream) &&
-                                            a.day.toLowerCase() === day.toLowerCase() &&
-                                            (a.period === periodKey || a.period === period.name || (a.periodName && a.periodName === period.name))
+                                            (a.day || '').toLowerCase() === day.toLowerCase() &&
+                                            isSamePeriod(a.period, a.periodName, period.name)
                                         );
+                                        const assignment = slotAssignments[0];
+                                        const isMultiParallel = slotAssignments.length > 1;
 
                                         const teacher = assignment?.teacherId
                                           ? teachers.find(t => t.id === assignment.teacherId)
@@ -1742,7 +2216,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                                 stream,
                                                 day,
                                                 period: periodKey,
-                                                assignment
+                                                assignment,
+                                                slotAssignments
                                               })
                                             }
                                             style={{
@@ -1775,7 +2250,72 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                                 : 'hover:bg-blue-50/40'
                                             }`}
                                           >
-                                            {assignment ? (
+                                            {isMultiParallel ? (
+                                              /* MULTIPLE PARALLEL ELECTIVE SUBJECTS IN SAME SLOT */
+                                              <div className="space-y-1.5">
+                                                <div className="flex items-center justify-between text-[9px] font-black text-emerald-800 bg-emerald-100/90 px-1.5 py-0.5 rounded border border-emerald-300">
+                                                  <span>🔀 MICHEPUO ({slotAssignments.length})</span>
+                                                </div>
+                                                {slotAssignments.map((asg, asgIdx) => {
+                                                  const asgColor = getSubjectColor(asg.subject);
+                                                  const asgTeacher = asg.teacherId ? teachers.find(t => t.id === asg.teacherId) : undefined;
+                                                  const asgTeacherColor = asgTeacher ? getTeacherColor(asgTeacher.id) : null;
+                                                  return (
+                                                    <div
+                                                      key={asg.id || asgIdx}
+                                                      draggable
+                                                      onDragStart={e => handleDragStart(e, asg)}
+                                                      style={{
+                                                        backgroundColor: asgColor?.bg,
+                                                        borderColor: asgColor?.border
+                                                      }}
+                                                      className="p-1.5 rounded-md border text-xs shadow-2xs hover:shadow-xs select-none transition-all"
+                                                    >
+                                                      <div
+                                                        style={{ color: asgColor?.text }}
+                                                        className="font-bold leading-tight flex items-center justify-between gap-1"
+                                                      >
+                                                        <span className="truncate">{getSubjectShortName(asg.subject)}</span>
+                                                        {asg.parallelElectiveTrack && (
+                                                          <span className="text-[8px] px-1 py-0.2 bg-emerald-700 text-white rounded font-black uppercase shrink-0">
+                                                            {asg.parallelElectiveTrack}
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                      <div className="mt-1 flex items-center justify-between gap-1 text-[10px]">
+                                                        {asgTeacher ? (
+                                                          <span
+                                                            style={{ backgroundColor: asgTeacherColor?.hex, color: '#ffffff' }}
+                                                            className="px-1.5 py-0.2 rounded-full font-bold shadow-2xs text-[9px]"
+                                                          >
+                                                            {asgTeacher.initial}
+                                                          </span>
+                                                        ) : (
+                                                          <span className="text-slate-400 italic text-[9px]">Hakuna mwalimu</span>
+                                                        )}
+                                                        {asg.room && (
+                                                          <span className="font-semibold text-[9px] text-slate-600 truncate max-w-[60px]">
+                                                            {asg.room}
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                      {asg.id && conflicts[asg.id]?.hasConflict && (
+                                                        <div 
+                                                          title={conflicts[asg.id]?.message}
+                                                          className="mt-1 flex items-center justify-between text-[8px] bg-rose-600 hover:bg-rose-700 text-white font-black px-1.5 py-0.5 rounded animate-pulse shadow-2xs"
+                                                        >
+                                                          <span className="flex items-center gap-0.5 truncate">
+                                                            <AlertTriangle className="w-2 h-2 shrink-0" />
+                                                            <span>MGONGANO!</span>
+                                                          </span>
+                                                          <span className="underline shrink-0">Rekebisha</span>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  );
+                                                })}
+                                              </div>
+                                            ) : assignment ? (
                                               <div
                                                 draggable
                                                 onDragStart={e => handleDragStart(e, assignment)}
@@ -1837,6 +2377,11 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                                     {!extraInfo && <span className="font-extrabold">{getSubjectShortName(assignment.subject)}</span>}
                                                     {extraInfo && <span className="font-extrabold">{assignment.subject}</span>}
                                                   </span>
+                                                  {assignment.isParallelElective && (
+                                                    <span className="text-[8px] px-1 py-0.2 bg-emerald-600 text-white font-black rounded uppercase">
+                                                      {assignment.parallelElectiveTrack || 'Mchepuo'}
+                                                    </span>
+                                                  )}
                                                   {conflict?.hasConflict && (
                                                     <span
                                                       title={`Clash! Double-booked with ${conflict.conflictingWith
@@ -1878,10 +2423,17 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                                                   )}
                                                 </div>
 
-                                                {/* Conflict tooltip */}
+                                                {/* Conflict high-visibility alert banner on cell */}
                                                 {conflict?.hasConflict && (
-                                                  <div className="text-[9px] text-rose-700 font-bold mt-0.5 leading-none">
-                                                    Clash: {conflict.conflictingWith[0]?.className}
+                                                  <div 
+                                                    title={conflict.message || `Clash! Double-booked with ${conflict.conflictingWith.map(c => `${c.className} ${c.stream}`).join(', ')}`}
+                                                    className="mt-1.5 flex items-center justify-between gap-1 bg-rose-600 hover:bg-rose-700 text-white px-1.5 py-0.5 rounded text-[9px] font-black animate-pulse shadow-xs"
+                                                  >
+                                                    <span className="flex items-center gap-0.5 truncate">
+                                                      <AlertTriangle className="w-2.5 h-2.5 shrink-0" />
+                                                      <span className="truncate">MGONGANO!</span>
+                                                    </span>
+                                                    <span className="underline shrink-0 text-[8px]">Rekebisha</span>
                                                   </div>
                                                 )}
                                               </div>
@@ -2013,7 +2565,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                   exportClassTimetableGridToCSV(
                     selectedClassFilter,
                     streams[0] || 'A',
-                    DAYS_OF_WEEK,
+                    configuredDays,
                     periodSettings,
                     assignments,
                     teachers
@@ -2050,6 +2602,32 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
               <button
                 type="button"
+                onClick={() => {
+                  exportTimetablePDF({
+                    viewMode: 'class',
+                    assignments,
+                    teachers,
+                    periodSettings,
+                    streamSettings,
+                    schoolInfo,
+                    schoolName,
+                    selectedClass: selectedClassFilter,
+                    selectedStream: 'All',
+                    selectedDay: 'All',
+                    orientation: 'landscape'
+                  });
+                  setWhatsAppDocTitle(`Class Timetable (${selectedClassFilter}) - ${schoolName}`);
+                  setShowWhatsAppModal(true);
+                }}
+                className="px-3 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                title="Download Timetable PDF and send via WhatsApp"
+              >
+                <Share2 className="w-3.5 h-3.5" />
+                <span>Send via WhatsApp</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => handlePrintTimetable()}
                 className="px-3.5 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95 transition-all"
                 title="Print Class Timetable using dedicated print CSS"
@@ -2077,7 +2655,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             <div className="flex flex-wrap items-center gap-1.5">
               {DEFAULT_CLASSES.map(cName => {
                 const isSelected = selectedClassFilter === cName;
-                const hasLessons = (assignments || []).some(a => a && a.className === cName);
+                const hasLessons = (assignments || []).some(a => a && isSameClass(a.className, cName));
                 return (
                   <button
                     key={cName}
@@ -2191,6 +2769,8 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     assignments={assignments} 
                     periodSettings={periodSettings} 
                     teachers={teachers}
+                    subjectPeriodAllocations={subjectPeriodAllocations}
+                    onManageStreamSubjects={handleManageStreamSubjects}
                   />
                 </div>
               ));
@@ -2227,7 +2807,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       {activeTab === 'teacher' && (
         <div className="space-y-6">
           <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-3 no-print">
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <label className="text-xs font-bold text-slate-500 uppercase tracking-wider">Select Teacher:</label>
               <select
                 value={selectedTeacherFilter}
@@ -2240,12 +2820,52 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                   </option>
                 ))}
               </select>
+              {(() => {
+                let dutyCount = 0;
+                (sessions || []).forEach(sess => {
+                  for (let r = 0; r < (sess.rooms || 1); r++) {
+                    if (Number(invigilationAssignments[`${sess.id}_room${r}`]) === Number(selectedTeacherFilter)) {
+                      dutyCount++;
+                    }
+                  }
+                });
+                if (dutyCount === 0) return null;
+                return (
+                  <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-200 flex items-center gap-1.5 shadow-2xs">
+                    <ShieldCheck className="w-3.5 h-3.5 text-amber-700" />
+                    <span>{dutyCount} Vikao vya Mitihani</span>
+                  </span>
+                );
+              })()}
             </div>
 
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => {
-                  const currentTeacher = teachers.find(t => t.id === selectedTeacherFilter);
+                  setAllocInitialSubView('teacher_progression');
+                  setActiveTab('allocations');
+                }}
+                className="px-3 py-2 text-xs font-bold bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="Tazama Ripoti ya Progression ya Walimu (Teacher Progression Report)"
+              >
+                <BarChart3 className="w-3.5 h-3.5" />
+                <span>Progression ya Walimu</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setActiveTab('teacherEntry')}
+                className="px-3 py-2 text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
+                title="Fungua Fomu ya Kupanga Vipindi vya Mwalimu"
+              >
+                <Edit3 className="w-3.5 h-3.5" />
+                <span>Panga Vipindi vya Mwalimu</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  const currentTeacher = teachers.find(t => Number(t.id) === Number(selectedTeacherFilter)) || teachers[0];
                   handleShareTimetableWhatsApp(`${currentTeacher?.name || 'Teacher'} Teaching Timetable`);
                 }}
                 className="px-3 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs transition-all cursor-pointer"
@@ -2257,6 +2877,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
               <button
                 onClick={() => {
+                  const currentTeacher = teachers.find(t => Number(t.id) === Number(selectedTeacherFilter)) || teachers[0];
                   exportTimetablePDF({
                     viewMode: 'teacher',
                     assignments,
@@ -2265,7 +2886,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                     streamSettings,
                     schoolInfo,
                     schoolName,
-                    selectedTeacherId: selectedTeacherFilter,
+                    selectedTeacherId: currentTeacher?.id ?? selectedTeacherFilter,
                     orientation: 'landscape'
                   });
                 }}
@@ -2316,7 +2937,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                       {schoolInfo?.phone ? ` • Tel: ${schoolInfo.phone}` : ''}
                     </p>
                     <p className="text-[11px] font-bold text-blue-950 uppercase mt-0.5 tracking-wider">
-                      TEACHER TEACHING TIMETABLE • {teachers.find(t => t.id === selectedTeacherFilter)?.name || 'FACULTY'} (RATIBA YA MWALIMU)
+                      TEACHER TEACHING TIMETABLE • {(teachers.find(t => Number(t.id) === Number(selectedTeacherFilter)) || teachers[0])?.name || 'FACULTY'} (RATIBA YA MWALIMU)
                     </p>
                   </div>
                 </div>
@@ -2334,9 +2955,19 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
               </div>
             </div>
               {(() => {
-                const currentTeacher = teachers.find(t => t.id === selectedTeacherFilter);
-                if (!currentTeacher) return <p className="text-slate-500">Select a teacher.</p>;
-                return <TeacherTimetable teacher={currentTeacher} assignments={assignments} periodSettings={periodSettings} />;
+                const currentTeacher = teachers.find(t => Number(t.id) === Number(selectedTeacherFilter)) || teachers[0];
+                return (
+                  <TeacherTimetable 
+                    teacher={currentTeacher} 
+                    assignments={assignments} 
+                    periodSettings={periodSettings}
+                    sessions={sessions}
+                    invigilationAssignments={invigilationAssignments}
+                    supervisors={supervisors}
+                    schoolInfo={schoolInfo}
+                    schoolName={schoolName}
+                  />
+                );
               })()}
 
             {/* Official Signatures & Stamp Footer (Visible ONLY during print) */}
@@ -2371,6 +3002,9 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           onUpdateAssignments={onUpdateAssignments}
           assignments={assignments}
           periodSettings={periodSettings}
+          teacherAssignments={teacherAssignments}
+          subjectPeriodAllocations={subjectPeriodAllocations}
+          onManageStreamSubjects={handleManageStreamSubjects}
           classes={DEFAULT_CLASSES}
         />
       )}
@@ -2463,7 +3097,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                   onChange={e => setAssignDay(e.target.value)}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
                 >
-                  {DAYS_OF_WEEK.map(d => (
+                  {configuredDays.map(d => (
                     <option key={d} value={d}>{d}</option>
                   ))}
                 </select>
@@ -2478,10 +3112,19 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 >
                   <option value="">-- Select Period --</option>
                   {periodSettings
-                    .filter(p => p.day === assignDay)
+                    .filter(p => p.day === assignDay && !p.isBreak)
                     .map(p => {
                       const label = `${p.name} (${p.start}-${p.end})`;
-                      return <option key={p.id} value={label}>{label}</option>;
+                      const locked = isPeriodLocked(assignDay, p.name, periodSettings, assignments, {
+                        className: assignClass,
+                        stream: assignStream,
+                        teacherId: assignTeacher
+                      }).isLocked;
+                      return (
+                        <option key={p.id} value={label} disabled={locked}>
+                          {label}{locked ? ' — [LOCKED 🔒]' : ''}
+                        </option>
+                      );
                     })}
                 </select>
               </div>
@@ -2493,38 +3136,64 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                   onChange={e => {
                     const tid = Number(e.target.value);
                     setAssignTeacher(tid);
-                    const t = teachers.find(item => item.id === tid);
-                    if (t && t.subjects.length > 0) {
-                      setAssignSubject(t.subjects[0]);
+                    const subs = getTeacherSubjectsForId(tid);
+                    if (subs.length === 1) {
+                      setAssignSubject(subs[0]);
+                    } else {
+                      setAssignSubject('');
                     }
                   }}
                   className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
                 >
                   {teachers.map(t => (
                     <option key={t.id} value={t.id}>
-                      {t.name} ({t.initial})
+                      {t.name} ({t.initial}) — [{getTeacherSubjectsForId(t.id).join(', ') || 'No subject'}]
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Subject</label>
-                <select
-                  value={assignSubject}
-                  onChange={e => setAssignSubject(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
-                >
-                  {teachers.find(t => t.id === assignTeacher)?.subjects.map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  )) || <option value="Mathematics">Mathematics</option>}
-                </select>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Subject (Somo Alilosajiliwa Mwalimu)</label>
+                {(() => {
+                  const teacherSubs = getTeacherSubjectsForId(assignTeacher);
+                  if (teacherSubs.length === 0) {
+                    return (
+                      <div className="w-full px-3 py-2 text-xs font-bold border border-rose-200 rounded-lg bg-rose-50 text-rose-800">
+                        ⚠️ Mwalimu huyu hajasajiliwa somo lolote
+                      </div>
+                    );
+                  }
+                  if (teacherSubs.length === 1) {
+                    return (
+                      <div className="w-full px-3 py-2 text-xs font-bold border border-blue-200 rounded-lg bg-blue-50 text-blue-900 flex items-center justify-between">
+                        <span>{teacherSubs[0]}</span>
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 font-black">
+                          Auto ✓
+                        </span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <select
+                      value={assignSubject}
+                      onChange={e => setAssignSubject(e.target.value)}
+                      className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
+                    >
+                      <option value="">-- Chagua Somo (Select Subject) --</option>
+                      {teacherSubs.map(s => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                  );
+                })()}
               </div>
 
               <div className="sm:col-span-2 pt-2">
                 <button
                   type="submit"
-                  className="w-full py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-xs transition-colors flex items-center justify-center gap-1.5"
+                  disabled={getTeacherSubjectsForId(assignTeacher).length === 0}
+                  className="w-full py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 disabled:cursor-not-allowed rounded-lg shadow-xs transition-colors flex items-center justify-center gap-1.5"
                 >
                   <CheckCircle className="w-4 h-4" />
                   Save & Assign Period
@@ -2626,193 +3295,93 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
             streamSettings={streamSettings}
           />
 
-          {/* Class Stream Settings */}
+          {/* Class & Stream Settings + Curriculum Load Configuration (Required Subjects & Expected Weekly Periods) */}
+          <ClassStreamCurriculumConfig
+            streamSettings={streamSettings}
+            onUpdateStreamSettings={onUpdateStreamSettings}
+            subjectPeriodAllocations={subjectPeriodAllocations}
+            onUpdateSubjectPeriodAllocations={onUpdateSubjectPeriodAllocations || (() => {})}
+            assignments={assignments}
+            periodSettings={periodSettings}
+            teachers={teachers}
+            teacherAssignments={teacherAssignments}
+            onUpdateTeacherAssignments={onUpdateTeacherAssignments}
+            schoolName={schoolName}
+            schoolInfo={schoolInfo}
+            onOpenProgressionReport={(className, stream) =>
+              handleManageStreamSubjects(className, stream, 'progression')
+            }
+            onOpenTeacherProgressionReport={() =>
+              handleManageStreamSubjects('All', 'All', 'teacher_progression')
+            }
+            onNavigateToGeneralTimetable={(className, stream) => {
+              setSelectedGeneralClass(className);
+              setSelectedGeneralStream(stream);
+              setActiveTab('generalEntry');
+            }}
+          />
+
+          {/* Timetable Print Layout & CSS Optimization Settings (Moved from School Identity) */}
           <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-xs space-y-4">
-            <h3 className="text-base font-bold text-slate-800 pb-2 border-b border-slate-200">
-              Class Stream Settings (Streams & Combinations)
-            </h3>
+            <div className="border-b border-slate-200 pb-3">
+              <h3 className="text-base font-bold text-[#1f4d8b] flex items-center gap-2 uppercase tracking-wide">
+                <Printer className="w-5 h-5 text-blue-600" />
+                Timetable Print Layout & CSS Optimization Settings
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Customize print page orientation, page margins, and print-optimized CSS classes for clean A4 printing without cutting off periods.
+              </p>
+            </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div>
-                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Class</label>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Print Page Orientation</label>
                 <select
-                  value={newStreamClass}
-                  onChange={e => setNewStreamClass(e.target.value)}
-                  className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
+                  value={printOrientation}
+                  onChange={(e) => setPrintOrientation(e.target.value as any)}
+                  className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg cursor-pointer"
                 >
-                  {DEFAULT_CLASSES.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
+                  <option value="landscape">Landscape (Recommended for Timetables)</option>
+                  <option value="portrait">Portrait</option>
                 </select>
               </div>
 
               <div>
-                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Level</label>
+                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Custom Page Margin</label>
                 <select
-                  value={newStreamLevel}
-                  onChange={e => {
-                    const lvl = e.target.value as 'CSEE' | 'ACSEE';
-                    setNewStreamLevel(lvl);
-                    if (lvl === 'ACSEE') {
-                      setNewStreamNames('PCM, PCB, CBG, HGE');
-                    } else {
-                      setNewStreamNames('STREAM A, STREAM B');
-                    }
-                  }}
-                  className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white"
+                  value={printMargin}
+                  onChange={(e) => setPrintMargin(e.target.value)}
+                  className="w-full px-3 py-2 text-xs font-bold bg-slate-50 border border-slate-300 rounded-lg cursor-pointer"
                 >
-                  <option value="CSEE">CSEE (Ordinary Level)</option>
-                  <option value="ACSEE">ACSEE (Advanced Level)</option>
+                  <option value="4mm">4mm (Ultra Compact)</option>
+                  <option value="6mm">6mm (Standard)</option>
+                  <option value="10mm">10mm (Balanced)</option>
+                  <option value="15mm">15mm (Spacious)</option>
                 </select>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Select/Add Streams</label>
-                <select
-                  onChange={e => {
-                    const selected = e.target.value;
-                    if (selected && selected !== 'Custom') {
-                      setNewStreamNames(selected);
-                    }
-                  }}
-                  className="w-full px-3 py-2 text-xs font-semibold border border-slate-300 rounded-lg bg-white mb-2"
-                >
-                  <option value="">-- Choose Preset --</option>
-                  <option value="STREAM A, STREAM B">STREAM A, STREAM B</option>
-                  <option value="STREAM A, STREAM B, STREAM C">STREAM A, STREAM B, STREAM C</option>
-                  <option value="PCM, PCB, CBG, HGE">PCM, PCB, CBG, HGE</option>
-                  <option value="Custom">Custom (Manual Entry)</option>
-                </select>
-                <input
-                  type="text"
-                  value={newStreamNames}
-                  onChange={e => setNewStreamNames(e.target.value)}
-                  placeholder="e.g. STREAM A, STREAM B"
-                  className="w-full px-3 py-2 text-xs border border-slate-300 rounded-lg"
-                />
+              <div className="flex items-center pt-5">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={printOptimizedCss}
+                    onChange={(e) => setPrintOptimizedCss(e.target.checked)}
+                    className="w-4 h-4 rounded text-blue-600 border-slate-300 focus:ring-blue-500"
+                  />
+                  <span className="text-xs font-bold text-slate-700">Enable Print-Optimized CSS & Crisp Borders</span>
+                </label>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex justify-end pt-2">
               <button
                 type="button"
-                onClick={() => {
-                  const streamList = newStreamNames
-                    .split(',')
-                    .map(s => s.trim().toUpperCase())
-                    .filter(Boolean);
-
-                  if (!streamList.length) {
-                    return;
-                  }
-
-                  const existingIndex = streamSettings.findIndex(s => s.className === newStreamClass);
-                  let updated: StreamSetting[];
-                  if (existingIndex > -1) {
-                    const copy = [...streamSettings];
-                    copy[existingIndex] = {
-                      ...copy[existingIndex],
-                      level: newStreamLevel,
-                      streams: streamList
-                    };
-                    updated = copy;
-                  } else {
-                    updated = [
-                      ...streamSettings,
-                      {
-                        id: Date.now(),
-                        className: newStreamClass,
-                        level: newStreamLevel,
-                        streams: streamList
-                      }
-                    ];
-                  }
-                  onUpdateStreamSettings(updated);
-                  setNewStreamNames('');
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs cursor-pointer"
+                onClick={handleSavePrintSettings}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 cursor-pointer shadow-xs"
               >
-                Hifadhi Mikondo (Save Streams)
+                <Save className="w-3.5 h-3.5" />
+                <span>Save Print Preferences</span>
               </button>
-
-              {streamSettings.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onUpdateStreamSettings([])}
-                  className="px-3 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                  <span>Futa Mikondo Yote (Anza Upya)</span>
-                </button>
-              )}
-            </div>
-
-            {/* Active Class Streams with Delete buttons */}
-            <div className="pt-4 border-t border-slate-200 space-y-3">
-              <h4 className="text-xs font-black text-slate-700 uppercase tracking-wider">
-                Orodha ya Madarasa na Mikondo Yaliyopo (Active Class Streams & Combinations):
-              </h4>
-              {streamSettings.length === 0 ? (
-                <div className="p-6 text-center bg-slate-50 border border-dashed border-slate-200 rounded-xl text-xs text-slate-500">
-                  Hakuna mikondo au madarasa yaliyosajiliwa. Tumia fomu ya hapo juu kuongeza darasa na mikondo unayotaka kusanidi.
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  {streamSettings.map(ss => (
-                    <div key={ss.className} className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
-                      <div className="flex items-center justify-between">
-                        <span className="font-black text-sm text-slate-900">{ss.className}</span>
-                        <div className="flex items-center gap-2">
-                          <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-blue-100 text-blue-800">
-                            {ss.streams.length} Mikondo
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              const updated = streamSettings.filter(setting => setting.className !== ss.className);
-                              onUpdateStreamSettings(updated);
-                            }}
-                            className="px-2 py-0.5 text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded border border-rose-200 transition-colors cursor-pointer flex items-center gap-1"
-                            title={`Futa mipangilio ya darasa la ${ss.className}`}
-                          >
-                            <Trash2 className="w-2.5 h-2.5" />
-                            <span>Futa Darasa</span>
-                          </button>
-                        </div>
-                      </div>
-                      <div className="flex flex-wrap gap-1.5">
-                        {ss.streams.map(st => (
-                          <span
-                            key={st}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold bg-white text-slate-800 border border-slate-200 shadow-2xs group"
-                          >
-                            <span>{st}</span>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const updated = streamSettings.map(setting => {
-                                  if (setting.className === ss.className) {
-                                    return {
-                                      ...setting,
-                                      streams: setting.streams.filter(x => x !== st)
-                                    };
-                                  }
-                                  return setting;
-                                }).filter(setting => setting.streams.length > 0);
-                                onUpdateStreamSettings(updated);
-                              }}
-                              className="text-slate-400 hover:text-rose-600 transition-colors cursor-pointer p-0.5 rounded"
-                              title={`Futa mkondo wa ${st}`}
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
             </div>
           </div>
         </div>
@@ -2848,6 +3417,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           teachers={teachers}
           periodSettings={periodSettings}
           streamSettings={streamSettings}
+          subjectPeriodAllocations={subjectPeriodAllocations}
           schoolName={schoolName}
           onUpdateAssignments={onUpdateAssignments}
           onEditSlot={slot => setEditingSlot(slot)}
@@ -2893,13 +3463,27 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       )}
 
       {/* ======================================================== */}
-      {/* 8. SUBJECT PERIOD ALLOCATION TAB                        */}
+      {/* 8. SUBJECT PERIOD ALLOCATION & PROGRESSION REPORT TAB   */}
       {/* ======================================================== */}
       {activeTab === 'allocations' && (
         <SubjectPeriodAllocationTab
           allocations={subjectPeriodAllocations}
           streamSettings={streamSettings}
+          assignments={assignments}
+          periodSettings={periodSettings}
+          teachers={teachers}
+          teacherAssignments={teacherAssignments}
+          schoolName={schoolName}
+          schoolInfo={schoolInfo}
+          initialClass={allocInitialClass}
+          initialStream={allocInitialStream}
+          initialSubView={allocInitialSubView}
           onUpdateAllocations={onUpdateSubjectPeriodAllocations || (() => {})}
+          onNavigateToGeneralTimetable={(cls, st) => {
+            setSelectedGeneralClass(cls);
+            setSelectedGeneralStream(st);
+            setActiveTab('general');
+          }}
         />
       )}
 
@@ -2928,15 +3512,18 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
       )}
 
       {/* Manual Slot Edit Modal */}
-      {editingSlot && (
-        <EditSlotModal
-          slot={editingSlot}
-          teachers={teachers}
-          onSave={handleSaveSlot}
-          onDelete={handleDeleteSlot}
-          onClose={() => setEditingSlot(null)}
-        />
-      )}
+        {editingSlot && (
+          <EditSlotModal
+            slot={editingSlot}
+            teachers={teachers}
+            periodSettings={periodSettings}
+            institutionalPolicy={institutionalPolicy}
+            assignments={assignments}
+            onSave={handleSaveSlot}
+            onDelete={handleDeleteSlot}
+            onClose={() => setEditingSlot(null)}
+          />
+        )}
 
       {/* Schedule Extra-Curricular Period Modal (Editable Times) */}
       {extraCurricularModalOpen && (
@@ -2965,10 +3552,193 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           teachers={teachers}
           periodSettings={periodSettings}
           streamSettings={streamSettings}
+          subjectPeriodAllocations={subjectPeriodAllocations}
           schoolName={schoolName}
           onUpdateAssignments={onUpdateAssignments}
           onEditSlot={slot => setEditingSlot(slot)}
         />
+      )}
+
+      {/* Conflict List Modal (Orodha ya Migongano & Kurekebisha Haraka) */}
+      {conflictListModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-3xl w-full max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+            {/* Header */}
+            <div className="p-4 sm:p-5 bg-gradient-to-r from-rose-700 via-rose-600 to-red-700 text-white flex items-center justify-between shrink-0 shadow-sm">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-white/15 backdrop-blur-xs flex items-center justify-center text-white border border-white/20">
+                  <AlertTriangle className="w-5 h-5 text-amber-200 animate-pulse" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base sm:text-lg font-black tracking-tight">
+                      Orodha ya Migongano ya Ratiba
+                    </h3>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/20 border border-white/30 text-white uppercase tracking-wider">
+                      {totalConflicts} {totalConflicts === 1 ? 'Mgongano' : 'Migongano'}
+                    </span>
+                  </div>
+                  <p className="text-xs text-rose-100 font-medium mt-0.5">
+                    Tazama vipindi vinavyogongana na ubofye &quot;Rekebisha Sasa&quot; ili kubadilisha mwalimu, somo au muda.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConflictListModalOpen(false)}
+                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer"
+                title="Funga"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Quick Actions Bar */}
+            <div className="px-5 py-2.5 bg-rose-50/80 border-b border-rose-100 flex items-center justify-between gap-3 text-xs flex-wrap">
+              <span className="text-rose-900 font-semibold flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5 text-rose-600" />
+                Bofya <strong>Rekebisha Sasa</strong> kufungua dirisha la kubadili kipindi, au tumia utatuzi wa kiotomatiki.
+              </span>
+              {totalConflicts > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    handleResolveConflicts();
+                    setConflictListModalOpen(false);
+                  }}
+                  className="px-3 py-1 bg-white hover:bg-rose-100/70 text-rose-800 border border-rose-300 rounded-lg font-bold text-xs flex items-center gap-1 cursor-pointer transition shadow-2xs"
+                >
+                  <RefreshCw className="w-3 h-3 text-rose-600" />
+                  <span>Tatua Kiotomatiki Zote</span>
+                </button>
+              )}
+            </div>
+
+            {/* Content List */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-3 flex-1 bg-slate-50/50">
+              {totalConflicts === 0 ? (
+                <div className="py-12 text-center space-y-3 bg-white rounded-xl border border-slate-200">
+                  <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 mx-auto flex items-center justify-center">
+                    <CheckCircle className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-base font-black text-slate-800">
+                    Hongera! Hakuna Mgongano Wowote
+                  </h4>
+                  <p className="text-xs text-slate-500 max-w-md mx-auto">
+                    Ratiba haina mgongano wowote wa walimu au madarasa kwa sasa. Vipindi vyote vimepangwa kulingana na sheria za shule.
+                  </p>
+                </div>
+              ) : (
+                Object.entries(conflicts).map(([asgId, conflictInfo], idx) => {
+                  const asg = assignments.find(a => a && String(a.id) === String(asgId));
+                  if (!asg) return null;
+                  const teacher = asg.teacherId ? teachers.find(t => t.id === asg.teacherId) : undefined;
+                  const typeLabel = conflictInfo.type === 'TEACHER_DOUBLE_BOOKED'
+                    ? 'Mgongano wa Mwalimu'
+                    : conflictInfo.type === 'CLASS_COLLISION'
+                    ? 'Mgongano wa Darasa'
+                    : 'Mgongano wa Chumba';
+
+                  return (
+                    <div
+                      key={asgId || idx}
+                      className="bg-white rounded-xl border-2 border-rose-200 p-4 shadow-2xs hover:shadow-sm transition space-y-3"
+                    >
+                      {/* Top Badges & Tags */}
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+                        <div className="flex flex-wrap items-center gap-1.5 text-xs">
+                          <span className="px-2 py-0.5 rounded-md font-black bg-rose-600 text-white text-[10px] uppercase tracking-wide flex items-center gap-1">
+                            <AlertTriangle className="w-3 h-3" />
+                            {typeLabel}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md font-bold bg-slate-100 text-slate-800 text-[11px]">
+                            📅 {asg.day}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md font-bold bg-blue-50 text-blue-800 border border-blue-200 text-[11px]">
+                            ⏰ {asg.period || asg.periodName || 'Kipindi'}
+                          </span>
+                          <span className="px-2 py-0.5 rounded-md font-extrabold bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px]">
+                            🏫 {asg.className} ({asg.stream})
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => handleQuickFixConflict(asg.id)}
+                            className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white text-xs font-black rounded-lg flex items-center gap-1.5 transition shadow-xs cursor-pointer active:scale-95"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                            <span>🛠️ Rekebisha Sasa</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (window.confirm(`Futa kipindi cha ${asg.subject} (${asg.className} ${asg.stream}) ili kuondoa mgongano huu?`)) {
+                                onUpdateAssignments(assignments.filter(a => a && a.id !== asg.id));
+                              }
+                            }}
+                            className="px-2.5 py-1.5 bg-slate-100 hover:bg-red-50 text-slate-600 hover:text-red-700 text-xs font-bold rounded-lg transition border border-slate-200 cursor-pointer"
+                            title="Futa kipindi hiki"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Details & Explanation */}
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs bg-slate-50/70 p-2.5 rounded-lg border border-slate-100">
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Somo</span>
+                          <strong className="text-slate-800 font-extrabold">{asg.subject}</strong>
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Mwalimu Aliye Pangwa</span>
+                          <span className="font-bold text-blue-900">
+                            {teacher ? `${teacher.name} (${teacher.initial})` : 'Hakuna Mwalimu'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Chumba / Mchepuo</span>
+                          <span className="font-medium text-slate-600">
+                            {asg.isParallelElective ? `🔀 ${asg.parallelElectiveTrack || 'Mchepuo'}` : (asg.room || 'Chumba cha Kawaida')}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Conflict Alert Banner */}
+                      <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-lg space-y-1">
+                        <p className="text-xs font-bold text-rose-950 flex items-start gap-1.5">
+                          <AlertTriangle className="w-3.5 h-3.5 text-rose-600 shrink-0 mt-0.5" />
+                          <span>{conflictInfo.message}</span>
+                        </p>
+                        {conflictInfo.recommendation && (
+                          <p className="text-[11px] text-rose-800 font-medium pl-5">
+                            💡 <strong>Mapendekezo:</strong> {conflictInfo.recommendation}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="p-3.5 sm:p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 shrink-0">
+              <span className="text-xs text-slate-500 font-medium">
+                Migongano inapunguza ufanisi wa ratiba na kusababisha walimu kutoingia darasani.
+              </span>
+              <button
+                type="button"
+                onClick={() => setConflictListModalOpen(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition cursor-pointer shadow-2xs"
+              >
+                Funga Dirisha
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* AI Timetable Assistant Modal */}
@@ -3126,6 +3896,12 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           </div>
         </div>
       )}
+      {/* WhatsApp Share Modal */}
+      <WhatsAppShareModal
+        isOpen={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
+        documentTitle={whatsAppDocTitle}
+      />
     </div>
   );
 };

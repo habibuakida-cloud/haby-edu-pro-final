@@ -16,7 +16,7 @@ import {
   Sparkles
 } from 'lucide-react';
 import { Teacher, TeacherAssignment, StreamSetting } from '../../types';
-import { SUBJECT_LIST, NURSERY_SUBJECTS, PRIMARY_SUBJECTS, SECONDARY_SUBJECTS } from '../../constants/defaults';
+import { getRegisteredSubjectsForTeacher } from '../../lib/timetableService';
 
 interface TeacherAssignmentsTabProps {
   teachers: Teacher[];
@@ -51,15 +51,8 @@ export const TeacherAssignmentsTab: React.FC<TeacherAssignmentsTabProps> = ({
   // Selected teacher details
   const currentTeacher = teachers.find(t => t.id === Number(selectedTeacherId)) || teachers[0];
 
-  // Subject options for current level & teacher
-  const teacherSubjects = currentTeacher?.subjects || [];
-  const levelSubjects = selectedLevel === 'NURSERY' 
-    ? NURSERY_SUBJECTS 
-    : selectedLevel === 'PRIMARY' 
-    ? PRIMARY_SUBJECTS 
-    : SECONDARY_SUBJECTS;
-  // Merge teacher's preferred subjects first, then all level subjects
-  const availableSubjectOptions = Array.from(new Set([...teacherSubjects, ...levelSubjects]));
+  // Strictly use ONLY the teacher's registered subjects
+  const availableSubjectOptions = getRegisteredSubjectsForTeacher(currentTeacher);
 
   // Streams filtered by the selected level for easy selection
   const relevantStreams = streamSettings
@@ -106,6 +99,7 @@ export const TeacherAssignmentsTab: React.FC<TeacherAssignmentsTabProps> = ({
 
     const next = [...localAssignments, newAssignment];
     setLocalAssignments(next);
+    onUpdateTeacherAssignments(next);
     setSelectedStreams([]);
     setSelectedSubject('');
     setWizardStep(3); // Keep on subject step to assign the next subject for this teacher!
@@ -135,14 +129,19 @@ export const TeacherAssignmentsTab: React.FC<TeacherAssignmentsTabProps> = ({
       streams: editStreams
     };
 
-    setLocalAssignments(prev => prev.map(a => a.id === editingAssignment.id ? updated : a));
+    const next = localAssignments.map(a => a.id === editingAssignment.id ? updated : a);
+    setLocalAssignments(next);
+    onUpdateTeacherAssignments(next);
     setEditingAssignment(null);
+    setSavedToast(true);
+    setTimeout(() => setSavedToast(false), 3500);
   };
 
   const handleDeleteAssignment = (id: string) => {
     if (window.confirm("Are you sure you want to remove this teacher assignment?")) {
       const next = localAssignments.filter(a => a.id !== id);
       setLocalAssignments(next);
+      onUpdateTeacherAssignments(next);
     }
   };
 
@@ -335,26 +334,32 @@ export const TeacherAssignmentsTab: React.FC<TeacherAssignmentsTabProps> = ({
                 Select a single subject to allocate to streams. You can repeat this step for additional subjects.
               </p>
 
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-56 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
-                {availableSubjectOptions.map(subj => {
-                  const isSelected = selectedSubject === subj;
-                  return (
-                    <button
-                      key={subj}
-                      type="button"
-                      onClick={() => setSelectedSubject(subj)}
-                      className={`p-2.5 rounded-lg text-xs font-bold text-left transition flex items-center justify-between cursor-pointer ${
-                        isSelected 
-                          ? 'bg-blue-600 text-white shadow-xs' 
-                          : 'bg-white text-slate-800 border border-slate-200 hover:border-slate-300'
-                      }`}
-                    >
-                      <span className="truncate">{subj}</span>
-                      {isSelected && <Check className="w-3.5 h-3.5 text-white shrink-0 ml-1" />}
-                    </button>
-                  );
-                })}
-              </div>
+              {availableSubjectOptions.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 max-h-56 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
+                  {availableSubjectOptions.map(subj => {
+                    const isSelected = selectedSubject === subj;
+                    return (
+                      <button
+                        key={subj}
+                        type="button"
+                        onClick={() => setSelectedSubject(subj)}
+                        className={`p-2.5 rounded-lg text-xs font-bold text-left transition flex items-center justify-between cursor-pointer ${
+                          isSelected 
+                            ? 'bg-blue-600 text-white shadow-xs' 
+                            : 'bg-white text-slate-800 border border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <span className="truncate">{subj}</span>
+                        {isSelected && <Check className="w-3.5 h-3.5 text-white shrink-0 ml-1" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-800">
+                  ⚠️ Mwalimu huyu ({currentTeacher?.name}) hajasajiliwa kufundisha somo lolote. Tafadhali msajilie masomo kwanza kwenye ukurasa wa Walimu (Teachers).
+                </div>
+              )}
             </div>
 
             <div className="flex justify-between pt-2">
@@ -586,24 +591,63 @@ export const TeacherAssignmentsTab: React.FC<TeacherAssignmentsTabProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Subject</label>
-                  <input
-                    type="text"
+                  <label className="text-xs font-bold text-slate-700 block mb-1">Registered Subject</label>
+                  <select
                     required
                     value={editSubject}
                     onChange={(e) => setEditSubject(e.target.value)}
                     className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-xl text-xs font-bold text-slate-800"
-                    placeholder="Subject Name"
-                  />
+                  >
+                    <option value="">-- Chagua Somo Alilosajiliwa --</option>
+                    {getRegisteredSubjectsForTeacher(teachers.find(t => t.id === Number(editTeacherId))).map(subj => (
+                      <option key={subj} value={subj}>{subj}</option>
+                    ))}
+                  </select>
                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-slate-700 block mb-1">
-                  Assigned Streams ({editStreams.length} selected):
-                </label>
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-slate-700">
+                    Assigned Streams ({editStreams.length} selected — Futa ✕ au Ongeza +):
+                  </label>
+                  {editStreams.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setEditStreams([])}
+                      className="text-[11px] font-bold text-rose-600 hover:underline cursor-pointer"
+                    >
+                      Clear All
+                    </button>
+                  )}
+                </div>
+
+                {/* Current Streams Chips with Delete (X) */}
+                <div className="flex flex-wrap gap-1.5 p-2.5 bg-blue-50/60 border border-blue-200 rounded-xl min-h-[40px] items-center">
+                  {editStreams.length === 0 ? (
+                    <span className="text-[11px] text-slate-400 italic">Bado hujachagua mkondo. Chagua hapa chini (+).</span>
+                  ) : (
+                    editStreams.map((st, idx) => (
+                      <span
+                        key={`${st}_${idx}`}
+                        className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-bold bg-white text-blue-900 border border-blue-300 shadow-2xs"
+                      >
+                        <span>{st}</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditStreams(prev => prev.filter((_, i) => i !== idx))}
+                          className="text-blue-700 hover:text-rose-600 rounded-full p-0.5 cursor-pointer"
+                          title={`Futa ${st}`}
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </span>
+                    ))
+                  )}
+                </div>
+
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 max-h-48 overflow-y-auto p-2 bg-slate-50 rounded-xl border border-slate-200">
-                  {allAvailableStreamOptions.map(tag => {
+                  {Array.from(new Set([...editStreams, ...allAvailableStreamOptions])).map(tag => {
                     const checked = editStreams.includes(tag);
                     return (
                       <button

@@ -97,10 +97,11 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
       selectedTerm,
       currentUser?.fullName || 'Teacher',
       schoolInfo.schoolNumber || 'DEMO_SCHOOL',
-      periodsPerWeek
+      periodsPerWeek,
+      language
     );
     setCurrentScheme(generated);
-    showToast(`Generated complete 12-week Scheme of Work & Log Book for ${selectedSubject} (${curriculumType === 'NEW_CBC_2023' ? 'New CBC 2023' : 'Old Curriculum'})!`);
+    showToast(`📋 Imefungua Azimio Halisi la TET kwa ${selectedSubject} (${selectedClass} - ${selectedTerm})!`);
   };
 
   // AI-Powered Smart Scheme Generation
@@ -140,7 +141,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           assessmentMethods: item.assessmentMethods || 'Assessment',
           references: item.references || `TIE ${selectedSubject} for ${selectedClass}`,
           periodsCount: periodsPerWeek,
-          remarks: item.remarks || 'Covered as scheduled'
+          remarks: item.remarks || (language === 'Kiswahili' ? 'Imefundishwa kama ilivyopangwa' : 'Covered as scheduled')
         }));
 
         const logBookEntries: TeachingLogBookEntry[] = (aiData.logBookEntries || []).map((log: any, idx: number) => ({
@@ -149,9 +150,9 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           date: log.date || `2026-0${Math.min(1 + Math.floor(idx / 4), 4)}-${String(12 + (idx % 4) * 7).padStart(2, '0')}`,
           className: selectedClass,
           stream: selectedStream || 'Stream A',
-          periodTime: log.periodTime || 'Period 2 & 3 (08:40 - 10:00)',
+          periodTime: log.periodTime || (language === 'Kiswahili' ? 'Kipindi cha 2 & 3 (08:40 - 10:00)' : 'Period 2 & 3 (08:40 - 10:00)'),
           subTopicTaught: log.subTopicTaught || items[idx]?.subTopicOrSpecificCompetence || 'Subtopic',
-          workCoveredSummary: log.workCoveredSummary || `Delivered lesson on ${selectedSubject}.`,
+          workCoveredSummary: log.workCoveredSummary || (language === 'Kiswahili' ? `Kipindi kuhusu ${selectedSubject} kimekamilika kwa ufanisi.` : `Delivered lesson on ${selectedSubject}.`),
           studentsPresent: log.studentsPresent || 43,
           studentsTotal: log.studentsTotal || 45,
           comprehensionEvaluation: log.comprehensionEvaluation || 'GOOD',
@@ -170,17 +171,17 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           term: selectedTerm,
           periodsPerWeek,
           totalWeeks: items.length,
-          department: aiData.department || 'Science & Mathematics',
-          competenceSummary: aiData.competenceSummary || `AI Generated 12-week Scheme of Work for ${selectedSubject}`,
+          department: aiData.department || (language === 'Kiswahili' ? 'Masomo ya Kiakademia' : 'Academic Department'),
+          competenceSummary: aiData.competenceSummary || `Azimio la Kazi la ${selectedSubject} (${selectedClass})`,
           items,
           logBookEntries,
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString()
         });
 
-        showToast(`✨ Gemini AI generated complete Scheme of Work & Log Book for ${selectedSubject}!`);
+        showToast(`✨ Gemini AI: Imekamilisha Azimio Halisi na Kumbukumbu za Kufundisha kwa ${selectedSubject}!`);
       } else {
-        // Fallback to local smart generator
+        // Fallback to local authentic generator
         handleGenerate();
       }
     } catch (err) {
@@ -398,20 +399,39 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
           {/* Syllabus Selector */}
           <div className="col-span-2">
-            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Select Syllabus (Auto-fill)</label>
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Mtaala wa TET / Syllabus (Auto-fill)</label>
             <select
               onChange={e => {
-                const template = TANZANIA_SCHEMES_KNOWLEDGE_BASE[e.target.value];
-                if (template) {
-                  setSelectedSubject(template.subject);
-                  setTopics(template.weeks.map(w => (curriculumType === 'NEW_CBC_2023' ? w.cbc.mainCompetence : w.old.mainTopic)).join(', '));
-                  showToast(`Auto-filled topics for ${template.subject}`);
+                const sub = e.target.value;
+                if (sub) {
+                  const targetLang = (sub.toLowerCase().includes('kiswahili') || sub.toLowerCase().includes('hisabati')) ? 'Kiswahili' : language;
+                  setSelectedSubject(sub);
+                  if (sub.toLowerCase().includes('kiswahili')) {
+                    setLanguage('Kiswahili');
+                  }
+                  const generated = generateAutoSchemeOfWork(
+                    sub,
+                    selectedClass,
+                    selectedStream,
+                    curriculumType,
+                    academicYear,
+                    selectedTerm,
+                    currentUser?.fullName || 'Teacher',
+                    schoolInfo.schoolNumber || 'DEMO_SCHOOL',
+                    periodsPerWeek,
+                    targetLang
+                  );
+                  setCurrentScheme(generated);
+                  setTopics(generated.items.map(it => it.mainTopicOrCompetence).slice(0, 4).join(', '));
+                  showToast(`📋 Imepakia Mtaala Rasmi wa TET kwa ${sub} (${selectedClass})!`);
                 }
               }}
               className="w-full px-2.5 py-1.5 text-xs font-semibold border border-blue-300 rounded-xl bg-blue-50 focus:bg-white"
             >
-              <option value="">-- Choose Syllabus --</option>
-              {Object.keys(TANZANIA_SCHEMES_KNOWLEDGE_BASE).map(s => <option key={s} value={s}>{s} Syllabus</option>)}
+              <option value="">-- Chagua Mtaala wa TET / Choose Syllabus --</option>
+              {['Basic Mathematics', 'Kiswahili', 'English Language', 'Biology', 'Chemistry', 'Physics', 'Geography', 'History', 'Civics', 'Commerce', 'Bookkeeping', 'Science & Technology', 'Social Studies'].map(s => (
+                <option key={s} value={s}>{s} (TET Official)</option>
+              ))}
             </select>
           </div>
           {/* Subject */}
@@ -419,7 +439,13 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
             <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Subject</label>
             <select
               value={selectedSubject}
-              onChange={e => setSelectedSubject(e.target.value)}
+              onChange={e => {
+                const newSub = e.target.value;
+                setSelectedSubject(newSub);
+                if (newSub.toLowerCase().includes('kiswahili')) {
+                  setLanguage('Kiswahili');
+                }
+              }}
               className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 focus:bg-white"
             >
               <optgroup label="Secondary Subjects">

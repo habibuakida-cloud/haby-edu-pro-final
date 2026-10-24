@@ -109,31 +109,11 @@ export const NURSERY_SUBJECTS = NURSERY_SUBJECTS_LIST;
 export const LOWER_PRIMARY_SUBJECTS = LOWER_PRIMARY_SUBJECTS_LIST;
 export const UPPER_PRIMARY_SUBJECTS = UPPER_PRIMARY_SUBJECTS_LIST;
 export const PRIMARY_SUBJECTS = PRIMARY_SUBJECTS_LIST;
-export const SECONDARY_SUBJECTS = [
-  'English Language',
-  'Kiswahili',
-  'Basic Mathematics',
-  'Physics',
-  'Chemistry',
-  'Biology',
-  'Civics',
-  'Geography',
-  'History',
-  'Commerce',
-  'Book Keeping',
-  'Literature in English',
-  'Agriculture',
-  'Computer Studies',
-  'Fine Art',
-  'Physical Education',
-  'French',
-  'Arabic',
-  'Bible Knowledge',
-  'Islamic Knowledge',
-  'Mikondo'
-];
+import { SubjectRegistry } from './SubjectRegistry';
 
-import { SUBJECT_LIST } from './nectaSubjects.js';
+export const SECONDARY_SUBJECTS = SubjectRegistry.getAllNames();
+
+import { SUBJECT_LIST } from './nectaSubjects.ts';
 export { SUBJECT_LIST };
 export const SUBJECT_NAMES_LIST = SUBJECT_LIST.map(s => s.name);
 
@@ -546,7 +526,8 @@ export const DEFAULT_INSTITUTIONAL_POLICY: InstitutionalPolicy = {
   rules: {
     noTeacherTwoClassesSameTime: true,
     noClassTwoTeachersSameTime: true,
-    noSameSubjectTwiceSameDay: true
+    noSameSubjectTwiceSameDay: true,
+    allowParallelElectiveSubjects: true
   }
 };
 
@@ -584,8 +565,8 @@ export const DEFAULT_TEACHER_ASSIGNMENTS: TeacherAssignment[] = [
   { id: 'ta_4', teacherId: 104, teacherName: 'David Mwakipesile', level: 'SECONDARY', subjects: ['Geography', 'History'], streams: ['Form 1 - STREAM A', 'Form 1 - STREAM B', 'Form 2 - STREAM B'] },
   { id: 'ta_5', teacherId: 105, teacherName: 'Emmanuel Tarimo', level: 'SECONDARY', subjects: ['Kiswahili', 'Civics'], streams: ['Form 1 - STREAM A', 'Form 2 - STREAM A', 'Form 3 - STREAM B'] },
   { id: 'ta_6', teacherId: 106, teacherName: 'Faraja Lyimo', level: 'SECONDARY', subjects: ['Computer Studies', 'Mathematics'], streams: ['Form 1 - STREAM A', 'Form 3 - STREAM A'] },
-  { id: 'ta_7', teacherId: 107, teacherName: 'Grace Muro', level: 'PRIMARY', subjects: ['English Language', 'Social Studies (Maarifa ya Jamii)'], streams: ['Standard 1 - STREAM A', 'Standard 1 - STREAM B', 'Standard 2 - STREAM A'] },
-  { id: 'ta_8', teacherId: 108, teacherName: 'Hamisi Juma', level: 'NURSERY', subjects: ['Sanaa, Muziki na Michezo ya Awali', 'Afya na Mazingira ya Mtoto'], streams: ['Baby Class - STREAM A', 'Nursery - STREAM A'] }
+  { id: 'ta_7', teacherId: 107, teacherName: 'Grace Muro', level: 'SECONDARY', subjects: ['Commerce', 'Book Keeping'], streams: ['Form 1 - STREAM A', 'Form 2 - STREAM A', 'Form 3 - STREAM A'] },
+  { id: 'ta_8', teacherId: 108, teacherName: 'Hamisi Juma', level: 'SECONDARY', subjects: ['Physical Education', 'Sports and Games'], streams: ['Form 1 - STREAM A', 'Form 1 - STREAM B', 'Form 2 - STREAM A'] }
 ];
 
 export const INITIAL_EXAMINATION_RECORDS: ExaminationRecord[] = [

@@ -48,6 +48,7 @@ export type ActiveView =
   | 'dailytracker'
   | 'timetable'
   | 'invigilation'
+  | 'invigilation-calendar'
   | 'attendance'
   | 'discipline'
   | 'environment'
@@ -64,6 +65,11 @@ export type ActiveView =
   | 'laboratory'
   | 'examsettings'
   | 'attendance-scan'
+  | 'teacher-attendance'
+  | 'staff-payroll'
+  | 'biometric-report'
+  | 'student-progress'
+  | 'officialletters'
   | 'settings';
 
 export interface SubModuleRoute {
@@ -93,7 +99,10 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     badgeBg: 'bg-blue-100 text-blue-800 border-blue-200',
     subModules: [
       { id: 'students', label: 'Student Registration', description: 'Admission, profile, enrollment, nominal rolls & CSV import' },
-      { id: 'teachers', label: 'Teacher Management', description: 'Teacher registration, profiles, subjects & class assignments' }
+      { id: 'teachers', label: 'Teacher Management', description: 'Teacher registration, profiles, subjects & class assignments' },
+      { id: 'teacher-attendance', label: 'Teacher Attendance (Mahudhurio ya Walimu)', description: 'Daily staff presence tracking, check-in times, absence logs & Supabase sync', badge: 'NEW' },
+      { id: 'biometric-report', label: 'Biometric Report (Ripoti ya Vidole)', description: 'Aggregates daily arrival & departure times, highlighting late arrivals & early departures', badge: 'BIOMETRIC' },
+      { id: 'staff-payroll', label: 'Staff Payroll Management (Mishahara)', description: 'Monthly salary calculation from attendance, tax deductions, bonuses & PDF payslips', badge: 'PAYROLL' }
     ]
   },
 
@@ -132,7 +141,8 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
       { id: 'dailytracker', label: 'Daily Ticker', description: 'Real-time academic activity ticker & lesson log' },
       { id: 'reampapers', label: 'Ream Paper Records', description: 'Usimamizi wa ream papers zilizoletwa na wanafunzi', badge: 'REAMS' },
       { id: 'pastpapers', label: 'Past Paper Center', description: 'Download past papers, marking schemes & exam resources', badge: 'NEW' },
-      { id: 'nectaregs', label: 'NECTA Reg. Numbers Studio', description: 'Jenereta ya namba za usajili za NECTA zenye boda na mitindo maridadi', badge: 'NECTA' }
+      { id: 'nectaregs', label: 'NECTA Reg. Numbers Studio', description: 'Jenereta ya namba za usajili za NECTA zenye boda na mitindo maridadi', badge: 'NECTA' },
+      { id: 'student-progress', label: 'Student Progress & Improvement Tracker', description: 'Track student score progression from lowest marks up to big improvement (Form 1 to 4)', badge: 'PROGRESS' }
     ]
   },
 
@@ -145,7 +155,8 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     badgeBg: 'bg-indigo-100 text-indigo-800 border-indigo-200',
     subModules: [
       { id: 'timetable', label: 'Master Timetable', description: 'Conflict-free master class & teacher timetable' },
-      { id: 'invigilation', label: 'Invigilation Schedule', description: 'Exam supervision & invigilator duty roster' }
+      { id: 'invigilation', label: 'Invigilation Schedule', description: 'Exam supervision & invigilator duty roster' },
+      { id: 'invigilation-calendar', label: 'Invigilation Calendar (Kalenda ya Usimamizi)', description: 'Monthly calendar view of exam duties, halls & invigilators', badge: 'KALENDA' }
     ]
   },
 
@@ -159,6 +170,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     subModules: [
       { id: 'attendance', label: 'Smart Attendance', description: 'Daily class rollcall & automatic monthly parent reports', badge: 'Smart' },
       { id: 'discipline', label: 'Discipline Management', description: 'Student conduct, warnings, suspensions & offenses' },
+      { id: 'officialletters', label: 'Barua za Wito & Wazazi (Bulk Letters)', description: 'Andika barua moja, mfumo uweke jina la kila mwanafunzi wa darasa moja kwa moja', badge: 'MPYA' },
       { id: 'studentid', label: 'Student ID Generator', description: 'Generate & print student ID cards with QR codes' }
     ]
   },
@@ -189,6 +201,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     badgeBg: 'bg-emerald-100 text-emerald-800 border-emerald-200',
     subModules: [
       { id: 'finance', label: 'Fees Finance / School Finance', description: 'Fee collection, invoices, payments, student balances & receipts', badge: 'RESTORED' },
+      { id: 'staff-payroll', label: 'Staff Payroll Management (Mishahara)', description: 'Monthly staff salaries based on attendance, tax deductions, bonuses & PDF payslips', badge: 'PAYROLL' },
       { id: 'remedialanalyzer', label: 'Remedial Pay', description: 'Teacher remedial allowances, payment audits & rate calculations' }
     ]
   },
@@ -201,6 +214,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     iconColor: 'text-cyan-400',
     badgeBg: 'bg-cyan-100 text-cyan-800 border-cyan-200',
     subModules: [
+      { id: 'officialletters', label: 'Barua za Wito & Wazazi (Bulk Letters)', description: 'Andika barua moja na mfumo uzae barua yenye jina la kila mwanafunzi darasani', badge: 'BARUA' },
       { id: 'sms', label: 'SMS & Ujumbe wa Wazazi (Inbox)', description: 'Soma ujumbe wa wazazi (Inbox), tuma majibu, na matangazo ya SMS', badge: 'INBOX' },
       { id: 'parentportal', label: 'Parent Portal', description: 'Parent login to view live results, attendance & fee balances', badge: 'RESTORED' }
     ]

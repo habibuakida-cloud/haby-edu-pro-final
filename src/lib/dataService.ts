@@ -1,29 +1,82 @@
 import { DEFAULT_PRIMARY_SCHOOL_ID } from './dbClient';
+import {
+  saveSchoolDataToFirestore,
+  getSchoolDataFromFirestore,
+  subscribeToSchoolDataFirestore
+} from './firestoreService';
+
+function parseTimestampMs(record: any): number {
+  if (!record || typeof record !== 'object') return 0;
+  if (typeof record.updatedAtMs === 'number' && record.updatedAtMs > 0) {
+    return record.updatedAtMs;
+  }
+  const rawDate = record.updatedAt || record.updated_at;
+  if (rawDate) {
+    const t = new Date(rawDate).getTime();
+    if (!isNaN(t) && t > 0) return t;
+  }
+  return 0;
+}
 
 /**
- * Fetch school data record
+ * Fetch school data record from Cloud SQL immediately (with Firestore fallback if offline/empty)
  */
 export async function getSchoolData(schoolId: string) {
-  const response = await fetch(`/api/db/school-data?schoolId=${schoolId}`);
-  if (!response.ok) throw new Error('Failed to fetch school data');
-  return await response.json();
+  try {
+    const res = await fetch(`/api/db/school-data?schoolId=${encodeURIComponent(schoolId)}`, {
+      cache: 'no-store'
+    });
+    if (res.ok) {
+      const apiData = await res.json();
+      if (apiData && typeof apiData === 'object' && Object.keys(apiData).length > 0) {
+        return apiData;
+      }
+    }
+  } catch (_err) {
+    // Fallback to Firestore if backend API is temporarily unreachable
+  }
+
+  try {
+    const fsData = await getSchoolDataFromFirestore(schoolId);
+    if (fsData && typeof fsData === 'object' && Object.keys(fsData).length > 0) {
+      return fsData;
+    }
+  } catch (_fsErr) {}
+
+  return {};
 }
 
 /**
- * Subscribe to school data changes (fallback polling / no-op)
+ * Subscribe to real-time school data changes via Firestore
  */
-export function subscribeSchoolData(_schoolId: string, _callback: (data: any) => void) {
-  return () => {};
+export function subscribeSchoolData(schoolId: string, callback: (data: any) => void) {
+  return subscribeToSchoolDataFirestore(schoolId, callback);
 }
 
 /**
- * Save school data record
+ * Save school data record to Cloud SQL immediately and mirror to Firestore in background
  */
 export async function saveSchoolData(schoolId: string, payload: any) {
+  const stampedPayload = {
+    ...(payload || {}),
+    _explicitDelete: true,
+    _fullSnapshot: true,
+    updatedAtMs: typeof payload?.updatedAtMs === 'number' ? payload.updatedAtMs : Date.now(),
+    updated_at: new Date().toISOString()
+  };
+
+  // Mirror asynchronously to Firestore for real-time cross-device sync without blocking UI/Cloud SQL
+  saveSchoolDataToFirestore(schoolId, stampedPayload).catch(err => {
+    console.warn('Firestore school_data mirror warning:', err);
+  });
+
+  const bodyStr = JSON.stringify({ schoolId, payload: stampedPayload });
+  const useKeepAlive = Boolean(payload?._isUnload) && bodyStr.length < 50000;
   const response = await fetch('/api/db/school-data', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ schoolId, payload }),
+    body: bodyStr,
+    ...(useKeepAlive ? { keepalive: true } : {})
   });
   if (!response.ok) throw new Error('Failed to save school data');
   return await response.json();

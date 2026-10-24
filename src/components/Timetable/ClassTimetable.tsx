@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { TimetableAssignment, PeriodSetting, Teacher } from '../../types';
+import { TimetableAssignment, PeriodSetting, Teacher, SubjectPeriodAllocation } from '../../types';
 import { DAYS_OF_WEEK } from '../../constants/defaults';
 import { getSubjectColor, getSubjectShortName } from '../../utils/colors';
 import { 
@@ -12,10 +12,27 @@ import {
   Filter, 
   Utensils,
   Download,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Share2,
+  Lock,
+  BarChart3,
+  AlertTriangle,
+  XCircle,
+  Plus,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { exportTimetablePDF } from '../../utils/timetablePdfExport';
 import { exportClassTimetableExcel } from '../../utils/timetableExcelExport';
+import { WhatsAppShareModal } from '../common/WhatsAppShareModal';
+import { isSameClass } from '../../utils/reportCardUtils';
+import {
+  isSameStream,
+  isSamePeriod,
+  getConfiguredDays,
+  getPeriodsForDayFromSettings,
+  computeStreamSubjectProgression
+} from '../../lib/timetableService';
 
 interface ClassTimetableProps {
   className: string;
@@ -23,6 +40,8 @@ interface ClassTimetableProps {
   assignments?: TimetableAssignment[];
   periodSettings?: PeriodSetting[];
   teachers?: Teacher[];
+  subjectPeriodAllocations?: SubjectPeriodAllocation[];
+  onManageStreamSubjects?: (className: string, stream: string, mode?: 'progression' | 'register') => void;
 }
 
 export const ClassTimetable: React.FC<ClassTimetableProps> = ({
@@ -30,14 +49,30 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
   stream,
   assignments = [],
   periodSettings = [],
-  teachers = []
+  teachers = [],
+  subjectPeriodAllocations = [],
+  onManageStreamSubjects
 }) => {
   const [selectedDayTab, setSelectedDayTab] = useState<string>('All');
+  const [showWhatsAppModal, setShowWhatsAppModal] = useState(false);
+  const [showProgressionDetails, setShowProgressionDetails] = useState(false);
+
+  const streamProgression = useMemo(() => {
+    return computeStreamSubjectProgression(
+      className,
+      stream,
+      subjectPeriodAllocations,
+      assignments,
+      periodSettings,
+      teachers
+    );
+  }, [className, stream, subjectPeriodAllocations, assignments, periodSettings, teachers]);
 
   const classAssignments = useMemo(() => {
-    return (assignments || []).filter(
-      a => a && a.className === className && a.stream === stream
-    );
+    return (assignments || []).filter(a => {
+      if (!a || !a.subject || !a.className) return false;
+      return isSameClass(a.className, className) && isSameStream(a.stream, stream);
+    });
   }, [assignments, className, stream]);
 
   // Build teacher lookup map
@@ -72,79 +107,56 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
     { id: 11, day: 'All', name: 'Period 8', start: '14:20', end: '15:00' }
   ], []);
 
-  // Retrieve exact periods for a given day from General Timetable
+  const configuredDays = useMemo(() => getConfiguredDays(periodSettings), [periodSettings]);
+
+  // Retrieve exact periods for a given day from General Timetable (never copy another day's periods if unconfigured)
   const getPeriodsForDay = (day: string): PeriodSetting[] => {
-    const list = (periodSettings || []).filter(
-      p => p && (p.day === day || p.day === 'All')
-    );
-
+    const list = getPeriodsForDayFromSettings(day, periodSettings);
     if (list.length > 0) {
-      return [...list].sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+      return list;
     }
-
-    // Fallback to any configured periods
-    const anyConfigured = (periodSettings || []).filter(p => p && p.name);
-    if (anyConfigured.length > 0) {
-      const dayMap = new Map<string, PeriodSetting>();
-      anyConfigured.forEach(p => {
-        const trimmed = (p.name || '').trim();
-        if (trimmed && !dayMap.has(trimmed)) dayMap.set(trimmed, p);
-      });
-      return Array.from(dayMap.values()).sort((a, b) => timeToMinutes(a.start) - timeToMinutes(b.start));
+    if (!periodSettings || periodSettings.length === 0) {
+      return day.toLowerCase() === 'saturday' ? [] : DEFAULT_PERIODS;
     }
-
-    return DEFAULT_PERIODS;
+    return [];
   };
 
-  // Helper to determine if a period is a break or activity
-  const isBreakPeriod = (name: string): boolean => {
-    const lower = (name || '').toLowerCase();
-    return (
-      lower.includes('break') ||
-      lower.includes('lunch') ||
-      lower.includes('mapumziko') ||
-      lower.includes('chakula') ||
-      lower.includes('tea') ||
-      lower.includes('assembly') ||
-      lower.includes('baraza')
+  const isSpecialPeriod = (period: PeriodSetting): boolean => {
+    const name = (period.name || '').toLowerCase();
+    const isBreak = Boolean(period.isBreak) || name.includes('break') || name.includes('lunch') || name.includes('mapumziko') || name.includes('chakula') || name.includes('tea');
+    const isLockedActivity = (period.isLocked || period.locked) && (
+      name.includes('test') || name.includes('environmental') || name.includes('debate') || name.includes('michezo') || name.includes('baraza') || name.includes('assembly') || name.includes('religion') || name.includes('praising')
     );
+    return isBreak || isLockedActivity;
   };
 
-  // Find matching assignment for class on this day and slot
-  const findClassAssignmentForSlot = (day: string, period: PeriodSetting): TimetableAssignment | undefined => {
-    const targetName = (period.name || '').toLowerCase().trim();
-    const targetStart = (period.start || '').trim();
-
-    return classAssignments.find(a => {
-      if (!a || a.day !== day) return false;
-      const aName = (a.periodName || '').toLowerCase().trim();
-      const aRaw = (a.period || '').toLowerCase().trim();
-      const aNorm = (a.period ? a.period.split(' (')[0] : '').toLowerCase().trim();
-
-      if (aName && aName === targetName) return true;
-      if (aNorm && aNorm === targetName) return true;
-      if (aRaw === targetName) return true;
-      if (aRaw.startsWith(targetName) || targetName.startsWith(aRaw)) return true;
-      if (targetStart && aRaw.includes(targetStart)) return true;
-
-      return false;
+  // Find matching assignments for class on this day and slot (supports parallel elective subjects)
+  const findClassAssignmentsForSlot = (day: string, period: PeriodSetting): TimetableAssignment[] => {
+    const normDay = (day || '').trim().toLowerCase();
+    return classAssignments.filter(a => {
+      if (!a || (a.day || '').trim().toLowerCase() !== normDay) return false;
+      return isSamePeriod(a.period, a.periodName, period.name);
     });
   };
 
   // Daily lessons count
   const dailyWorkload = useMemo(() => {
     const summary: Record<string, number> = {};
-    DAYS_OF_WEEK.forEach(day => {
-      summary[day] = classAssignments.filter(a => a && a.day === day).length;
+    configuredDays.forEach(day => {
+      const normDay = day.toLowerCase();
+      summary[day] = classAssignments.filter(a => a && (a.day || '').trim().toLowerCase() === normDay).length;
     });
     return summary;
-  }, [classAssignments]);
+  }, [classAssignments, configuredDays]);
 
-  const totalClassLessons = classAssignments.length;
+  const totalClassLessons = classAssignments.filter(a =>
+    configuredDays.some(d => d.toLowerCase() === (a.day || '').trim().toLowerCase())
+  ).length;
 
-  const displayDays = selectedDayTab === 'All' 
-    ? DAYS_OF_WEEK 
-    : DAYS_OF_WEEK.filter(d => d === selectedDayTab);
+  const displayDays = (selectedDayTab === 'All'
+    ? configuredDays
+    : configuredDays.filter(d => d === selectedDayTab)
+  ).filter(day => getPeriodsForDay(day).length > 0);
 
   const handlePrint = () => {
     window.print();
@@ -215,6 +227,18 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => {
+              handleDownloadPdf();
+              setShowWhatsAppModal(true);
+            }}
+            className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition print:hidden cursor-pointer shadow-xs active:scale-95"
+            title="Download Timetable PDF and send via WhatsApp"
+          >
+            <Share2 className="w-3.5 h-3.5 text-white" />
+            <span className="hidden sm:inline">Send via WhatsApp</span>
+          </button>
+          <button
+            type="button"
             onClick={handleDownloadExcel}
             className="px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 transition print:hidden cursor-pointer shadow-xs active:scale-95"
             title="Pakua Ratiba ya Darasa kwenye Excel (.xlsx)"
@@ -234,6 +258,153 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
         </div>
       </div>
 
+      {/* Live Stream Subject & Period Progression Banner */}
+      <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 space-y-3 print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center shrink-0">
+              <BarChart3 className="w-4 h-4" />
+            </div>
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-black text-slate-900 uppercase">
+                  Kipimo cha Vipindi vya {className} ({stream})
+                </span>
+                {streamProgression.totalRequiredSubjects === 0 ? (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 border border-amber-300 text-[10px] font-black">
+                    Masomo ya Mkondo Hayajasajiliwa Bado
+                  </span>
+                ) : streamProgression.isFullyComplete ? (
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 text-[10px] font-black flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>100% Vipindi Vimeingizwa Sawa</span>
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 rounded-full bg-rose-100 text-rose-800 border border-rose-300 text-[10px] font-black flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3 text-rose-600" />
+                    <span>
+                      {streamProgression.overallPercentage}% Imekamilika ({streamProgression.totalEnteredRegisteredPeriods}/{streamProgression.totalRequiredPeriods} Vipindi)
+                    </span>
+                  </span>
+                )}
+              </div>
+              {streamProgression.totalRequiredSubjects > 0 ? (
+                <p className="text-[11px] text-slate-600 font-medium mt-0.5">
+                  Masomo Yaliyosajiliwa: <strong>{streamProgression.totalRequiredSubjects}</strong> •
+                  Sawa: <strong className="text-emerald-700">{streamProgression.exactMatchSubjectsCount}</strong> •
+                  Hayajaingizwa: <strong className="text-rose-600">{streamProgression.missingSubjects.length}</strong> •
+                  Vipindi Pungufu: <strong className="text-amber-700">{streamProgression.incompleteSubjects.length}</strong>
+                </p>
+              ) : (
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Sajili masomo na idadi ya vipindi vinavyotakiwa kusomwa na {className} ({stream}) ili mfumo utambue masomo ambayo hayajaingizwa na kutoa Progression Report.
+                </p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            {streamProgression.totalRequiredSubjects > 0 && (
+              <button
+                type="button"
+                onClick={() => setShowProgressionDetails(prev => !prev)}
+                className="px-3 py-1.5 bg-white hover:bg-slate-100 text-slate-800 border border-slate-300 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                {showProgressionDetails ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                <span>{showProgressionDetails ? 'Ficha Progression Report' : 'Onyesha Progression Report'}</span>
+              </button>
+            )}
+            {onManageStreamSubjects && (
+              <button
+                type="button"
+                onClick={() => onManageStreamSubjects(className, stream, 'register')}
+                className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-2xs"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>Sajili Masomo &amp; Vipindi vya {stream}</span>
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Quick Pills for Missing or Incomplete Subjects */}
+        {(streamProgression.missingSubjects.length > 0 || streamProgression.incompleteSubjects.length > 0) && (
+          <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-200/80">
+            {streamProgression.missingSubjects.map(m => (
+              <span
+                key={m.allocationId}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-rose-50 border border-rose-200 text-rose-800 text-[11px] font-bold"
+              >
+                <XCircle className="w-3 h-3 text-rose-600 shrink-0" />
+                <span>{m.subject}: <strong>Haijaingizwa (0/{m.requiredPeriods})</strong></span>
+              </span>
+            ))}
+            {streamProgression.incompleteSubjects.map(inc => (
+              <span
+                key={inc.allocationId}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-[11px] font-bold"
+              >
+                <AlertTriangle className="w-3 h-3 text-amber-600 shrink-0" />
+                <span>{inc.subject}: <strong>{inc.enteredPeriods}/{inc.requiredPeriods} (Bado {inc.remainingPeriods})</strong></span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Expandable Inline Progression Report Table */}
+        {showProgressionDetails && streamProgression.totalRequiredSubjects > 0 && (
+          <div className="pt-2 overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse bg-white rounded-xl overflow-hidden border border-slate-200">
+              <thead className="bg-slate-900 text-white uppercase text-[10px] font-black">
+                <tr>
+                  <th className="p-2.5">Somo</th>
+                  <th className="p-2.5">Mwalimu</th>
+                  <th className="p-2.5 text-center">Vinavyotakiwa</th>
+                  <th className="p-2.5 text-center">Vilivyoingizwa</th>
+                  <th className="p-2.5 text-center">Upungufu / Baki</th>
+                  <th className="p-2.5 text-center">Maendeleo</th>
+                  <th className="p-2.5 text-center">Hali</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {streamProgression.subjects.map(sub => (
+                  <tr key={sub.allocationId} className="hover:bg-slate-50">
+                    <td className="p-2.5 font-bold text-slate-900">{sub.subject}</td>
+                    <td className="p-2.5 text-slate-600">{sub.assignedTeachers.join(', ') || '—'}</td>
+                    <td className="p-2.5 text-center font-black text-slate-800">{sub.requiredPeriods}</td>
+                    <td className="p-2.5 text-center font-black text-blue-700">{sub.enteredPeriods}</td>
+                    <td className="p-2.5 text-center font-bold">
+                      {sub.status === 'COMPLETE' ? (
+                        <span className="text-emerald-600">0 (Sawa)</span>
+                      ) : sub.status === 'MISSING' || sub.status === 'INCOMPLETE' ? (
+                        <span className="text-rose-600">Bado {sub.remainingPeriods}</span>
+                      ) : (
+                        <span className="text-blue-600">Ziada +{sub.excessPeriods}</span>
+                      )}
+                    </td>
+                    <td className="p-2.5 text-center font-black">{sub.percentage}%</td>
+                    <td className="p-2.5 text-center">
+                      {sub.status === 'COMPLETE' && (
+                        <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 font-black text-[10px]">SAWA</span>
+                      )}
+                      {sub.status === 'MISSING' && (
+                        <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-800 font-black text-[10px]">HAIJAINGIZWA</span>
+                      )}
+                      {sub.status === 'INCOMPLETE' && (
+                        <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-black text-[10px]">PUNGUFU</span>
+                      )}
+                      {sub.status === 'EXCESS' && (
+                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-800 font-black text-[10px]">ZIADA</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
       {/* Day Filter Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-2 bg-slate-50 p-2 rounded-xl border border-slate-200 text-xs">
         <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto">
@@ -249,9 +420,9 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
                 : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
             }`}
           >
-            Siku Zote ({DAYS_OF_WEEK.length})
+            Siku Zote ({configuredDays.length})
           </button>
-          {DAYS_OF_WEEK.map(d => {
+          {configuredDays.map(d => {
             const isSelected = selectedDayTab === d;
             const count = dailyWorkload[d] || 0;
             return (
@@ -312,9 +483,11 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
                     gridTemplateColumns: `repeat(${dayPeriods.length}, minmax(115px, 1fr))`
                   }}
                 >
-                  {dayPeriods.map((period, pIdx) => {
-                    const isBreak = isBreakPeriod(period.name);
-                    const assignment = findClassAssignmentForSlot(day, period);
+                   {dayPeriods.map((period, pIdx) => {
+                    const isSpecial = isSpecialPeriod(period);
+                    const slotAssignments = findClassAssignmentsForSlot(day, period);
+                    const isMultiParallel = slotAssignments.length > 1;
+                    const assignment = slotAssignments[0];
                     const subColor = assignment ? getSubjectColor(assignment.subject) : null;
                     const teacherObj = assignment && assignment.teacherId !== undefined ? teacherMap.get(assignment.teacherId) : null;
                     const teacherDisplayName = (assignment as any)?.teacherName || teacherObj?.name || (teacherObj ? `Tr. ${teacherObj.initial}` : '');
@@ -323,8 +496,10 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
                       <div
                         key={`${day}-${period.name}-${pIdx}`}
                         className={`rounded-xl border flex flex-col transition-all overflow-hidden print:rounded-lg print:border-slate-800 ${
-                          isBreak
+                          isSpecial
                             ? 'bg-amber-50/70 border-amber-200 text-amber-900 print:bg-amber-50/40'
+                            : isMultiParallel
+                            ? 'bg-gradient-to-b from-emerald-50/40 to-teal-50/20 border-emerald-300 shadow-2xs'
                             : assignment
                             ? 'bg-white border-emerald-200 shadow-2xs print:shadow-none'
                             : 'bg-white/80 border-slate-200 border-dashed print:border-slate-400'
@@ -333,13 +508,16 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
                         {/* 1. TOP HEADER: MUDA NA JINA LA KIPINDI JUU KWA KILA SIKU */}
                         <div 
                           className={`p-2 text-center border-b ${
-                            isBreak
+                            isSpecial
                               ? 'bg-amber-100/70 border-amber-200 text-amber-900'
+                              : isMultiParallel
+                              ? 'bg-emerald-100/80 border-emerald-200 text-emerald-950'
                               : 'bg-slate-100/80 border-slate-200 text-slate-800'
                           }`}
                         >
-                          <div className="text-[11px] font-black uppercase tracking-tight truncate">
-                            {period.name}
+                          <div className="text-[11px] font-black uppercase tracking-tight truncate flex items-center justify-center gap-1">
+                            {isMultiParallel && <span className="text-[9px] text-emerald-700 font-extrabold">🔀</span>}
+                            <span>{period.name}</span>
                           </div>
                           {period.start && period.end ? (
                             <div className="text-[10px] font-mono font-bold text-emerald-800 bg-white/90 px-1.5 py-0.5 rounded border border-slate-200/60 mt-1 inline-flex items-center gap-1 shadow-2xs">
@@ -352,17 +530,67 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
                         </div>
 
                         {/* 2. BODY CONTENT: BREAK AU SOMO NA MWALIMU */}
-                        <div className="p-2.5 flex-1 flex flex-col justify-center text-center">
-                          {isBreak ? (
+                        <div className="p-2 sm:p-2.5 flex-1 flex flex-col justify-center text-center">
+                          {isSpecial ? (
                             <div className="py-2 text-amber-700 flex flex-col items-center justify-center">
                               {period.name.toLowerCase().includes('lunch') || period.name.toLowerCase().includes('chakula') ? (
                                 <Utensils className="w-4 h-4 mb-1 text-orange-600" />
+                              ) : period.name.toLowerCase().includes('test') || period.name.toLowerCase().includes('exam') ? (
+                                <Lock className="w-4 h-4 mb-1 text-blue-600" />
                               ) : (
                                 <Coffee className="w-4 h-4 mb-1 text-amber-600" />
                               )}
-                              <span className="text-[10px] font-bold leading-tight">
-                                Mapumziko
+                              <span className="text-[10px] font-black leading-tight uppercase tracking-wide">
+                                {period.name}
                               </span>
+                              {!(period.name.toLowerCase().includes('break') || period.name.toLowerCase().includes('lunch') || period.name.toLowerCase().includes('mapumziko') || period.name.toLowerCase().includes('chakula')) && (
+                                <span className="text-[8px] font-bold text-slate-400 mt-0.5">LOCKED ACTIVITY</span>
+                              )}
+                            </div>
+                          ) : isMultiParallel ? (
+                            /* MULTIPLE PARALLEL ELECTIVE SUBJECTS (e.g. Science vs Business) */
+                            <div className="space-y-1.5">
+                              <div className="text-[8px] font-black uppercase text-emerald-800 bg-emerald-100 py-0.5 px-1 rounded border border-emerald-200">
+                                Michepuo Sambamba
+                              </div>
+                              {slotAssignments.map((asg, asgIdx) => {
+                                const asgColor = getSubjectColor(asg.subject);
+                                const asgTeacher = asg.teacherId !== undefined ? teacherMap.get(asg.teacherId) : null;
+                                const asgTeacherName = (asg as any)?.teacherName || asgTeacher?.name || (asgTeacher ? `Tr. ${asgTeacher.initial}` : 'Mwalimu');
+                                return (
+                                  <div 
+                                    key={asg.id || asgIdx}
+                                    className="p-1 rounded-md border text-center space-y-0.5 shadow-2xs"
+                                    style={{
+                                      backgroundColor: asgColor?.bg || '#ffffff',
+                                      borderColor: asgColor?.border || '#cbd5e1'
+                                    }}
+                                  >
+                                    <div className="flex items-center justify-between gap-1">
+                                      <span
+                                        className="font-black text-[10px] truncate"
+                                        style={{ color: asgColor?.text || '#0f172a' }}
+                                        title={asg.subject}
+                                      >
+                                        {getSubjectShortName(asg.subject)}
+                                      </span>
+                                      {asg.parallelElectiveTrack && (
+                                        <span className="text-[7px] px-1 py-0.2 bg-emerald-700 text-white rounded font-bold uppercase shrink-0">
+                                          {asg.parallelElectiveTrack}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[9px] font-bold text-slate-700 truncate">
+                                      {asgTeacherName}
+                                    </div>
+                                    {asg.room && (
+                                      <div className="text-[8px] font-mono text-slate-500 truncate">
+                                        Rm: {asg.room}
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           ) : assignment ? (
                             <div className="space-y-1">
@@ -377,9 +605,18 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
                               >
                                 {getSubjectShortName(assignment.subject)}
                               </div>
+                              {assignment.isParallelElective && (
+                                <span className="inline-block px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 text-[8px] font-black uppercase">
+                                  {assignment.parallelElectiveTrack || 'Mchepuo'}
+                                </span>
+                              )}
                               <div className="text-[11px] font-bold text-slate-800 truncate flex items-center justify-center gap-1">
                                 <User className="w-3 h-3 text-slate-400 shrink-0" />
                                 <span>{teacherDisplayName || 'Mwalimu'}</span>
+                              </div>
+                              <div className="text-[10px] font-bold text-slate-700 truncate">
+                                {className.replace('Form ', '').replace('Standard ', '')}
+                                {stream.replace('STREAM ', '')}
                               </div>
                               {assignment.room && (
                                 <div className="text-[9px] font-mono font-semibold text-slate-500 bg-slate-100 px-1 rounded">
@@ -418,6 +655,11 @@ export const ClassTimetable: React.FC<ClassTimetableProps> = ({
           <span>Jumla ya Vipindi: <strong className="text-slate-900">{totalClassLessons}</strong></span>
         </div>
       </div>
+      <WhatsAppShareModal
+        isOpen={showWhatsAppModal}
+        onClose={() => setShowWhatsAppModal(false)}
+        documentTitle={`Class Timetable (${className} - ${stream})`}
+      />
     </div>
   );
 };

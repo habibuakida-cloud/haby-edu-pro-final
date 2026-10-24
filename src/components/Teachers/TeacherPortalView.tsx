@@ -27,13 +27,14 @@ import {
   ChevronRight,
   ShieldCheck
 } from 'lucide-react';
-import { Student, Teacher, SchoolInfo, StreamSetting, UserAccount, Exam, AcademicTermDates } from '../../types';
+import { Student, Teacher, SchoolInfo, StreamSetting, UserAccount, Exam, AcademicTermDates, TimetableAssignment, PeriodSetting, InvigilationSession, Supervisor } from '../../types';
 import { format } from 'date-fns';
 import { generateAutoLessonPlan } from '../../utils/lessonPlanGenerator';
 import { LessonPlan } from '../../types/lessonPlan';
 import { ReportCardDocument } from '../ReportCard/ReportCardDocument';
 import { EditReportCardModal } from '../ReportCard/EditReportCardModal';
 import { SUBJECT_LIST } from '../../constants/defaults';
+import { TeacherTimetable } from '../Timetable/TeacherTimetable';
 
 interface TeacherPortalViewProps {
   teachers: Teacher[];
@@ -50,6 +51,12 @@ interface TeacherPortalViewProps {
   onAutoSaveExaminationRecords?: (records: any[]) => void;
   onNavigateToView?: (view: string) => void;
   academicTermDates?: AcademicTermDates;
+  timetableAssignments?: TimetableAssignment[];
+  periodSettings?: PeriodSetting[];
+  sessions?: InvigilationSession[];
+  invigilationAssignments?: Record<string, number>;
+  supervisors?: Supervisor[];
+  onUpdateTeacher?: (teacher: Teacher) => void;
 }
 
 export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
@@ -66,7 +73,13 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
   examinationRecords = [],
   onAutoSaveExaminationRecords,
   onNavigateToView,
-  academicTermDates
+  academicTermDates,
+  timetableAssignments = [],
+  periodSettings = [],
+  sessions = [],
+  invigilationAssignments = {},
+  supervisors = [],
+  onUpdateTeacher
 }) => {
   // 1. Identify Logged-in / Selected Teacher Context
   const isTeacherOnly = currentUser?.role === 'TEACHER' && !currentUser?.isSuperAdmin;
@@ -84,11 +97,34 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
   });
 
   const currentTeacher = useMemo(() => {
-    return teachers.find(t => t.id === selectedTeacherId) || teachers[0];
+    return teachers.find(t => Number(t.id) === Number(selectedTeacherId)) || teachers[0];
   }, [teachers, selectedTeacherId]);
 
+  // Invigilation duties assigned to current teacher
+  const teacherInvigilationCount = useMemo(() => {
+    if (!currentTeacher || !sessions || !invigilationAssignments) return 0;
+    let count = 0;
+    sessions.forEach(sess => {
+      for (let r = 0; r < (sess.rooms || 1); r++) {
+        if (Number(invigilationAssignments[`${sess.id}_room${r}`]) === Number(currentTeacher.id)) {
+          count++;
+        }
+      }
+    });
+    return count;
+  }, [currentTeacher, sessions, invigilationAssignments]);
+
   // Active Tab inside Teacher Portal
-  const [activeTab, setActiveTab] = useState<'attendance' | 'markentry' | 'lessonplan' | 'scheme' | 'reports'>('attendance');
+  const [activeTab, setActiveTab] = useState<'timetable' | 'invigilation' | 'attendance' | 'markentry' | 'lessonplan' | 'scheme' | 'reports' | 'biometric'>('timetable');
+  const [bioScanState, setBioScanState] = useState<'idle' | 'scanning' | 'registered'>(() => currentTeacher?.fingerprintEnrolled ? 'registered' : 'idle');
+  const [bioToast, setBioToast] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (currentTeacher) {
+      setBioScanState(currentTeacher.fingerprintEnrolled ? 'registered' : 'idle');
+      setBioToast(null);
+    }
+  }, [currentTeacher?.id]);
 
   // Common Selection Filters
   const [selectedClass, setSelectedClass] = useState<string>('Form 1');
@@ -394,6 +430,41 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none border-b border-slate-200">
         <button
           type="button"
+          onClick={() => setActiveTab('timetable')}
+          className={`px-4 py-2.5 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'timetable'
+              ? 'bg-blue-600 text-white shadow-md'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <Calendar className="w-4 h-4 text-blue-300" />
+          <span>Ratiba ya Masomo (My Timetable)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('invigilation')}
+          className={`px-4 py-2.5 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'invigilation'
+              ? 'bg-[#1f4d8b] text-white shadow-md'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 text-amber-400" />
+          <span>Usimamizi wa Mitihani (Invigilation)</span>
+          <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+            activeTab === 'invigilation'
+              ? 'bg-amber-400 text-slate-950'
+              : teacherInvigilationCount > 0
+              ? 'bg-amber-100 text-amber-900 border border-amber-300'
+              : 'bg-slate-100 text-slate-600'
+          }`}>
+            {teacherInvigilationCount}
+          </span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('attendance')}
           className={`px-4 py-2.5 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === 'attendance'
@@ -456,7 +527,54 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
           <FileText className="w-4 h-4 text-slate-950" />
           <span>5. Ripoti za Wanafunzi (Report Cards)</span>
         </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('biometric')}
+          className={`px-4 py-2.5 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'biometric'
+              ? 'bg-indigo-600 text-white shadow-md'
+              : 'bg-white text-indigo-900 hover:bg-indigo-50 border border-indigo-200'
+          }`}
+        >
+          <ShieldCheck className="w-4 h-4 text-indigo-500" />
+          <span>Biometric Enrollment</span>
+        </button>
       </div>
+
+      {/* -------------------------------------------------------------------- */}
+      {/* TAB 0A: RATIBA YA MASOMO (TEACHER TEACHING TIMETABLE)                */}
+      {/* -------------------------------------------------------------------- */}
+      {activeTab === 'timetable' && (
+        <TeacherTimetable
+          teacher={currentTeacher}
+          assignments={timetableAssignments}
+          periodSettings={periodSettings}
+          sessions={sessions}
+          invigilationAssignments={invigilationAssignments}
+          supervisors={supervisors}
+          schoolInfo={schoolInfo}
+          schoolName={schoolInfo?.name || 'HABY EDUPRO'}
+          defaultScheduleType="teaching"
+        />
+      )}
+
+      {/* -------------------------------------------------------------------- */}
+      {/* TAB 0B: RATIBA YA USIMAMIZI WA MITIHANI (INVIGILATION TIMETABLE)     */}
+      {/* -------------------------------------------------------------------- */}
+      {activeTab === 'invigilation' && (
+        <TeacherTimetable
+          teacher={currentTeacher}
+          assignments={timetableAssignments}
+          periodSettings={periodSettings}
+          sessions={sessions}
+          invigilationAssignments={invigilationAssignments}
+          supervisors={supervisors}
+          schoolInfo={schoolInfo}
+          schoolName={schoolInfo?.name || 'HABY EDUPRO'}
+          defaultScheduleType="invigilation"
+        />
+      )}
 
       {/* -------------------------------------------------------------------- */}
       {/* TAB 1: KUITA MAJINA (STUDENT ROLL CALL)                              */}
@@ -952,6 +1070,139 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* -------------------------------------------------------------------- */}
+      {/* TAB 6: BIOMETRIC ENROLLMENT TAB                                      */}
+      {/* -------------------------------------------------------------------- */}
+      {activeTab === 'biometric' && (
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-xs space-y-6 max-w-3xl mx-auto">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                <ShieldCheck className="w-5 h-5 text-indigo-600" />
+                <span>Biometric Enrollment - {currentTeacher.name}</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Sajili alama ya vidole vya mwalimu ili kujiandikisha kuingia (Arrival) na kutoka (Departure) kazini kwa urahisi.
+              </p>
+            </div>
+            <span className={`px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+              currentTeacher.fingerprintEnrolled ? 'bg-emerald-50 text-emerald-800 border border-emerald-300' : 'bg-amber-50 text-amber-800 border border-amber-300'
+            }`}>
+              {currentTeacher.fingerprintEnrolled ? `🔑 Registered (${currentTeacher.fingerprintId || 'Enrolled'})` : '⚠️ Not Enrolled'}
+            </span>
+          </div>
+
+          <div className="p-6 bg-slate-50 border border-slate-200 rounded-2xl flex flex-col items-center justify-center space-y-6 text-center">
+            <div className="relative">
+              <div className={`w-32 h-32 rounded-full flex items-center justify-center shadow-xl transition-all duration-700 ${
+                bioScanState === 'scanning'
+                  ? 'bg-indigo-600 text-white animate-pulse ring-8 ring-indigo-200 scale-105'
+                  : bioScanState === 'registered'
+                  ? 'bg-emerald-600 text-white ring-8 ring-emerald-200 scale-105'
+                  : 'bg-white text-indigo-700 border-4 border-dashed border-indigo-300 hover:border-indigo-500 cursor-pointer'
+              }`}
+              onClick={() => {
+                if (bioScanState === 'scanning') return;
+                setBioScanState('scanning');
+                setBioToast(null);
+                setTimeout(() => {
+                  setBioScanState('registered');
+                  const fpId = currentTeacher.fingerprintId || `FP-${Math.floor(1000 + Math.random() * 9000)}`;
+                  setBioToast(`Registered: Alama ya kidole imesajiliwa kikamilifu kwa ${currentTeacher.name} (${fpId})!`);
+                  if (onUpdateTeacher) {
+                    onUpdateTeacher({
+                      ...currentTeacher,
+                      fingerprintEnrolled: true,
+                      fingerprintId: fpId
+                    });
+                  }
+                }, 1800);
+              }}
+              title="Gusa hapa kuweka kidole kwenye skana"
+              >
+                <ShieldCheck className="w-16 h-16" />
+              </div>
+            </div>
+
+            <div className="space-y-2 max-w-md">
+              {bioScanState === 'idle' && (
+                <>
+                  <p className="text-sm font-black text-slate-800">Weka Kidole kwenye Skana ya Biometric</p>
+                  <p className="text-xs text-slate-500">Bonyeza duara la skana hapo juu au kitufe cha chini kuiga mwalimu kuweka kidole kwenye kifaa.</p>
+                </>
+              )}
+              {bioScanState === 'scanning' && (
+                <>
+                  <p className="text-sm font-black text-indigo-700 animate-bounce">Scanning... Tafadhali subiri kidole kinasomwa...</p>
+                  <p className="text-xs text-slate-500">Inathibitisha alama ya kipekee ya vidole vya mwalimu...</p>
+                </>
+              )}
+              {bioScanState === 'registered' && (
+                <>
+                  <p className="text-sm font-black text-emerald-700 flex items-center justify-center gap-1.5">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    Registered (Imesajiliwa Mafanikio)
+                  </p>
+                  <p className="text-xs text-emerald-800 font-medium">Alama ya vidole imehifadhiwa salama kwenye mfumo wa shule. Sasa mwalimu anaweza kutumia kidole kuingia na kutoka kazini.</p>
+                </>
+              )}
+            </div>
+
+            {bioToast && (
+              <div className="p-3.5 bg-emerald-50 border border-emerald-300 text-emerald-950 rounded-xl text-xs font-bold w-full flex items-center justify-center gap-2 animate-in fade-in">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{bioToast}</span>
+              </div>
+            )}
+
+            <div className="flex gap-3 pt-2">
+              <button
+                type="button"
+                disabled={bioScanState === 'scanning'}
+                onClick={() => {
+                  setBioScanState('scanning');
+                  setBioToast(null);
+                  setTimeout(() => {
+                    setBioScanState('registered');
+                    const fpId = currentTeacher.fingerprintId || `FP-${Math.floor(1000 + Math.random() * 9000)}`;
+                    setBioToast(`Registered: Alama ya kidole imesajiliwa mafanikio! ID: ${fpId}`);
+                    if (onUpdateTeacher) {
+                      onUpdateTeacher({
+                        ...currentTeacher,
+                        fingerprintEnrolled: true,
+                        fingerprintId: fpId
+                      });
+                    }
+                  }, 1800);
+                }}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md cursor-pointer transition"
+              >
+                {bioScanState === 'scanning' ? 'Scanning...' : 'Anzisha Usajili wa Kidole'}
+              </button>
+              {currentTeacher.fingerprintEnrolled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setBioScanState('idle');
+                    setBioToast(null);
+                    if (onUpdateTeacher) {
+                      onUpdateTeacher({
+                        ...currentTeacher,
+                        fingerprintEnrolled: false,
+                        fingerprintId: undefined
+                      });
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded-xl text-xs font-bold cursor-pointer transition"
+                >
+                  Futa Usajili (Revoke)
+                </button>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

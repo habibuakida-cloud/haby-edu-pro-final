@@ -33,6 +33,9 @@ import {
 } from '../../types';
 import { DAYS_OF_WEEK, DEFAULT_CLASSES } from '../../constants/defaults';
 import { getSubjectColor, getTeacherColor } from '../../utils/colors';
+import { SubjectRegistry } from '../../constants/SubjectRegistry';
+import { getConfiguredDays } from '../../lib/timetableService';
+
 
 interface AITimetableAssistantModalProps {
   isOpen: boolean;
@@ -63,9 +66,10 @@ export const AITimetableAssistantModal: React.FC<AITimetableAssistantModalProps>
   const [activeTab, setActiveTab] = useState<'early_info' | 'upload_draft' | 'generate' | 'preview'>('early_info');
 
   // Early Feed Configuration State
+  const configuredDays = React.useMemo(() => getConfiguredDays(periodSettings), [periodSettings]);
   const [targetClass, setTargetClass] = useState<string>('ALL');
   const [targetStream, setTargetStream] = useState<string>('ALL');
-  const [targetDays, setTargetDays] = useState<string[]>(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']);
+  const [targetDays, setTargetDays] = useState<string[]>(() => getConfiguredDays(periodSettings));
 
   // Subject Quotas State
   const [localSubjectQuotas, setLocalSubjectQuotas] = useState<SubjectQuotaState[]>(() => {
@@ -78,6 +82,7 @@ export const AITimetableAssistantModal: React.FC<AITimetableAssistantModalProps>
     });
 
     const defaultDefaults: Record<string, number> = {
+      'Basic Mathematics': 6,
       'Mathematics': 6,
       'English Language': 5,
       'Kiswahili': 4,
@@ -87,7 +92,10 @@ export const AITimetableAssistantModal: React.FC<AITimetableAssistantModalProps>
       'Geography': 3,
       'History': 3,
       'Civics': 3,
-      'Computer Studies': 2
+      'Historia ya Tanzania na Maadili': 2,
+      'Business Studies': 2,
+      'Academic Communication': 2,
+      'ICT / TEHAMA': 2
     };
 
     Object.entries(defaultDefaults).forEach(([sub, cnt]) => {
@@ -872,7 +880,7 @@ export const AITimetableAssistantModal: React.FC<AITimetableAssistantModalProps>
                   <div>
                     <label className="block text-[11px] font-bold text-slate-700 uppercase mb-1">Siku za Ratiba (Target Days):</label>
                     <div className="flex items-center gap-1 flex-wrap pt-1">
-                      {DAYS_OF_WEEK.map(d => {
+                      {configuredDays.map(d => {
                         const isSelected = targetDays.includes(d);
                         return (
                           <button

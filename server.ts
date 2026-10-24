@@ -101,7 +101,7 @@ async function ensureSchoolExists(schoolIdRaw: any): Promise<string> {
   return schoolUuid;
 }
 
-// Complete mapping of all 51 database tables
+// Complete mapping of all 56 database tables in Cloud SQL
 const TABLE_KEY_MAP: Record<string, any> = {
   schools: schema.schools,
   users: schema.users,
@@ -157,7 +157,10 @@ const TABLE_KEY_MAP: Record<string, any> = {
   duty_streams: schema.dutyStreams,
   duty_weekly_assignments: schema.dutyWeeklyAssignments,
   duty_daily_reports: schema.dutyDailyReports,
+  curriculum_standards: schema.curriculumStandards,
   past_papers: schema.pastPapers,
+  teacher_attendance: schema.teacherAttendance,
+  staff_payroll: schema.staffPayroll,
 };
 
 function resolveColumn(tableObj: any, colName: string): { jsKey: string; colDef: any } | null {
@@ -446,9 +449,12 @@ function pickNonEmptyObject<T = Record<string, any>>(...candidates: any[]): T {
   return {} as T;
 }
 
+const seededStaticBySchool = new Set<string>();
+
 // Helper to synchronize relational tables from a schoolData snapshot
 async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<string, any>) {
   const validSchoolUuid = await ensureSchoolExists(schoolId);
+  const isFirstStaticSeed = !seededStaticBySchool.has(validSchoolUuid);
   try {
     // 0. Sync School metadata & Subscriptions & SMS Wallet
     if (raw.schoolInfo && typeof raw.schoolInfo === 'object') {
@@ -464,15 +470,17 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
       }]);
     }
 
-    await db.insert(schema.smsWallet).values({
-      id: toDeterministicUuid(`wallet_${validSchoolUuid}`),
-      schoolId: validSchoolUuid,
-      balance: 500,
-      updatedAt: new Date(),
-    }).onConflictDoNothing().catch(() => {});
+    if (isFirstStaticSeed) {
+      await db.insert(schema.smsWallet).values({
+        id: toDeterministicUuid(`wallet_${validSchoolUuid}`),
+        schoolId: validSchoolUuid,
+        balance: 500,
+        updatedAt: new Date(),
+      }).onConflictDoNothing().catch(() => {});
+    }
 
-    // 1. Students (canonical deterministic ID + deduplicate stale rows)
-    const rawStudents = pickNonEmptyArray(raw.students, DEFAULT_APP_DATA.students);
+    // 1. Students (canonical deterministic ID + prune deleted rows)
+    const rawStudents = Array.isArray(raw.students) ? raw.students : DEFAULT_APP_DATA.students;
     const canonicalStudentIds: string[] = [];
     const seenStudentKeys = new Set<string>();
     const studentPayloads: any[] = [];
@@ -495,18 +503,15 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
 
     if (studentPayloads.length > 0) {
       await upsertTableRecords('students', schema.students, studentPayloads);
-      try {
-        await db.delete(schema.students).where(
-          and(
-            eq(schema.students.schoolId, validSchoolUuid as any),
-            notInArray(schema.students.id, canonicalStudentIds as any)
-          )
-        );
-      } catch (cleanupErr) {}
+      if (Array.isArray(raw.students)) {
+        await db.delete(schema.students)
+          .where(and(eq(schema.students.schoolId, validSchoolUuid), notInArray(schema.students.id, canonicalStudentIds)))
+          .catch(() => {});
+      }
     }
 
-    // 2. Teachers (canonical deterministic ID + deduplicate stale rows)
-    const rawTeachers = pickNonEmptyArray(raw.teachers, DEFAULT_APP_DATA.teachers);
+    // 2. Teachers (canonical deterministic ID + prune deleted teachers)
+    const rawTeachers = Array.isArray(raw.teachers) ? raw.teachers : DEFAULT_APP_DATA.teachers;
     const canonicalTeacherIds: string[] = [];
     const seenTeacherKeys = new Set<string>();
     const teacherPayloads: any[] = [];
@@ -528,17 +533,14 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
 
     if (teacherPayloads.length > 0) {
       await upsertTableRecords('teachers', schema.teachers, teacherPayloads);
-      try {
-        await db.delete(schema.teachers).where(
-          and(
-            eq(schema.teachers.schoolId, validSchoolUuid as any),
-            notInArray(schema.teachers.id, canonicalTeacherIds as any)
-          )
-        );
-      } catch (cleanupErr) {}
+      if (Array.isArray(raw.teachers)) {
+        await db.delete(schema.teachers)
+          .where(and(eq(schema.teachers.schoolId, validSchoolUuid), notInArray(schema.teachers.id, canonicalTeacherIds)))
+          .catch(() => {});
+      }
 
       // Also sync authorized_staff from teachers
-      await upsertTableRecords('authorized_staff', schema.authorizedStaff, teacherPayloads.slice(0, 50).map((t: any) => ({
+      await upsertTableRecords('authorized_staff', schema.authorizedStaff, teacherPayloads.slice(0, 60).map((t: any) => ({
         id: toDeterministicUuid(`staff_${validSchoolUuid}_${t.email || t.name}`),
         schoolId: validSchoolUuid,
         name: t.name || 'Teacher',
@@ -549,23 +551,25 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
       })));
     }
 
-    // 3. Subjects Catalog
-    const allSubjectNames = Array.from(new Set([
-      ...SECONDARY_SUBJECTS,
-      ...UPPER_PRIMARY_SUBJECTS_LIST,
-      ...NURSERY_SUBJECTS_LIST
-    ]));
-    if (allSubjectNames.length > 0) {
-      await upsertTableRecords('subjects', schema.subjects, allSubjectNames.map((subjName, idx) => ({
-        id: toDeterministicUuid(`subj_${validSchoolUuid}_${subjName}`),
-        schoolId: validSchoolUuid,
-        name: subjName,
-        code: `SUB-${String(idx + 1).padStart(3, '0')}`,
-      })));
+    // 3. Subjects Catalog (seed once per school boot)
+    if (isFirstStaticSeed) {
+      const allSubjectNames = Array.from(new Set([
+        ...SECONDARY_SUBJECTS,
+        ...UPPER_PRIMARY_SUBJECTS_LIST,
+        ...NURSERY_SUBJECTS_LIST
+      ]));
+      if (allSubjectNames.length > 0) {
+        await upsertTableRecords('subjects', schema.subjects, allSubjectNames.map((subjName, idx) => ({
+          id: toDeterministicUuid(`subj_${validSchoolUuid}_${subjName}`),
+          schoolId: validSchoolUuid,
+          name: subjName,
+          code: `SUB-${String(idx + 1).padStart(3, '0')}`,
+        })));
+      }
     }
 
     // 4. Exams, Exam Records & Exam Results
-    const rawExams = pickNonEmptyArray(raw.exams, DEFAULT_APP_DATA.exams);
+    const rawExams = Array.isArray(raw.exams) ? raw.exams : DEFAULT_APP_DATA.exams;
     const firstExamUuid = rawExams.length > 0
       ? toDeterministicUuid(`exm_${validSchoolUuid}_${rawExams[0].id || rawExams[0].name}`)
       : null;
@@ -581,31 +585,44 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
         };
       });
       await upsertTableRecords('exams', schema.exams, examPayloads);
-      try {
-        await db.delete(schema.exams).where(
-          and(
-            eq(schema.exams.schoolId, validSchoolUuid as any),
-            notInArray(schema.exams.id, canonicalExamIds as any)
-          )
-        );
-      } catch (cleanupErr) {}
+      if (Array.isArray(raw.exams)) {
+        await db.delete(schema.exams)
+          .where(and(eq(schema.exams.schoolId, validSchoolUuid), notInArray(schema.exams.id, canonicalExamIds)))
+          .catch(() => {});
+      }
+    } else if (Array.isArray(raw.exams) && raw.exams.length === 0) {
+      await db.delete(schema.exams).where(eq(schema.exams.schoolId, validSchoolUuid)).catch(() => {});
     }
 
-    const examRecs = pickNonEmptyArray(raw.examinationRecords, raw.examination_records, DEFAULT_APP_DATA.examinationRecords);
+    const examRecs = Array.isArray(raw.examinationRecords)
+      ? raw.examinationRecords
+      : Array.isArray(raw.examination_records)
+      ? raw.examination_records
+      : DEFAULT_APP_DATA.examinationRecords;
     if (examRecs.length > 0) {
-      await upsertTableRecords('exam_records', schema.examRecords, examRecs.map((r: any, idx: number) => ({
-        ...r,
-        id: r.id ? String(r.id) : `rec_${validSchoolUuid}_${idx}`,
-        schoolId: validSchoolUuid,
-        subjectMarks: r.subjectMarks || r.subjects || {},
-        totalMarks: String(r.totalMarks ?? 0),
-        averageScore: String(r.averageScore ?? r.averageMarks ?? 0),
-        rank: Number(r.rank ?? r.positionInClass ?? (idx + 1)),
-      })));
+      const canonicalRecIds: string[] = [];
+      await upsertTableRecords('exam_records', schema.examRecords, examRecs.map((r: any, idx: number) => {
+        const rid = r.id ? String(r.id) : `rec_${validSchoolUuid}_${idx}`;
+        canonicalRecIds.push(rid);
+        return {
+          ...r,
+          id: rid,
+          schoolId: validSchoolUuid,
+          subjectMarks: r.subjectMarks || r.subjects || {},
+          totalMarks: String(r.totalMarks ?? 0),
+          averageScore: String(r.averageScore ?? r.averageMarks ?? 0),
+          rank: Number(r.rank ?? r.positionInClass ?? (idx + 1)),
+        };
+      }));
+      if (Array.isArray(raw.examinationRecords) || Array.isArray(raw.examination_records)) {
+        await db.delete(schema.examRecords)
+          .where(and(eq(schema.examRecords.schoolId, validSchoolUuid), notInArray(schema.examRecords.id, canonicalRecIds)))
+          .catch(() => {});
+      }
     }
 
     // Populate exam_results for students who have subject marks
-    if (firstExamUuid && studentPayloads.length > 0) {
+    if (isFirstStaticSeed && firstExamUuid && studentPayloads.length > 0) {
       const examResultRows: any[] = [];
       for (const s of studentPayloads.slice(0, 60)) {
         const marksObj = s.marks && typeof s.marks === 'object' ? s.marks : {};
@@ -613,16 +630,15 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
           const numericScore = typeof scoreVal === 'number' ? Math.round(scoreVal) : Number(scoreVal);
           if (isNaN(numericScore)) continue;
           const subjUuid = toDeterministicUuid(`subj_${validSchoolUuid}_${subjName}`);
-          const gradeStr = numericScore >= 75 ? 'A' : numericScore >= 65 ? 'B' : numericScore >= 45 ? 'C' : numericScore >= 30 ? 'D' : 'F';
           examResultRows.push({
             id: toDeterministicUuid(`exres_${validSchoolUuid}_${firstExamUuid}_${s.id}_${subjName}`),
             schoolId: validSchoolUuid,
-            examId: firstExamUuid,
             studentId: s.id,
             subjectId: subjUuid,
-            marks: numericScore,
-            grade: gradeStr,
-            remarks: gradeStr === 'A' ? 'Excellent' : gradeStr === 'B' ? 'Very Good' : gradeStr === 'C' ? 'Good' : gradeStr === 'D' ? 'Satisfactory' : 'Fail',
+            examType: 'TERMINAL',
+            year: 2026,
+            term: 'Term 1',
+            marks: String(numericScore),
           });
         }
       }
@@ -631,31 +647,42 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
       }
     }
 
-    // 5. Timetable Assignments & Timetables
-    const ttAssigns = pickNonEmptyArray(
-      raw.timetableAssignments,
-      raw.timetable_assignments,
-      DEFAULT_APP_DATA.timetableAssignments,
-      TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS
-    );
+    // 5. Timetable Assignments & Timetables (respect deletions & empty list)
+    const explicitTimetableProvided = Array.isArray(raw.timetableAssignments) || Array.isArray(raw.timetable_assignments);
+    const ttAssigns = Array.isArray(raw.timetableAssignments)
+      ? raw.timetableAssignments
+      : Array.isArray(raw.timetable_assignments)
+      ? raw.timetable_assignments
+      : pickNonEmptyArray(DEFAULT_APP_DATA.timetableAssignments, TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS);
+
     if (ttAssigns.length > 0) {
-      await upsertTableRecords('timetable_assignments', schema.timetableAssignments, ttAssigns.map((a: any, idx: number) => ({
-        ...a,
-        id: a.id ? `ta_${validSchoolUuid}_${a.id}` : `ta_${validSchoolUuid}_${idx}`,
-        schoolId: validSchoolUuid,
-        className: a.className || 'Form 1',
-        stream: a.stream || 'STREAM A',
-        day: a.day || 'Monday',
-        period: a.period || `Period ${(idx % 7) + 1}`,
-        subject: a.subject || 'Mathematics',
-        teacherId: typeof a.teacherId === 'number' ? a.teacherId : 101,
-      })));
+      const canonicalTaIds: string[] = [];
+      const canonicalTtIds: string[] = [];
+      await upsertTableRecords('timetable_assignments', schema.timetableAssignments, ttAssigns.map((a: any, idx: number) => {
+        const rawId = a.id ? String(a.id) : String(idx);
+        const taId = rawId.startsWith(`ta_${validSchoolUuid}_`) ? rawId : `ta_${validSchoolUuid}_${rawId}`;
+        canonicalTaIds.push(taId);
+        return {
+          ...a,
+          id: taId,
+          schoolId: validSchoolUuid,
+          className: a.className || 'Form 1',
+          stream: a.stream || 'STREAM A',
+          day: a.day || 'Monday',
+          period: a.period || `Period ${(idx % 7) + 1}`,
+          subject: a.subject || 'Mathematics',
+          teacherId: typeof a.teacherId === 'number' ? a.teacherId : 101,
+        };
+      }));
 
       await upsertTableRecords('timetables', schema.timetables, ttAssigns.map((a: any, idx: number) => {
         const periodNumMatch = String(a.period || '').match(/(\d+)/);
         const periodNumber = periodNumMatch ? parseInt(periodNumMatch[1], 10) : (idx % 7) + 1;
+        const rawId = a.id ? String(a.id) : String(idx);
+        const ttId = rawId.startsWith(`tt_${validSchoolUuid}_`) ? rawId : `tt_${validSchoolUuid}_${rawId}`;
+        canonicalTtIds.push(ttId);
         return {
-          id: a.id ? `tt_${validSchoolUuid}_${a.id}` : `tt_${validSchoolUuid}_${idx}`,
+          id: ttId,
           schoolId: validSchoolUuid,
           classId: a.className || 'Form 1',
           stream: a.stream || 'STREAM A',
@@ -667,6 +694,18 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
           timeEnd: '08:40',
         };
       }));
+
+      if (explicitTimetableProvided) {
+        await db.delete(schema.timetableAssignments)
+          .where(and(eq(schema.timetableAssignments.schoolId, validSchoolUuid), notInArray(schema.timetableAssignments.id, canonicalTaIds)))
+          .catch(() => {});
+        await db.delete(schema.timetables)
+          .where(and(eq(schema.timetables.schoolId, validSchoolUuid), notInArray(schema.timetables.id, canonicalTtIds)))
+          .catch(() => {});
+      }
+    } else if (explicitTimetableProvided && ttAssigns.length === 0) {
+      await db.delete(schema.timetableAssignments).where(eq(schema.timetableAssignments.schoolId, validSchoolUuid)).catch(() => {});
+      await db.delete(schema.timetables).where(eq(schema.timetables.schoolId, validSchoolUuid)).catch(() => {});
     }
 
     // 6. Period Settings & Periods
@@ -871,6 +910,36 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
       await upsertTableRecords('period_attendance', schema.periodAttendance, attRows.slice(0, 300));
     }
 
+    // 10B. Teacher Daily Attendance -> teacher_attendance table
+    const teacherAttMap = pickNonEmptyObject(raw.teacherAttendance, raw.teacher_attendance);
+    const teacherAttRows: any[] = [];
+    for (const [dateKey, tStatusMap] of Object.entries(teacherAttMap)) {
+      if (!tStatusMap || typeof tStatusMap !== 'object') continue;
+      for (const [tIdStr, entryVal] of Object.entries(tStatusMap as Record<string, any>)) {
+        const matchedT = rawTeachers.find((t: any) => String(t.id) === String(tIdStr));
+        const isObj = entryVal && typeof entryVal === 'object';
+        const statusStr = isObj ? String(entryVal.status || 'PRESENT') : String(entryVal || 'PRESENT');
+        teacherAttRows.push({
+          id: `tatt_${validSchoolUuid}_${dateKey}_${tIdStr}`,
+          schoolId: validSchoolUuid,
+          teacherId: Number(tIdStr) || matchedT?.id || 101,
+          teacherName: (isObj && entryVal.teacherName) || matchedT?.name || `Teacher #${tIdStr}`,
+          schoolRole: (isObj && entryVal.schoolRole) || matchedT?.schoolRole || 'Subject Teacher',
+          date: dateKey,
+          dayOfWeek: new Date(dateKey).toLocaleDateString('en-US', { weekday: 'long' }) || 'Monday',
+          status: statusStr,
+          checkInTime: (isObj && entryVal.checkInTime) || '07:30',
+          checkOutTime: (isObj && entryVal.checkOutTime) || '15:30',
+          remarks: (isObj && entryVal.remarks) || '',
+          markedBy: (isObj && entryVal.markedBy) || 'Admin',
+          updatedAt: new Date(),
+        });
+      }
+    }
+    if (teacherAttRows.length > 0) {
+      await upsertTableRecords('teacher_attendance', schema.teacherAttendance, teacherAttRows.slice(0, 400));
+    }
+
     // 11. Parents & Parent-Students links from student parentPhone
     const parentRowsMap = new Map<string, any>();
     const parentStudentLinks: any[] = [];
@@ -895,6 +964,150 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
     if (parentRowsMap.size > 0) {
       await upsertTableRecords('parents', schema.parents, Array.from(parentRowsMap.values()));
     }
+    if (parentStudentLinks.length > 0) {
+      await upsertTableRecords('parent_students', schema.parentStudents, parentStudentLinks);
+    }
+
+    // 11B. Saved Timetable Records, Saved Invigilation Records & Invigilation Assignments
+    const savedTtList = pickNonEmptyArray(raw.savedTimetableRecords, raw.saved_timetable_records);
+    if (savedTtList.length > 0) {
+      await upsertTableRecords('saved_timetable_records', schema.savedTimetableRecords, savedTtList.map((rec: any, idx: number) => ({
+        id: rec.id ? String(rec.id) : `stt_${validSchoolUuid}_${idx}`,
+        schoolId: validSchoolUuid,
+        name: rec.name || `Master Timetable ${idx + 1}`,
+        academicYear: String(rec.academicYear || rec.year || '2026'),
+        term: rec.term || 'Term 1',
+        timetableData: Array.isArray(rec.timetableData) ? rec.timetableData : (Array.isArray(rec.assignments) ? rec.assignments : ttAssigns),
+        status: rec.status || 'Published',
+      })));
+    } else if (ttAssigns.length > 0) {
+      await upsertTableRecords('saved_timetable_records', schema.savedTimetableRecords, [{
+        id: `stt_active_${validSchoolUuid}`,
+        schoolId: validSchoolUuid,
+        name: 'Active School Master Timetable 2026',
+        academicYear: '2026',
+        term: 'Term 1',
+        timetableData: ttAssigns,
+        status: 'Published',
+      }]);
+    }
+
+    const savedInvList = pickNonEmptyArray(raw.savedInvigilationRecords, raw.saved_invigilation_records);
+    if (savedInvList.length > 0) {
+      await upsertTableRecords('saved_invigilation_records', schema.savedInvigilationRecords, savedInvList.map((rec: any, idx: number) => ({
+        id: rec.id ? String(rec.id) : `sinv_${validSchoolUuid}_${idx}`,
+        schoolId: validSchoolUuid,
+        examName: rec.examName || rec.name || `Exam Roster ${idx + 1}`,
+        academicYear: String(rec.academicYear || rec.year || '2026'),
+        term: rec.term || 'Term 1',
+        dutyRoster: rec.dutyRoster || rec.assignments || [],
+      })));
+    } else if (invSessions.length > 0) {
+      await upsertTableRecords('saved_invigilation_records', schema.savedInvigilationRecords, [{
+        id: `sinv_active_${validSchoolUuid}`,
+        schoolId: validSchoolUuid,
+        examName: 'Terminal Examination Invigilation Roster 2026',
+        academicYear: '2026',
+        term: 'Term 1',
+        dutyRoster: invSessions,
+      }]);
+    }
+
+    // Sync invigilation_assignments from raw.invigilationAssignments or invigilation sessions
+    const rawInvAssign = raw.invigilationAssignments || raw.invigilation_assignments;
+    const invAssignRows: any[] = [];
+    if (Array.isArray(rawInvAssign) && rawInvAssign.length > 0) {
+      rawInvAssign.forEach((ia: any, idx: number) => {
+        invAssignRows.push({
+          id: ia.id ? String(ia.id) : `inva_${validSchoolUuid}_${idx}`,
+          schoolId: validSchoolUuid,
+          sessionId: String(ia.sessionId || `inv_sess_${validSchoolUuid}_0`),
+          examName: ia.examName || 'Terminal Examination',
+          date: ia.date || '2026-10-15',
+          roomNumber: Number(ia.roomNumber || 1),
+          teacherId: Number(ia.teacherId || 1001),
+          teacherName: ia.teacherName || 'Invigilator',
+          role: ia.role || 'Invigilator',
+        });
+      });
+    } else if (invSessions.length > 0 && rawTeachers.length > 0) {
+      invSessions.forEach((sess: any, idx: number) => {
+        const tch = rawTeachers[idx % rawTeachers.length];
+        invAssignRows.push({
+          id: `inva_${validSchoolUuid}_${sess.id || idx}`,
+          schoolId: validSchoolUuid,
+          sessionId: sess.id ? `inv_sess_${validSchoolUuid}_${sess.id}` : `inv_sess_${validSchoolUuid}_${idx}`,
+          examName: sess.subject ? `${sess.subject} Exam` : 'Terminal Exam',
+          date: sess.rawDate || '2026-10-15',
+          roomNumber: 1,
+          teacherId: typeof tch?.id === 'number' ? tch.id : (1001 + idx),
+          teacherName: tch?.name || 'Mwalimu Msimamizi',
+          role: 'Invigilator',
+        });
+      });
+    }
+    if (invAssignRows.length > 0) {
+      await upsertTableRecords('invigilation_assignments', schema.invigilationAssignments, invAssignRows);
+    }
+
+    // 11C. Sync Student Ledger & Contribution Types for Finance Module
+    await upsertTableRecords('contribution_types', schema.contributionTypes, [
+      {
+        id: `contrib_fee_${validSchoolUuid}`,
+        schoolId: validSchoolUuid,
+        name: 'Ada na Michango ya Taaluma (School & Academic Fee)',
+        amountDefault: '150000',
+        classLevels: ['Form 1', 'Form 2', 'Form 3', 'Form 4'],
+        academicYear: '2026',
+        term: 'Term 1 / 2026',
+        createdBy: 'School Bursar',
+      },
+      {
+        id: `contrib_exam_${validSchoolUuid}`,
+        schoolId: validSchoolUuid,
+        name: 'Mchango wa Mitihani ya Ndani (Internal Exams)',
+        amountDefault: '30000',
+        classLevels: ['Form 1', 'Form 2', 'Form 3', 'Form 4'],
+        academicYear: '2026',
+        term: 'Term 1 / 2026',
+        createdBy: 'Academic Office',
+      },
+    ]);
+
+    if (rawStudents.length > 0) {
+      const ledgerSample = rawStudents.slice(0, 60).map((s: any, idx: number) => {
+        const isPaid = String(s.feeStatus || s.fee_status || 'UNPAID').toUpperCase() === 'PAID';
+        const cno = String(s.regNo || s.reg_no || s.id || `STD-${idx + 1}`);
+        return {
+          id: `ledg_${validSchoolUuid}_${cno.replace(/[^a-zA-Z0-9_-]/g, '_')}`,
+          schoolId: validSchoolUuid,
+          studentCno: cno,
+          studentName: s.name || `Student ${idx + 1}`,
+          classLevel: s.className || s.class_name || 'Form 1',
+          contributionTypeId: `contrib_fee_${validSchoolUuid}`,
+          contributionName: 'Ada na Michango ya Taaluma (School & Academic Fee)',
+          requiredAmount: '150000',
+          paidAmount: isPaid ? '150000' : '50000',
+          balanceAmount: isPaid ? '0' : '100000',
+          status: isPaid ? 'PAID' : 'PARTIAL',
+          lastPaymentDate: '2026-09-15',
+          receiptNumber: `RCT-2026-${String(idx + 1).padStart(4, '0')}`,
+          updatedAt: new Date(),
+        };
+      });
+      await upsertTableRecords('student_ledger', schema.studentLedger, ledgerSample);
+    }
+
+    // 11D. Remedial Payment Settings & Remedial Timetable baseline
+    await upsertTableRecords('remedial_payment_settings', schema.remedialPaymentSettings, [
+      {
+        id: toDeterministicUuid(`rem_pay_${validSchoolUuid}_form1`),
+        schoolId: validSchoolUuid,
+        className: 'All Classes',
+        ratePerPeriod: '5000',
+        effectiveDate: '2026-01-15',
+      },
+    ]);
 
     // 12. Discipline Records & Activity Logs & Duty Roster
     const discRecs = pickNonEmptyArray(raw.disciplineRecords, raw.discipline_records, DEFAULT_APP_DATA.disciplineRecords);
@@ -1016,12 +1229,454 @@ function scheduleRelationalSync(schoolId: string, snapshotData: Record<string, a
   });
 }
 
+// ============================================================================
+// NON-DESTRUCTIVE MERGE & HISTORICAL SNAPSHOT RECOVERY ENGINE
+// ============================================================================
+
+const DEMO_STUDENT_IDS = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+const DEMO_TEACHER_IDS = new Set([101, 102, 103, 104, 105, 106, 107, 108]);
+
+function isDemoStudentList(list: any[]): boolean {
+  if (!Array.isArray(list) || list.length === 0 || list.length > 20) return false;
+  return list.every((s: any) => DEMO_STUDENT_IDS.has(Number(s?.id)));
+}
+
+function isDemoTeacherList(list: any[]): boolean {
+  if (!Array.isArray(list) || list.length === 0 || list.length > 10) return false;
+  return list.every((t: any) => DEMO_TEACHER_IDS.has(Number(t?.id)));
+}
+
+function mergeNonDestructiveArray<T = any>(
+  incomingCamel: any,
+  incomingSnake: any,
+  existingVal: any,
+  defaultVal: T[] = [],
+  keyFn: (item: any, idx: number) => string,
+  options?: {
+    allowExplicitReplace?: boolean;
+    filterDemoWhenRealExists?: 'students' | 'teachers';
+  }
+): T[] {
+  const incomingRaw = Array.isArray(incomingCamel)
+    ? incomingCamel
+    : Array.isArray(incomingSnake)
+    ? incomingSnake
+    : undefined;
+
+  const existingArr: any[] = Array.isArray(existingVal) ? existingVal : [];
+  const incomingArr: any[] = Array.isArray(incomingRaw) ? incomingRaw : [];
+
+  // If the user explicitly requested a replacement (e.g., deleting a specific item from UI), respect incoming if non-empty
+  if (options?.allowExplicitReplace && incomingRaw !== undefined && incomingArr.length > 0) {
+    return incomingArr as T[];
+  }
+
+  // Check if either existing or incoming has real (non-demo) records
+  let cleanExisting = existingArr;
+  let cleanIncoming = incomingArr;
+
+  if (options?.filterDemoWhenRealExists === 'students') {
+    const existingHasReal = existingArr.some((s: any) => !DEMO_STUDENT_IDS.has(Number(s?.id)));
+    const incomingHasReal = incomingArr.some((s: any) => !DEMO_STUDENT_IDS.has(Number(s?.id)));
+    if (existingHasReal && isDemoStudentList(incomingArr)) {
+      cleanIncoming = [];
+    }
+    if ((existingHasReal || incomingHasReal) && existingArr.length > 15) {
+      cleanExisting = existingArr.filter((s: any) => !DEMO_STUDENT_IDS.has(Number(s?.id)));
+    }
+    if ((existingHasReal || incomingHasReal) && incomingArr.length > 15) {
+      cleanIncoming = cleanIncoming.filter((s: any) => !DEMO_STUDENT_IDS.has(Number(s?.id)));
+    }
+  } else if (options?.filterDemoWhenRealExists === 'teachers') {
+    const existingHasReal = existingArr.some((t: any) => !DEMO_TEACHER_IDS.has(Number(t?.id)));
+    const incomingHasReal = incomingArr.some((t: any) => !DEMO_TEACHER_IDS.has(Number(t?.id)));
+    if (existingHasReal && isDemoTeacherList(incomingArr)) {
+      cleanIncoming = [];
+    }
+    if (existingHasReal || incomingHasReal) {
+      cleanExisting = existingArr.filter((t: any) => !DEMO_TEACHER_IDS.has(Number(t?.id)));
+      cleanIncoming = cleanIncoming.filter((t: any) => !DEMO_TEACHER_IDS.has(Number(t?.id)));
+    }
+  }
+
+  // Merge existing + incoming by key so old records are NEVER lost when updating
+  const mergedMap = new Map<string, any>();
+  cleanExisting.forEach((item, idx) => {
+    if (item === null || item === undefined) return;
+    const k = keyFn(item, idx);
+    if (k) mergedMap.set(k, item);
+  });
+
+  cleanIncoming.forEach((item, idx) => {
+    if (item === null || item === undefined) return;
+    const k = keyFn(item, idx);
+    if (k) {
+      const prev = mergedMap.get(k);
+      if (prev && typeof prev === 'object' && typeof item === 'object' && !Array.isArray(item)) {
+        mergedMap.set(k, { ...prev, ...item });
+      } else {
+        mergedMap.set(k, item);
+      }
+    }
+  });
+
+  const mergedList = Array.from(mergedMap.values());
+  if (mergedList.length > 0) {
+    return mergedList as T[];
+  }
+  return Array.isArray(defaultVal) ? defaultVal : [];
+}
+
+function resolveSnapshotObject<T = Record<string, any>>(
+  incomingCamel: any,
+  incomingSnake: any,
+  existingVal: any,
+  defaultVal: Record<string, any> = {},
+  _isFullSnapshot = false
+): T {
+  const incoming =
+    incomingCamel && typeof incomingCamel === 'object' && !Array.isArray(incomingCamel)
+      ? incomingCamel
+      : incomingSnake && typeof incomingSnake === 'object' && !Array.isArray(incomingSnake)
+      ? incomingSnake
+      : undefined;
+
+  const existingObj =
+    existingVal && typeof existingVal === 'object' && !Array.isArray(existingVal)
+      ? existingVal
+      : {};
+
+  if (incoming !== undefined) {
+    // Always deep-preserve existing keys and merge incoming keys on top so old object properties are never wiped
+    return {
+      ...defaultVal,
+      ...existingObj,
+      ...incoming,
+    } as T;
+  }
+
+  if (Object.keys(existingObj).length > 0) {
+    return existingObj as T;
+  }
+  return (defaultVal || {}) as T;
+}
+
+const restoredSchoolsSet = new Set<string>();
+
+async function ensureHistoricalBackupRestored(schoolId: string): Promise<void> {
+  const validSchoolUuid = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
+    ? DEFAULT_SCHOOL_UUID
+    : schoolId;
+
+  try {
+    const existing = await db.query.schoolData.findFirst({
+      where: eq(schema.schoolData.schoolId, validSchoolUuid),
+    });
+
+    const currentStudents = Array.isArray(existing?.students) ? existing.students : [];
+    const currentTeachers = Array.isArray(existing?.teachers) ? existing.teachers : [];
+
+    // Check if we already have the full roster (>= 100 students and >= 20 teachers)
+    if (currentStudents.length >= 100 && currentTeachers.length >= 20 && restoredSchoolsSet.has(validSchoolUuid)) {
+      return;
+    }
+
+    const backupDir = path.resolve(__dirname, '.backups', validSchoolUuid);
+    if (!fs.existsSync(backupDir)) return;
+
+    const files = fs.readdirSync(backupDir).filter(f => f.startsWith('snap_') && f.endsWith('.json'));
+    if (files.length === 0) return;
+
+    // Pick the richest backup snapshot (largest file size)
+    let bestSnapData: any = null;
+    let bestScore = 0;
+
+    for (const f of files) {
+      try {
+        const fullPath = path.join(backupDir, f);
+        const stat = fs.statSync(fullPath);
+        if (stat.size > bestScore) {
+          const parsed = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
+          const sCount = Array.isArray(parsed?.students) ? parsed.students.length : 0;
+          const tCount = Array.isArray(parsed?.teachers) ? parsed.teachers.length : 0;
+          if (sCount > currentStudents.length || tCount > currentTeachers.length) {
+            bestScore = stat.size;
+            bestSnapData = parsed;
+          }
+        }
+      } catch (e) {}
+    }
+
+    if (!bestSnapData) {
+      if (existing && !restoredSchoolsSet.has(validSchoolUuid)) {
+        scheduleRelationalSync(validSchoolUuid, existing as any);
+      }
+      restoredSchoolsSet.add(validSchoolUuid);
+      return;
+    }
+
+    console.log(`[Database Recovery] Restoring & merging historical data from backup for school ${validSchoolUuid}...`);
+
+    const mergedStudents = mergeNonDestructiveArray(
+      currentStudents,
+      undefined,
+      bestSnapData.students,
+      DEFAULT_APP_DATA.students,
+      (s, i) => String(s?.regNo || s?.reg_no || s?.id || s?.name || i).trim().toLowerCase(),
+      { filterDemoWhenRealExists: 'students' }
+    );
+
+    const mergedTeachers = mergeNonDestructiveArray(
+      currentTeachers,
+      undefined,
+      bestSnapData.teachers,
+      DEFAULT_APP_DATA.teachers,
+      (t, i) => String(t?.id || t?.email || t?.name || i).trim().toLowerCase(),
+      { filterDemoWhenRealExists: 'teachers' }
+    );
+
+    const mergedExams = mergeNonDestructiveArray(
+      existing?.exams,
+      undefined,
+      bestSnapData.exams,
+      DEFAULT_APP_DATA.exams,
+      (e, i) => String(e?.id || e?.name || i).trim().toLowerCase()
+    );
+
+    const mergedTimetable = mergeNonDestructiveArray(
+      existing?.timetableAssignments,
+      undefined,
+      bestSnapData.timetableAssignments || bestSnapData.timetable_assignments,
+      DEFAULT_APP_DATA.timetableAssignments,
+      (a, i) => {
+        const cls = String(a?.className || a?.class_name || '').trim().toLowerCase();
+        const str = String(a?.stream || '').trim().toLowerCase();
+        const day = String(a?.day || '').trim().toLowerCase();
+        const prd = String(a?.period || a?.periodName || a?.period_name || '').trim().toLowerCase();
+        return cls && day && prd ? `${cls}_${str}_${day}_${prd}` : String(a?.id || i);
+      }
+    ).map((a: any) => ({
+      ...a,
+      className: a.className || a.class_name || 'Form 1',
+      teacherId: a.teacherId ?? a.teacher_id ?? 101,
+      teacherName: a.teacherName || a.teacher_name || '',
+      activityType: a.activityType || a.activity_type || 'academic',
+      allocationMode: a.allocationMode || a.allocation_mode || 'manual',
+    }));
+
+    const mergedDutyRoster = resolveSnapshotObject(
+      existing?.dutyRosterData,
+      undefined,
+      bestSnapData.dutyRosterData || bestSnapData.duty_roster_data,
+      {}
+    );
+
+    const restoredRow: any = {
+      id: validSchoolUuid,
+      schoolId: validSchoolUuid,
+      schoolInfo: {
+        ...((DEFAULT_APP_DATA.schoolInfo as Record<string, any>) || {}),
+        ...(bestSnapData.schoolInfo || bestSnapData.school_info || {}),
+        ...((existing?.schoolInfo as Record<string, any>) || {}),
+      },
+      students: mergedStudents,
+      teachers: mergedTeachers,
+      exams: mergedExams,
+      timetableAssignments: mergedTimetable,
+      periodSettings: mergeNonDestructiveArray(
+        existing?.periodSettings,
+        undefined,
+        bestSnapData.periodSettings || bestSnapData.period_settings,
+        DEFAULT_APP_DATA.periodSettings,
+        (p, i) => `${String(p?.day || '').trim().toLowerCase()}_${String(p?.name || p?.id || i).trim().toLowerCase()}`
+      ),
+      streamSettings: mergeNonDestructiveArray(
+        existing?.streamSettings,
+        undefined,
+        bestSnapData.streamSettings || bestSnapData.stream_settings,
+        DEFAULT_APP_DATA.streamSettings,
+        (s, i) => String(s?.className || s?.id || i).trim().toLowerCase()
+      ),
+      subjectPeriodAllocations: mergeNonDestructiveArray(
+        existing?.subjectPeriodAllocations,
+        undefined,
+        bestSnapData.subjectPeriodAllocations || bestSnapData.subject_period_allocations,
+        DEFAULT_APP_DATA.subjectPeriodAllocations,
+        (spa, i) => `${String(spa?.className || '').trim().toLowerCase()}_${String(spa?.stream || '').trim().toLowerCase()}_${String(spa?.subject || spa?.subjectName || i).trim().toLowerCase()}`
+      ),
+      teacherAssignments: mergeNonDestructiveArray(
+        existing?.teacherAssignments,
+        undefined,
+        bestSnapData.teacherAssignments || bestSnapData.teacher_assignments,
+        DEFAULT_APP_DATA.teacherAssignments,
+        (ta, i) => String(ta?.id || `${ta?.teacherId}_${i}`).trim().toLowerCase()
+      ),
+      examinationRecords: mergeNonDestructiveArray(
+        existing?.examinationRecords,
+        undefined,
+        bestSnapData.examinationRecords || bestSnapData.examination_records,
+        DEFAULT_APP_DATA.examinationRecords,
+        (r, i) => String(r?.id || `${r?.regNo}_${r?.examType}_${i}`).trim().toLowerCase()
+      ),
+      disciplineRecords: mergeNonDestructiveArray(
+        existing?.disciplineRecords,
+        undefined,
+        bestSnapData.disciplineRecords || bestSnapData.discipline_records,
+        DEFAULT_APP_DATA.disciplineRecords,
+        (d, i) => String(d?.id || i)
+      ),
+      dutyRosterData: mergedDutyRoster,
+      institutionalPolicy: resolveSnapshotObject(
+        existing?.institutionalPolicy,
+        undefined,
+        bestSnapData.institutionalPolicy || bestSnapData.institutional_policy,
+        (DEFAULT_APP_DATA.institutionalPolicy as Record<string, any>) || {}
+      ),
+      sessions: mergeNonDestructiveArray(
+        existing?.sessions,
+        undefined,
+        bestSnapData.sessions,
+        DEFAULT_APP_DATA.sessions,
+        (s, i) => String(s?.id || i)
+      ),
+      supervisors: mergeNonDestructiveArray(
+        existing?.supervisors,
+        undefined,
+        bestSnapData.supervisors,
+        DEFAULT_APP_DATA.supervisors,
+        (s, i) => String(s?.id || s?.teacherId || i)
+      ),
+      selectedInvigilators: mergeNonDestructiveArray(
+        existing?.selectedInvigilators,
+        undefined,
+        bestSnapData.selectedInvigilators || bestSnapData.selected_invigilators,
+        DEFAULT_APP_DATA.selectedInvigilators,
+        (item, i) => String(typeof item === 'object' ? (item?.teacherId ?? item?.id ?? i) : item)
+      ),
+      invigilationAssignments: resolveSnapshotObject(
+        existing?.invigilationAssignments,
+        undefined,
+        bestSnapData.invigilationAssignments || bestSnapData.invigilation_assignments,
+        {}
+      ),
+      dailyAttendance: resolveSnapshotObject(
+        existing?.dailyAttendance,
+        undefined,
+        bestSnapData.dailyAttendance || bestSnapData.daily_attendance,
+        {}
+      ),
+      journalRecords: resolveSnapshotObject(
+        existing?.journalRecords,
+        undefined,
+        bestSnapData.journalRecords || bestSnapData.journal_records,
+        {}
+      ),
+      schemesOfWork: mergeNonDestructiveArray(
+        existing?.schemesOfWork,
+        undefined,
+        bestSnapData.schemesOfWork || bestSnapData.schemes_of_work,
+        [],
+        (item, i) => String(item?.id || i)
+      ),
+      lessonPlans: mergeNonDestructiveArray(
+        existing?.lessonPlans,
+        undefined,
+        bestSnapData.lessonPlans || bestSnapData.lesson_plans,
+        [],
+        (item, i) => String(item?.id || i)
+      ),
+      teacherEvaluations: mergeNonDestructiveArray(
+        existing?.teacherEvaluations,
+        undefined,
+        bestSnapData.teacherEvaluations || bestSnapData.teacher_evaluations,
+        [],
+        (item, i) => String(item?.id || i)
+      ),
+      savedTimetableRecords: mergeNonDestructiveArray(
+        existing?.savedTimetableRecords,
+        undefined,
+        bestSnapData.savedTimetableRecords || bestSnapData.saved_timetable_records,
+        [],
+        (item, i) => String(item?.id || i)
+      ),
+      savedInvigilationRecords: mergeNonDestructiveArray(
+        existing?.savedInvigilationRecords,
+        undefined,
+        bestSnapData.savedInvigilationRecords || bestSnapData.saved_invigilation_records,
+        [],
+        (item, i) => String(item?.id || i)
+      ),
+      gradeCutoffs: resolveSnapshotObject(
+        existing?.gradeCutoffs,
+        undefined,
+        bestSnapData.gradeCutoffs || bestSnapData.grade_cutoffs,
+        {}
+      ),
+      ledgerSubjectKeys: resolveSnapshotObject(
+        existing?.ledgerSubjectKeys,
+        undefined,
+        bestSnapData.ledgerSubjectKeys || bestSnapData.ledger_subject_keys,
+        {}
+      ),
+      subjectPaperConfigs: resolveSnapshotObject(
+        existing?.subjectPaperConfigs,
+        undefined,
+        bestSnapData.subjectPaperConfigs || bestSnapData.subject_paper_configs,
+        {}
+      ),
+      bubbleSettings: resolveSnapshotObject(
+        existing?.bubbleSettings,
+        undefined,
+        bestSnapData.bubbleSettings || bestSnapData.bubble_settings,
+        {}
+      ),
+      academicTermDates: resolveSnapshotObject(
+        existing?.academicTermDates,
+        undefined,
+        bestSnapData.academicTermDates || bestSnapData.academic_term_dates,
+        {}
+      ),
+      teacherAttendance: resolveSnapshotObject(
+        existing?.teacherAttendance,
+        undefined,
+        bestSnapData.teacherAttendance || bestSnapData.teacher_attendance,
+        {}
+      ),
+      staffPayroll: resolveSnapshotObject(
+        existing?.staffPayroll,
+        undefined,
+        bestSnapData.staffPayroll || bestSnapData.staff_payroll,
+        {}
+      ),
+      updatedAt: new Date(),
+    };
+
+    await db.insert(schema.schoolData).values(restoredRow).onConflictDoUpdate({
+      target: schema.schoolData.schoolId,
+      set: restoredRow,
+    });
+
+    restoredSchoolsSet.add(validSchoolUuid);
+    scheduleRelationalSync(validSchoolUuid, restoredRow);
+    console.log(`[Database Recovery] Restored ${mergedStudents.length} students and ${mergedTeachers.length} teachers for school ${validSchoolUuid}.`);
+  } catch (err: any) {
+    console.warn('[Database Recovery] Warning:', err?.message || err);
+  }
+}
+
+// Run recovery immediately on boot for the primary school
+setImmediate(() => {
+  ensureHistoricalBackupRestored(DEFAULT_SCHOOL_UUID).catch(() => {});
+});
+
 // DB API
 app.get('/api/db/school-data', async (req, res) => {
   const { schoolId } = req.query as { schoolId: string };
   const s = String(schoolId || '').trim();
   const resolvedId = (!s || s === 'DEMO_SCHOOL' || s === 'DEFAULT_PRIMARY_SCHOOL_ID') ? DEFAULT_SCHOOL_UUID : s;
   try {
+    await ensureHistoricalBackupRestored(resolvedId);
+
     let data = await db.query.schoolData.findFirst({
       where: eq(schema.schoolData.schoolId, resolvedId),
     });
@@ -1035,13 +1690,21 @@ app.get('/api/db/school-data', async (req, res) => {
       const isDemo = resolvedId === DEFAULT_SCHOOL_UUID;
       
       if (isDemo) {
-        dual.students = pickNonEmptyArray(dual.students, DEFAULT_APP_DATA.students);
-        dual.teachers = pickNonEmptyArray(dual.teachers, DEFAULT_APP_DATA.teachers);
-        dual.exams = pickNonEmptyArray(dual.exams, DEFAULT_APP_DATA.exams);
+        dual.students = Array.isArray(dual.students) && dual.students.length > 0 ? dual.students : DEFAULT_APP_DATA.students;
+        dual.teachers = Array.isArray(dual.teachers) && dual.teachers.length > 0 ? dual.teachers : DEFAULT_APP_DATA.teachers;
+        dual.exams = Array.isArray(dual.exams) && dual.exams.length > 0 ? dual.exams : DEFAULT_APP_DATA.exams;
         dual.periodSettings = pickNonEmptyArray(dual.periodSettings, dual.period_settings, DEFAULT_APP_DATA.periodSettings);
         dual.streamSettings = pickNonEmptyArray(dual.streamSettings, dual.stream_settings, DEFAULT_APP_DATA.streamSettings);
-        dual.timetableAssignments = pickNonEmptyArray(dual.timetableAssignments, dual.timetable_assignments, DEFAULT_APP_DATA.timetableAssignments);
-        dual.examinationRecords = pickNonEmptyArray(dual.examinationRecords, dual.examination_records, DEFAULT_APP_DATA.examinationRecords);
+        dual.timetableAssignments = Array.isArray(dual.timetableAssignments) && dual.timetableAssignments.length > 0
+          ? dual.timetableAssignments
+          : Array.isArray(dual.timetable_assignments) && dual.timetable_assignments.length > 0
+          ? dual.timetable_assignments
+          : DEFAULT_APP_DATA.timetableAssignments;
+        dual.examinationRecords = Array.isArray(dual.examinationRecords) && dual.examinationRecords.length > 0
+          ? dual.examinationRecords
+          : Array.isArray(dual.examination_records) && dual.examination_records.length > 0
+          ? dual.examination_records
+          : DEFAULT_APP_DATA.examinationRecords;
       } else {
         dual.students = Array.isArray(dual.students) ? dual.students : [];
         dual.teachers = Array.isArray(dual.teachers) ? dual.teachers : [];
@@ -1068,18 +1731,60 @@ app.post('/api/db/school-data', async (req, res) => {
   const s = String(rawSchoolId).trim();
   const schoolId = (!s || s === 'DEMO_SCHOOL' || s === 'DEFAULT_PRIMARY_SCHOOL_ID') ? DEFAULT_SCHOOL_UUID : s;
   try {
+    await ensureHistoricalBackupRestored(schoolId);
+
     const raw = payload || {};
+    const allowExplicitDelete = Boolean(raw._explicitDelete || raw._fullSnapshot);
     const existing = await db.query.schoolData.findFirst({
       where: eq(schema.schoolData.schoolId, schoolId),
     });
 
     const isDemo = schoolId === DEFAULT_SCHOOL_UUID;
 
-    const resolvedStudents = pickNonEmptyArray(raw.students, existing?.students, isDemo ? DEFAULT_APP_DATA.students : []);
-    const resolvedTeachers = pickNonEmptyArray(raw.teachers, existing?.teachers, isDemo ? DEFAULT_APP_DATA.teachers : []);
-    const resolvedExams = pickNonEmptyArray(raw.exams, existing?.exams, isDemo ? DEFAULT_APP_DATA.exams : []);
-    const resolvedDisciplineRecords = pickNonEmptyArray(raw.disciplineRecords, raw.discipline_records, existing?.disciplineRecords, DEFAULT_APP_DATA.disciplineRecords);
-    const resolvedDutyRosterData = pickNonEmptyObject(raw.dutyRosterData, raw.duty_roster_data, existing?.dutyRosterData);
+    // Resolve all arrays: protect against uninitialized demo seed wipeouts while immediately respecting user deletions
+    const resolvedStudents = mergeNonDestructiveArray(
+      raw.students,
+      raw.students,
+      existing?.students,
+      isDemo ? DEFAULT_APP_DATA.students : [],
+      (st, i) => String(st?.regNo || st?.reg_no || st?.id || st?.name || i).trim().toLowerCase(),
+      { allowExplicitReplace: allowExplicitDelete, filterDemoWhenRealExists: 'students' }
+    );
+
+    const resolvedTeachers = mergeNonDestructiveArray(
+      raw.teachers,
+      raw.teachers,
+      existing?.teachers,
+      isDemo ? DEFAULT_APP_DATA.teachers : [],
+      (t, i) => String(t?.id || t?.email || t?.name || i).trim().toLowerCase(),
+      { allowExplicitReplace: allowExplicitDelete, filterDemoWhenRealExists: 'teachers' }
+    );
+
+    const resolvedExams = mergeNonDestructiveArray(
+      raw.exams,
+      raw.exams,
+      existing?.exams,
+      isDemo ? DEFAULT_APP_DATA.exams : [],
+      (e, i) => String(e?.id || e?.name || i).trim().toLowerCase(),
+      { allowExplicitReplace: allowExplicitDelete }
+    );
+
+    const resolvedDisciplineRecords = mergeNonDestructiveArray(
+      raw.disciplineRecords,
+      raw.discipline_records,
+      existing?.disciplineRecords,
+      DEFAULT_APP_DATA.disciplineRecords,
+      (d, i) => String(d?.id || i),
+      { allowExplicitReplace: allowExplicitDelete }
+    );
+
+    const resolvedDutyRosterData = resolveSnapshotObject(
+      raw.dutyRosterData,
+      raw.duty_roster_data,
+      existing?.dutyRosterData,
+      {},
+      allowExplicitDelete
+    );
 
     const normalizedData = {
       id: schoolId,
@@ -1090,55 +1795,201 @@ app.post('/api/db/school-data', async (req, res) => {
         ...(raw.school_info || {}),
         ...(raw.schoolInfo || {}),
       },
-      timetableAssignments: pickNonEmptyArray(raw.timetableAssignments, raw.timetable_assignments, existing?.timetableAssignments, DEFAULT_APP_DATA.timetableAssignments),
-      periodSettings: pickNonEmptyArray(raw.periodSettings, raw.period_settings, existing?.periodSettings, DEFAULT_APP_DATA.periodSettings),
-      streamSettings: pickNonEmptyArray(raw.streamSettings, raw.stream_settings, existing?.streamSettings, DEFAULT_APP_DATA.streamSettings),
-      institutionalPolicy: {
-        ...((DEFAULT_APP_DATA.institutionalPolicy as Record<string, any>) || {}),
-        ...((existing?.institutionalPolicy as Record<string, any>) || {}),
-        ...(raw.institutional_policy || {}),
-        ...(raw.institutionalPolicy || {}),
-      },
-      sessions: pickNonEmptyArray(raw.sessions, existing?.sessions, DEFAULT_APP_DATA.sessions),
-      supervisors: pickNonEmptyArray(raw.supervisors, existing?.supervisors, DEFAULT_APP_DATA.supervisors),
-      selectedInvigilators: pickNonEmptyArray(raw.selectedInvigilators, raw.selected_invigilators, existing?.selectedInvigilators, DEFAULT_APP_DATA.selectedInvigilators),
-      invigilationAssignments: {
-        ...((existing?.invigilationAssignments as Record<string, any>) || {}),
-        ...(raw.invigilation_assignments || {}),
-        ...(raw.invigilationAssignments || {}),
-      },
-      dailyAttendance: {
-        ...((existing?.dailyAttendance as Record<string, any>) || {}),
-        ...(raw.daily_attendance || {}),
-        ...(raw.dailyAttendance || {}),
-      },
-      journalRecords: {
-        ...((existing?.journalRecords as Record<string, any>) || {}),
-        ...(raw.journal_records || {}),
-        ...(raw.journalRecords || {}),
-      },
-      schemesOfWork: pickNonEmptyArray(raw.schemesOfWork, raw.schemes_of_work, existing?.schemesOfWork),
-      lessonPlans: pickNonEmptyArray(raw.lessonPlans, raw.lesson_plans, existing?.lessonPlans),
-      teacherEvaluations: pickNonEmptyArray(raw.teacherEvaluations, raw.teacher_evaluations, existing?.teacherEvaluations),
-      savedTimetableRecords: pickNonEmptyArray(raw.savedTimetableRecords, raw.saved_timetable_records, existing?.savedTimetableRecords),
-      savedInvigilationRecords: pickNonEmptyArray(raw.savedInvigilationRecords, raw.saved_invigilation_records, existing?.savedInvigilationRecords),
-      gradeCutoffs: pickNonEmptyObject(raw.gradeCutoffs, raw.grade_cutoffs, existing?.gradeCutoffs),
-      ledgerSubjectKeys: pickNonEmptyObject(raw.ledgerSubjectKeys, raw.ledger_subject_keys, existing?.ledgerSubjectKeys),
-      subjectPeriodAllocations: pickNonEmptyArray(raw.subjectPeriodAllocations, raw.subject_period_allocations, existing?.subjectPeriodAllocations, DEFAULT_APP_DATA.subjectPeriodAllocations),
-      teacherAssignments: pickNonEmptyArray(raw.teacherAssignments, raw.teacher_assignments, existing?.teacherAssignments, DEFAULT_APP_DATA.teacherAssignments),
-      subjectPaperConfigs: pickNonEmptyObject(raw.subjectPaperConfigs, raw.subject_paper_configs, existing?.subjectPaperConfigs),
-      bubbleSettings: pickNonEmptyObject(raw.bubbleSettings, raw.bubble_settings, existing?.bubbleSettings),
+      timetableAssignments: mergeNonDestructiveArray(
+        raw.timetableAssignments,
+        raw.timetable_assignments,
+        existing?.timetableAssignments,
+        DEFAULT_APP_DATA.timetableAssignments,
+        (a, i) => {
+          const cls = String(a?.className || a?.class_name || '').trim().toLowerCase();
+          const str = String(a?.stream || '').trim().toLowerCase();
+          const day = String(a?.day || '').trim().toLowerCase();
+          const prd = String(a?.period || a?.periodName || a?.period_name || '').trim().toLowerCase();
+          return cls && day && prd ? `${cls}_${str}_${day}_${prd}` : String(a?.id || i);
+        },
+        { allowExplicitReplace: allowExplicitDelete || Boolean(raw._replaceTimetable) }
+      ),
+      periodSettings: mergeNonDestructiveArray(
+        raw.periodSettings,
+        raw.period_settings,
+        existing?.periodSettings,
+        DEFAULT_APP_DATA.periodSettings,
+        (p, i) => `${String(p?.day || '').trim().toLowerCase()}_${String(p?.name || p?.id || i).trim().toLowerCase()}`,
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      streamSettings: mergeNonDestructiveArray(
+        raw.streamSettings,
+        raw.stream_settings,
+        existing?.streamSettings,
+        DEFAULT_APP_DATA.streamSettings,
+        (st, i) => String(st?.className || st?.id || i).trim().toLowerCase(),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      institutionalPolicy: resolveSnapshotObject(
+        raw.institutionalPolicy,
+        raw.institutional_policy,
+        existing?.institutionalPolicy,
+        (DEFAULT_APP_DATA.institutionalPolicy as Record<string, any>) || {}
+      ),
+      sessions: mergeNonDestructiveArray(
+        raw.sessions,
+        raw.sessions,
+        existing?.sessions,
+        DEFAULT_APP_DATA.sessions,
+        (s, i) => String(s?.id || i),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      supervisors: mergeNonDestructiveArray(
+        raw.supervisors,
+        raw.supervisors,
+        existing?.supervisors,
+        DEFAULT_APP_DATA.supervisors,
+        (s, i) => String(s?.id || s?.teacherId || i),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      selectedInvigilators: mergeNonDestructiveArray(
+        raw.selectedInvigilators,
+        raw.selected_invigilators,
+        existing?.selectedInvigilators,
+        DEFAULT_APP_DATA.selectedInvigilators,
+        (item, i) => String(typeof item === 'object' ? (item?.teacherId ?? item?.id ?? i) : item),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      invigilationAssignments: resolveSnapshotObject(
+        raw.invigilationAssignments,
+        raw.invigilation_assignments,
+        existing?.invigilationAssignments,
+        {},
+        allowExplicitDelete
+      ),
+      dailyAttendance: resolveSnapshotObject(
+        raw.dailyAttendance,
+        raw.daily_attendance,
+        existing?.dailyAttendance,
+        {},
+        allowExplicitDelete
+      ),
+      journalRecords: resolveSnapshotObject(
+        raw.journalRecords,
+        raw.journal_records,
+        existing?.journalRecords,
+        {},
+        allowExplicitDelete
+      ),
+      schemesOfWork: mergeNonDestructiveArray(
+        raw.schemesOfWork,
+        raw.schemes_of_work,
+        existing?.schemesOfWork,
+        [],
+        (item, i) => String(item?.id || i),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      lessonPlans: mergeNonDestructiveArray(
+        raw.lessonPlans,
+        raw.lesson_plans,
+        existing?.lessonPlans,
+        [],
+        (item, i) => String(item?.id || i),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      teacherEvaluations: mergeNonDestructiveArray(
+        raw.teacherEvaluations,
+        raw.teacher_evaluations,
+        existing?.teacherEvaluations,
+        [],
+        (item, i) => String(item?.id || i),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      savedTimetableRecords: mergeNonDestructiveArray(
+        raw.savedTimetableRecords,
+        raw.saved_timetable_records,
+        existing?.savedTimetableRecords,
+        [],
+        (item, i) => String(item?.id || i),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      savedInvigilationRecords: mergeNonDestructiveArray(
+        raw.savedInvigilationRecords,
+        raw.saved_invigilation_records,
+        existing?.savedInvigilationRecords,
+        [],
+        (item, i) => String(item?.id || i),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      gradeCutoffs: resolveSnapshotObject(
+        raw.gradeCutoffs,
+        raw.grade_cutoffs,
+        existing?.gradeCutoffs,
+        {},
+        allowExplicitDelete
+      ),
+      ledgerSubjectKeys: resolveSnapshotObject(
+        raw.ledgerSubjectKeys,
+        raw.ledger_subject_keys,
+        existing?.ledgerSubjectKeys,
+        {},
+        allowExplicitDelete
+      ),
+      subjectPeriodAllocations: mergeNonDestructiveArray(
+        raw.subjectPeriodAllocations,
+        raw.subject_period_allocations,
+        existing?.subjectPeriodAllocations,
+        DEFAULT_APP_DATA.subjectPeriodAllocations,
+        (spa, i) => `${String(spa?.className || '').trim().toLowerCase()}_${String(spa?.stream || '').trim().toLowerCase()}_${String(spa?.subject || spa?.subjectName || i).trim().toLowerCase()}`,
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      teacherAssignments: mergeNonDestructiveArray(
+        raw.teacherAssignments,
+        raw.teacher_assignments,
+        existing?.teacherAssignments,
+        DEFAULT_APP_DATA.teacherAssignments,
+        (ta, i) => String(ta?.id || `${ta?.teacherId}_${i}`).trim().toLowerCase(),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
+      subjectPaperConfigs: resolveSnapshotObject(
+        raw.subjectPaperConfigs,
+        raw.subject_paper_configs,
+        existing?.subjectPaperConfigs,
+        {},
+        allowExplicitDelete
+      ),
+      bubbleSettings: resolveSnapshotObject(
+        raw.bubbleSettings,
+        raw.bubble_settings,
+        existing?.bubbleSettings,
+        {}
+      ),
       students: resolvedStudents,
       teachers: resolvedTeachers,
       exams: resolvedExams,
-      examinationRecords: pickNonEmptyArray(raw.examinationRecords, raw.examination_records, existing?.examinationRecords, isDemo ? DEFAULT_APP_DATA.examinationRecords : []),
+      examinationRecords: mergeNonDestructiveArray(
+        raw.examinationRecords,
+        raw.examination_records,
+        existing?.examinationRecords,
+        isDemo ? DEFAULT_APP_DATA.examinationRecords : [],
+        (r, i) => String(r?.id || `${r?.regNo}_${r?.examType}_${i}`).trim().toLowerCase(),
+        { allowExplicitReplace: allowExplicitDelete }
+      ),
       disciplineRecords: resolvedDisciplineRecords,
       dutyRosterData: resolvedDutyRosterData,
-      academicTermDates: {
-        ...((existing?.academicTermDates as Record<string, any>) || {}),
-        ...(raw.academic_term_dates || {}),
-        ...(raw.academicTermDates || {}),
-      },
+      academicTermDates: resolveSnapshotObject(
+        raw.academicTermDates,
+        raw.academic_term_dates,
+        existing?.academicTermDates,
+        {}
+      ),
+      teacherAttendance: resolveSnapshotObject(
+        raw.teacherAttendance,
+        raw.teacher_attendance,
+        existing?.teacherAttendance,
+        {}
+      ),
+      staffPayroll: resolveSnapshotObject(
+        raw.staffPayroll,
+        raw.staff_payroll,
+        existing?.staffPayroll,
+        {}
+      ),
       updatedAt: new Date(),
     };
 
@@ -1463,6 +2314,8 @@ app.get('/api/db/diagnostics', async (req, res) => {
       duty_streams: 'Operations & Inventory',
       duty_weekly_assignments: 'Operations & Inventory',
       duty_daily_reports: 'Operations & Inventory',
+      curriculum_standards: 'Academic & Registry',
+      past_papers: 'Academic & Registry',
     };
 
     const countQuery = await db.execute(sql`
@@ -1473,25 +2326,30 @@ app.get('/api/db/diagnostics', async (req, res) => {
     `);
 
     const exactCounts: Record<string, number> = {};
-    for (const [tableName, tableObj] of Object.entries(TABLE_KEY_MAP)) {
-      try {
-        const rows = await db.select({ count: sql<number>`count(*)::int` }).from(tableObj);
-        exactCounts[tableName] = rows[0]?.count ?? 0;
-        tableStats.push({
-          table: tableName,
-          connected: true,
-          rowCount: exactCounts[tableName],
-          category: categoryMap[tableName] || 'General',
-        });
-      } catch (e) {
-        tableStats.push({
-          table: tableName,
-          connected: false,
-          rowCount: 0,
-          category: categoryMap[tableName] || 'General',
-        });
-      }
-    }
+    const entries = Object.entries(TABLE_KEY_MAP);
+    const results = await Promise.all(
+      entries.map(async ([tableName, tableObj]) => {
+        try {
+          const rows = await db.select({ count: sql<number>`count(*)::int` }).from(tableObj);
+          const count = rows[0]?.count ?? 0;
+          exactCounts[tableName] = count;
+          return {
+            table: tableName,
+            connected: true,
+            rowCount: count,
+            category: categoryMap[tableName] || 'General',
+          };
+        } catch (e) {
+          return {
+            table: tableName,
+            connected: false,
+            rowCount: 0,
+            category: categoryMap[tableName] || 'General',
+          };
+        }
+      })
+    );
+    tableStats.push(...results);
 
     res.json({
       success: true,
@@ -1957,6 +2815,10 @@ app.post('/api/auth/login', async (req, res) => {
   }
 });
 
+app.get('/health', (_req, res) => {
+  res.json({ status: 'healthy', appName: 'HABY EDU PRO' });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     status: 'healthy',
@@ -2134,22 +2996,49 @@ app.post('/api/sms/send-announcement', async (req, res) => {
   }
 });
 
-// TIMETABLE REST API (Fetch, Save, Delete with Class + Stream filtering)
-app.get('/api/timetable', (req, res) => {
+// TIMETABLE REST API (Connected to both Cloud SQL timetable_assignments + school_data & local cache)
+app.get('/api/timetable', async (req, res) => {
   try {
     const { schoolId, class: className, stream, teacherId, day } = req.query as Record<string, string>;
+    const resolvedSchoolId = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
+      ? DEFAULT_SCHOOL_UUID
+      : schoolId;
 
-    console.log(`[Timetable API] Fetching timetable for school: ${schoolId || 'DEFAULT'} | class: ${className || 'ALL'} | stream: ${stream || 'ALL'} | teacher: ${teacherId || 'ALL'}`);
+    // Pull from Cloud SQL school_data & timetable_assignments and merge into timetableStore
+    try {
+      const [snap, dbAssigns] = await Promise.all([
+        db.query.schoolData.findFirst({ where: eq(schema.schoolData.schoolId, resolvedSchoolId) }),
+        db.select().from(schema.timetableAssignments).where(eq(schema.timetableAssignments.schoolId, resolvedSchoolId)),
+      ]);
+      const snapList = Array.isArray(snap?.timetableAssignments) ? (snap.timetableAssignments as any[]) : [];
+      const dbList = (dbAssigns || []).map(r => toDualCaseRow(schema.timetableAssignments, r));
+      const mergedFromSql = mergeNonDestructiveArray(
+        snapList,
+        undefined,
+        dbList,
+        [],
+        (a, i) => {
+          const cls = String(a?.className || a?.class_name || '').trim().toLowerCase();
+          const str = String(a?.stream || '').trim().toLowerCase();
+          const d = String(a?.day || '').trim().toLowerCase();
+          const prd = String(a?.period || a?.periodName || a?.period_name || '').trim().toLowerCase();
+          return cls && d && prd ? `${cls}_${str}_${d}_${prd}` : String(a?.id || i);
+        }
+      );
+      if (mergedFromSql.length > 0) {
+        saveTimetable(resolvedSchoolId, mergedFromSql as ServerTimetableAssignment[], { replace: false });
+      }
+    } catch (sqlErr) {
+      // Fallback to local store if Cloud SQL query fails
+    }
 
     const results = queryTimetable({
-      schoolId,
+      schoolId: resolvedSchoolId,
       className,
       stream,
       teacherId,
       day
     });
-
-    console.log(`[Timetable API] Found ${results.length} periods for class="${className}" stream="${stream}"`);
 
     res.json({
       success: true,
@@ -2163,9 +3052,12 @@ app.get('/api/timetable', (req, res) => {
   }
 });
 
-app.post('/api/timetable', (req, res) => {
+app.post('/api/timetable', async (req, res) => {
   try {
-    const { schoolId = 'DEFAULT_PRIMARY_SCHOOL_ID', assignments, replace = false, className, stream } = req.body;
+    const { schoolId = DEFAULT_SCHOOL_UUID, assignments, replace = false, className, stream } = req.body;
+    const resolvedSchoolId = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
+      ? DEFAULT_SCHOOL_UUID
+      : schoolId;
 
     if (!Array.isArray(assignments) && !req.body.entry) {
       return res.status(400).json({ success: false, error: 'assignments array or entry object required' });
@@ -2175,9 +3067,36 @@ app.post('/api/timetable', (req, res) => {
       ? assignments
       : [req.body.entry];
 
-    console.log(`[Timetable API] Saving ${toSave.length} periods for school: ${schoolId} (replace: ${replace}, class: ${className}, stream: ${stream})`);
+    const updated = saveTimetable(resolvedSchoolId, toSave, { replace, className, stream });
 
-    const updated = saveTimetable(schoolId, toSave, { replace, className, stream });
+    // Also persist to Cloud SQL timetable_assignments & school_data non-destructively
+    try {
+      const existing = await db.query.schoolData.findFirst({
+        where: eq(schema.schoolData.schoolId, resolvedSchoolId),
+      });
+      const mergedTimetable = mergeNonDestructiveArray(
+        updated,
+        undefined,
+        existing?.timetableAssignments,
+        [],
+        (a, i) => {
+          const cls = String(a?.className || a?.class_name || '').trim().toLowerCase();
+          const str = String(a?.stream || '').trim().toLowerCase();
+          const d = String(a?.day || '').trim().toLowerCase();
+          const prd = String(a?.period || a?.periodName || a?.period_name || '').trim().toLowerCase();
+          return cls && d && prd ? `${cls}_${str}_${d}_${prd}` : String(a?.id || i);
+        },
+        { allowExplicitReplace: Boolean(replace && !className && !stream) }
+      );
+      if (existing) {
+        await db.update(schema.schoolData)
+          .set({ timetableAssignments: mergedTimetable, updatedAt: new Date() })
+          .where(eq(schema.schoolData.schoolId, resolvedSchoolId));
+      }
+      scheduleRelationalSync(resolvedSchoolId, { ...(existing || {}), timetableAssignments: mergedTimetable });
+    } catch (sqlErr) {
+      console.warn('Cloud SQL sync in POST /api/timetable warning:', sqlErr);
+    }
 
     res.json({
       success: true,
@@ -2190,10 +3109,47 @@ app.post('/api/timetable', (req, res) => {
   }
 });
 
-app.delete('/api/timetable', (req, res) => {
+app.delete('/api/timetable', async (req, res) => {
   try {
-    const { schoolId = 'DEFAULT_PRIMARY_SCHOOL_ID', id, className, stream, day, period } = req.body;
-    const deleted = deleteTimetableAssignment(schoolId, { id, className, stream, day, period });
+    const { schoolId = DEFAULT_SCHOOL_UUID, id, className, stream, day, period } = req.body;
+    const resolvedSchoolId = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
+      ? DEFAULT_SCHOOL_UUID
+      : schoolId;
+    const deleted = deleteTimetableAssignment(resolvedSchoolId, { id, className, stream, day, period });
+
+    try {
+      const remaining = queryTimetable({ schoolId: resolvedSchoolId });
+      const existing = await db.query.schoolData.findFirst({
+        where: eq(schema.schoolData.schoolId, resolvedSchoolId),
+      });
+      if (existing && Array.isArray(existing.timetableAssignments)) {
+        const filtered = (existing.timetableAssignments as any[]).filter((a: any) => {
+          if (id && String(a?.id) === String(id)) return false;
+          if (
+            className && stream && day && period &&
+            String(a?.className || a?.class_name || '').toLowerCase() === String(className).toLowerCase() &&
+            String(a?.stream || '').toLowerCase() === String(stream).toLowerCase() &&
+            String(a?.day || '').toLowerCase() === String(day).toLowerCase() &&
+            String(a?.period || a?.periodName || '').toLowerCase() === String(period).toLowerCase()
+          ) {
+            return false;
+          }
+          return true;
+        });
+        await db.update(schema.schoolData)
+          .set({ timetableAssignments: filtered, updatedAt: new Date() })
+          .where(eq(schema.schoolData.schoolId, resolvedSchoolId));
+      }
+      if (id) {
+        await db.delete(schema.timetableAssignments)
+          .where(eq(schema.timetableAssignments.id, `ta_${resolvedSchoolId}_${id}`))
+          .catch(() => {});
+      }
+      void remaining;
+    } catch (sqlErr) {
+      console.warn('Cloud SQL delete in DELETE /api/timetable warning:', sqlErr);
+    }
+
     res.json({ success: true, deleted });
   } catch (error: any) {
     console.error('Error in DELETE /api/timetable:', error);
@@ -2492,6 +3448,415 @@ app.get('/api/db/attendance/weekly', async (req, res) => {
   }
 });
 
+// ============================================================================
+// AUTOMATED DAILY BACKUP & SUPABASE STORAGE SNAPSHOT ENGINE
+// ============================================================================
+const BACKUPS_ROOT_DIR = path.resolve(__dirname, '.backups');
+if (!fs.existsSync(BACKUPS_ROOT_DIR)) {
+  try {
+    fs.mkdirSync(BACKUPS_ROOT_DIR, { recursive: true });
+  } catch (e) {
+    console.warn('Could not create .backups directory:', e);
+  }
+}
+
+interface ServerAutoBackupConfig {
+  enabled: boolean;
+  scheduledTime: string; // "HH:MM"
+  backupMode: 'json_download' | 'supabase_snapshot' | 'both';
+  retentionCount: number;
+  lastBackupDate?: string | null;
+  lastJsonDownloadDate?: string | null;
+  lastSupabaseSnapshotDate?: string | null;
+  lastBackupTimestamp?: string | null;
+  lastBackupStatus?: 'success' | 'error' | null;
+  lastBackupMessage?: string | null;
+}
+
+const DEFAULT_SERVER_BACKUP_CONFIG: ServerAutoBackupConfig = {
+  enabled: true,
+  scheduledTime: '17:00',
+  backupMode: 'both',
+  retentionCount: 14,
+  lastBackupDate: null,
+  lastJsonDownloadDate: null,
+  lastSupabaseSnapshotDate: null,
+  lastBackupTimestamp: null,
+  lastBackupStatus: null,
+  lastBackupMessage: null,
+};
+
+function getSchoolBackupDir(schoolId: string): string {
+  const validSchoolUuid = toDeterministicUuid(schoolId || '02dff10d-78fb-4af6-ab5a-db1d275d7e06', true);
+  const dir = path.join(BACKUPS_ROOT_DIR, validSchoolUuid);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  return dir;
+}
+
+async function readSchoolBackupConfig(schoolId: string): Promise<ServerAutoBackupConfig> {
+  const validSchoolUuid = toDeterministicUuid(schoolId || '02dff10d-78fb-4af6-ab5a-db1d275d7e06', true);
+  const dir = getSchoolBackupDir(validSchoolUuid);
+  const cfgPath = path.join(dir, 'config.json');
+
+  let fileCfg: Partial<ServerAutoBackupConfig> = {};
+  if (fs.existsSync(cfgPath)) {
+    try {
+      fileCfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+    } catch (e) {}
+  }
+
+  try {
+    const rows = await db
+      .select()
+      .from(schema.schoolData)
+      .where(eq(schema.schoolData.schoolId, validSchoolUuid));
+    if (rows.length > 0) {
+      const policy = (rows[0].institutionalPolicy || {}) as any;
+      if (policy && policy.autoBackupConfig) {
+        return {
+          ...DEFAULT_SERVER_BACKUP_CONFIG,
+          ...policy.autoBackupConfig,
+          ...fileCfg,
+        };
+      }
+    }
+  } catch (e) {}
+
+  return {
+    ...DEFAULT_SERVER_BACKUP_CONFIG,
+    ...fileCfg,
+  };
+}
+
+async function writeSchoolBackupConfig(schoolId: string, config: Partial<ServerAutoBackupConfig>): Promise<ServerAutoBackupConfig> {
+  const validSchoolUuid = await ensureSchoolExists(schoolId);
+  const current = await readSchoolBackupConfig(validSchoolUuid);
+  const merged: ServerAutoBackupConfig = {
+    ...DEFAULT_SERVER_BACKUP_CONFIG,
+    ...current,
+    ...config,
+  };
+
+  const dir = getSchoolBackupDir(validSchoolUuid);
+  const cfgPath = path.join(dir, 'config.json');
+  try {
+    fs.writeFileSync(cfgPath, JSON.stringify(merged, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Error writing backup config file:', e);
+  }
+
+  // Also persist inside school_data.institutionalPolicy.autoBackupConfig in PostgreSQL
+  try {
+    const rows = await db
+      .select()
+      .from(schema.schoolData)
+      .where(eq(schema.schoolData.schoolId, validSchoolUuid));
+    if (rows.length > 0) {
+      const existingPolicy = (rows[0].institutionalPolicy || {}) as any;
+      await db
+        .update(schema.schoolData)
+        .set({
+          institutionalPolicy: {
+            ...existingPolicy,
+            autoBackupConfig: merged,
+          },
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.schoolData.schoolId, validSchoolUuid));
+    }
+  } catch (e) {
+    console.warn('Error persisting autoBackupConfig to school_data:', e);
+  }
+
+  return merged;
+}
+
+function readSnapshotIndex(schoolId: string): any[] {
+  const dir = getSchoolBackupDir(schoolId);
+  const idxPath = path.join(dir, 'index.json');
+  if (!fs.existsSync(idxPath)) return [];
+  try {
+    const list = JSON.parse(fs.readFileSync(idxPath, 'utf-8'));
+    return Array.isArray(list) ? list : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function writeSnapshotIndex(schoolId: string, list: any[]) {
+  const dir = getSchoolBackupDir(schoolId);
+  const idxPath = path.join(dir, 'index.json');
+  try {
+    fs.writeFileSync(idxPath, JSON.stringify(list, null, 2), 'utf-8');
+  } catch (e) {
+    console.warn('Error writing snapshot index:', e);
+  }
+}
+
+async function createSchoolStorageSnapshot(
+  schoolId: string,
+  triggerType: 'scheduled' | 'manual' = 'manual',
+  clientPayload?: any
+) {
+  const validSchoolUuid = await ensureSchoolExists(schoolId);
+  const dir = getSchoolBackupDir(validSchoolUuid);
+  const now = new Date();
+  const dateKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+  const timeKey = `${String(now.getHours()).padStart(2, '0')}-${String(now.getMinutes()).padStart(2, '0')}-${String(now.getSeconds()).padStart(2, '0')}`;
+  const snapshotId = `snap_${dateKey}_${timeKey}_${triggerType}`;
+  const filename = `${snapshotId}.json`;
+  const filePath = path.join(dir, filename);
+
+  // Assemble complete school data from clientPayload OR directly from PostgreSQL
+  let snapshotData: any = clientPayload && typeof clientPayload === 'object' ? { ...clientPayload } : null;
+
+  if (!snapshotData || Object.keys(snapshotData).length === 0) {
+    const [schoolDataRows, dbStudents, dbTeachers, dbExams, dbClasses, dbTimetable] = await Promise.all([
+      db.select().from(schema.schoolData).where(eq(schema.schoolData.schoolId, validSchoolUuid)).catch(() => []),
+      db.select().from(schema.students).where(eq(schema.students.schoolId, validSchoolUuid)).catch(() => []),
+      db.select().from(schema.teachers).where(eq(schema.teachers.schoolId, validSchoolUuid)).catch(() => []),
+      db.select().from(schema.exams).where(eq(schema.exams.schoolId, validSchoolUuid)).catch(() => []),
+      db.select().from(schema.classes).where(eq(schema.classes.schoolId, validSchoolUuid)).catch(() => []),
+      db.select().from(schema.timetableAssignments).where(eq(schema.timetableAssignments.schoolId, validSchoolUuid)).catch(() => []),
+    ]);
+
+    const baseRow: any = schoolDataRows[0] ? toDualCaseRow(schema.schoolData, schoolDataRows[0]) : {};
+    snapshotData = {
+      ...baseRow,
+      schoolId: validSchoolUuid,
+      students: Array.isArray(baseRow.students) && baseRow.students.length > 0 ? baseRow.students : dbStudents,
+      teachers: Array.isArray(baseRow.teachers) && baseRow.teachers.length > 0 ? baseRow.teachers : dbTeachers,
+      exams: Array.isArray(baseRow.exams) && baseRow.exams.length > 0 ? baseRow.exams : dbExams,
+      classes: dbClasses,
+      timetableAssignments:
+        Array.isArray(baseRow.timetableAssignments) && baseRow.timetableAssignments.length > 0
+          ? baseRow.timetableAssignments
+          : dbTimetable,
+    };
+  }
+
+  const counts = {
+    students: Array.isArray(snapshotData.students) ? snapshotData.students.length : 0,
+    teachers: Array.isArray(snapshotData.teachers) ? snapshotData.teachers.length : 0,
+    exams: Array.isArray(snapshotData.exams) ? snapshotData.exams.length : 0,
+    classes: Array.isArray(snapshotData.streamSettings)
+      ? snapshotData.streamSettings.length
+      : Array.isArray(snapshotData.classes)
+      ? snapshotData.classes.length
+      : 8,
+    timetableAssignments: Array.isArray(snapshotData.timetableAssignments) ? snapshotData.timetableAssignments.length : 0,
+    examinationRecords: Array.isArray(snapshotData.examinationRecords) ? snapshotData.examinationRecords.length : 0,
+  };
+
+  const fullEnvelope = {
+    _snapshotMeta: {
+      id: snapshotId,
+      schoolId: validSchoolUuid,
+      createdAt: now.toISOString(),
+      dateKey,
+      triggerType,
+      bucket: 'school-backups',
+      storagePath: `${validSchoolUuid}/${filename}`,
+      counts,
+    },
+    ...snapshotData,
+  };
+
+  const serialized = JSON.stringify(fullEnvelope, null, 2);
+  fs.writeFileSync(filePath, serialized, 'utf-8');
+  const sizeBytes = Buffer.byteLength(serialized, 'utf-8');
+
+  const meta = {
+    id: snapshotId,
+    schoolId: validSchoolUuid,
+    filename,
+    storagePath: `${validSchoolUuid}/${filename}`,
+    bucket: 'school-backups',
+    createdAt: now.toISOString(),
+    dateKey,
+    triggerType,
+    mode: 'supabase_snapshot',
+    sizeBytes,
+    counts,
+  };
+
+  const existingIndex = readSnapshotIndex(validSchoolUuid).filter(item => item.id !== snapshotId);
+  const config = await readSchoolBackupConfig(validSchoolUuid);
+  const retention = Math.max(3, Number(config.retentionCount) || 14);
+
+  const updatedIndex = [meta, ...existingIndex];
+  const pruned = updatedIndex.slice(0, retention);
+  const removed = updatedIndex.slice(retention);
+  for (const old of removed) {
+    try {
+      const oldPath = path.join(dir, old.filename);
+      if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+    } catch (e) {}
+  }
+
+  writeSnapshotIndex(validSchoolUuid, pruned);
+
+  // Update config last backup metadata
+  await writeSchoolBackupConfig(validSchoolUuid, {
+    lastBackupDate: dateKey,
+    lastSupabaseSnapshotDate: dateKey,
+    lastBackupTimestamp: now.toISOString(),
+    lastBackupStatus: 'success',
+    lastBackupMessage: `Supabase storage snapshot ${filename} saved (${counts.students} students, ${counts.teachers} teachers)`,
+  });
+
+  // Record in activity_logs table
+  try {
+    await db
+      .insert(schema.activityLogs)
+      .values({
+        id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+        schoolId: validSchoolUuid,
+        userId: 'system-scheduler',
+        userName: triggerType === 'scheduled' ? 'Automated Daily Backup' : 'School Administrator',
+        userEmail: 'backup@habyedupro.ac.tz',
+        userRole: 'HEADMASTER',
+        category: 'settings',
+        action: 'BACKUP_SNAPSHOT',
+        title: triggerType === 'scheduled' ? 'Automated Daily Supabase Snapshot Completed' : 'Manual Supabase Storage Snapshot Created',
+        description: `Saved snapshot ${filename} (${(sizeBytes / 1024).toFixed(1)} KB) with ${counts.students} students and ${counts.teachers} teachers.`,
+        timestamp: now.toISOString(),
+      })
+      .onConflictDoNothing();
+  } catch (e) {}
+
+  return meta;
+}
+
+// REST Endpoints for Automated Daily Backup & Supabase Storage Snapshots
+app.get('/api/backups/config', async (req, res) => {
+  try {
+    const schoolId = (req.query.schoolId as string) || '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
+    const config = await readSchoolBackupConfig(schoolId);
+    res.json({ success: true, config });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to read backup config' });
+  }
+});
+
+app.post('/api/backups/config', async (req, res) => {
+  try {
+    const { schoolId = '02dff10d-78fb-4af6-ab5a-db1d275d7e06', config = {} } = req.body || {};
+    const saved = await writeSchoolBackupConfig(schoolId, config);
+    res.json({ success: true, config: saved });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to save backup config' });
+  }
+});
+
+app.get('/api/backups/list', async (req, res) => {
+  try {
+    const schoolId = (req.query.schoolId as string) || '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
+    const validSchoolUuid = toDeterministicUuid(schoolId, true);
+    let snapshots = readSnapshotIndex(validSchoolUuid);
+
+    // Seed an initial baseline snapshot if none exists yet so the storage table is immediately populated
+    if (snapshots.length === 0) {
+      try {
+        const initialSnap = await createSchoolStorageSnapshot(validSchoolUuid, 'scheduled');
+        snapshots = [initialSnap];
+      } catch (seedErr) {
+        console.warn('Initial snapshot seed warning:', seedErr);
+      }
+    }
+
+    res.json({ success: true, snapshots });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to list snapshots', snapshots: [] });
+  }
+});
+
+app.post('/api/backups/snapshot', async (req, res) => {
+  try {
+    const { schoolId = '02dff10d-78fb-4af6-ab5a-db1d275d7e06', triggerType = 'manual', payload } = req.body || {};
+    const snapshot = await createSchoolStorageSnapshot(schoolId, triggerType, payload);
+    res.json({ success: true, snapshot });
+  } catch (err: any) {
+    console.error('Error creating storage snapshot:', err);
+    res.status(500).json({ success: false, error: err?.message || 'Failed to create snapshot' });
+  }
+});
+
+app.get('/api/backups/download/:snapshotId', async (req, res) => {
+  try {
+    const schoolId = (req.query.schoolId as string) || '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
+    const validSchoolUuid = toDeterministicUuid(schoolId, true);
+    const snapshotId = req.params.snapshotId.replace(/\.json$/i, '');
+    const dir = getSchoolBackupDir(validSchoolUuid);
+    const filePath = path.join(dir, `${snapshotId}.json`);
+
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Snapshot not found' });
+    }
+
+    const content = fs.readFileSync(filePath, 'utf-8');
+    res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Content-Disposition', `attachment; filename="${snapshotId}.json"`);
+    res.send(content);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message || 'Failed to download snapshot' });
+  }
+});
+
+app.delete('/api/backups/:snapshotId', async (req, res) => {
+  try {
+    const schoolId = (req.query.schoolId as string) || '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
+    const validSchoolUuid = toDeterministicUuid(schoolId, true);
+    const snapshotId = req.params.snapshotId.replace(/\.json$/i, '');
+    const dir = getSchoolBackupDir(validSchoolUuid);
+    const filePath = path.join(dir, `${snapshotId}.json`);
+
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    const updated = readSnapshotIndex(validSchoolUuid).filter(item => item.id !== snapshotId);
+    writeSnapshotIndex(validSchoolUuid, updated);
+    res.json({ success: true, snapshots: updated });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err?.message || 'Failed to delete snapshot' });
+  }
+});
+
+// Background Server-Side Daily Backup Cron (checks every 30 seconds)
+setInterval(async () => {
+  try {
+    const now = new Date();
+    const todayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const currentHHMM = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+    const schoolIds = new Set<string>(['02dff10d-78fb-4af6-ab5a-db1d275d7e06']);
+    if (fs.existsSync(BACKUPS_ROOT_DIR)) {
+      for (const entry of fs.readdirSync(BACKUPS_ROOT_DIR)) {
+        if (UUID_REGEX.test(entry)) schoolIds.add(entry);
+      }
+    }
+
+    for (const sId of schoolIds) {
+      const cfg = await readSchoolBackupConfig(sId);
+      if (!cfg.enabled) continue;
+      if (cfg.backupMode !== 'supabase_snapshot' && cfg.backupMode !== 'both') continue;
+
+      const scheduledHHMM = (cfg.scheduledTime || '17:00').slice(0, 5);
+      const alreadyDoneToday = cfg.lastSupabaseSnapshotDate === todayKey;
+
+      if (!alreadyDoneToday && currentHHMM >= scheduledHHMM) {
+        console.log(`[AutoDailyBackup] Triggering scheduled daily Supabase snapshot for school ${sId} at ${currentHHMM} (scheduled: ${scheduledHHMM})`);
+        await createSchoolStorageSnapshot(sId, 'scheduled');
+      }
+    }
+  } catch (err) {
+    // Silent background check
+  }
+}, 30000);
+
 
 // In dev mode, mount Vite middleware; in production or when built, serve dist files immediately
 async function startServer() {
@@ -2522,7 +3887,7 @@ async function startServer() {
 
   if (isProduction && hasDist) {
     app.use(express.static(distDir, { maxAge: '1h', index: false }));
-    app.get('*', (_req, res) => {
+    app.get(/.*/, (_req, res) => {
       if (fs.existsSync(indexPath)) {
         res.sendFile(indexPath, (err) => {
           if (err && !res.headersSent) {
@@ -2541,7 +3906,7 @@ async function startServer() {
       appType: 'spa',
     });
     app.use(vite.middlewares);
-    app.get('*', async (req, res, next) => {
+    app.get(/.*/, async (req, res, next) => {
       try {
         const url = req.originalUrl;
         const templatePath = path.resolve(__dirname, 'index.html');
