@@ -111,6 +111,9 @@ import { TeacherEntryForm } from './TeacherEntryForm';
 import { GeneralTimetableManualEntry } from './GeneralTimetableManualEntry';
 import { TeacherTimetable } from './TeacherTimetable';
 import { ClassTimetable } from './ClassTimetable';
+import { AdminTimetableExportModal } from './AdminTimetableExportModal';
+import { StreamBatchPeriodEntryModal } from './StreamBatchPeriodEntryModal';
+import { exportAdministrativeTimetableCSV } from '../../utils/adminTimetableExport';
 
 export const renderActivityIcon = (iconName: string, className = "w-3 h-3") => {
   switch (iconName) {
@@ -290,7 +293,9 @@ export const TimetableContainer: React.FC<TimetableContainerProps> = ({
 
   // AI Timetable Assistant Modal state
   const [aiModalOpen, setAiModalOpen] = useState(false);
+  const [streamBatchModalOpen, setStreamBatchModalOpen] = useState(false);
   const [saveSnapshotModalOpen, setSaveSnapshotModalOpen] = useState(false);
+  const [adminExportModalOpen, setAdminExportModalOpen] = useState(false);
   const [snapshotTitle, setSnapshotTitle] = useState('Term 1 Master Timetable');
   const [showExtraCurricularBar, setShowExtraCurricularBar] = useState(false);
 
@@ -1180,6 +1185,16 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
 
             <button
               type="button"
+              onClick={() => setStreamBatchModalOpen(true)}
+              className="px-3.5 py-2 bg-gradient-to-r from-purple-700 to-indigo-700 hover:from-purple-800 hover:to-indigo-800 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all cursor-pointer active:scale-95"
+              title="Ingiza vipindi kwa mkondo (Chagua Mwalimu na Somo, batch setup kwa siku na muda)"
+            >
+              <Zap className="w-3.5 h-3.5 text-yellow-300" />
+              <span>⚡ Upangaji kwa Mkondo</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => {
                 setEditingSlot({
                   className: selectedGeneralClass !== 'All' ? selectedGeneralClass : 'Form 1',
@@ -1236,6 +1251,16 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                   <span>Hifadhi DB</span>
                 </>
               )}
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAdminExportModalOpen(true)}
+              className="px-3.5 py-2 bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-800 hover:to-indigo-800 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+              title="Download official PDF & CSV timetable document formatted for school administrative usage"
+            >
+              <Download className="w-3.5 h-3.5 text-amber-300" />
+              <span>Export Admin (PDF &amp; CSV)</span>
             </button>
 
             <button
@@ -1682,6 +1707,28 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
                 >
                   <Download className="w-3.5 h-3.5 text-rose-600" />
                   <span>PDF</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    exportAdministrativeTimetableCSV({
+                      assignments,
+                      teachers,
+                      periodSettings,
+                      streamSettings,
+                      schoolInfo,
+                      schoolName,
+                      selectedClass: selectedGeneralClass,
+                      selectedStream: selectedGeneralStream,
+                      selectedDay: selectedDayFilter
+                    });
+                  }}
+                  className="px-2.5 py-1.5 text-xs font-bold bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition active:scale-95"
+                  title="Pakua Ratiba Rasmi kwenye CSV Directory"
+                >
+                  <Download className="w-3.5 h-3.5 text-blue-600" />
+                  <span>CSV</span>
                 </button>
 
                 <button
@@ -3402,6 +3449,7 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
           institutionalPolicy={institutionalPolicy}
           journalRecords={journalRecords}
           onUpdateJournal={onUpdateJournal}
+          schoolId={currentUser?.schoolId}
         />
       )}
 
@@ -3901,6 +3949,32 @@ Ratiba hii imekaguliwa rasmi na haina mgongano (Zero Clashes).`;
         isOpen={showWhatsAppModal}
         onClose={() => setShowWhatsAppModal(false)}
         documentTitle={whatsAppDocTitle}
+      />
+
+      {/* Administrative Timetable Export Modal (PDF & CSV) */}
+      {adminExportModalOpen && (
+        <AdminTimetableExportModal
+          assignments={assignments}
+          teachers={teachers}
+          periodSettings={periodSettings}
+          streamSettings={streamSettings}
+          schoolInfo={schoolInfo}
+          schoolName={schoolName}
+          onClose={() => setAdminExportModalOpen(false)}
+        />
+      )}
+
+      {/* Stream-Level Batch Period Entry Modal */}
+      <StreamBatchPeriodEntryModal
+        isOpen={streamBatchModalOpen}
+        onClose={() => setStreamBatchModalOpen(false)}
+        teachers={teachers}
+        assignments={assignments}
+        periodSettings={periodSettings}
+        streamSettings={streamSettings}
+        teacherAssignments={teacherAssignments}
+        subjectPeriodAllocations={subjectPeriodAllocations}
+        onUpdateAssignments={onUpdateAssignments}
       />
     </div>
   );

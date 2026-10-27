@@ -1,4 +1,4 @@
-import { CurriculumType } from './lessonPlan';
+import type { CurriculumType } from './lessonPlan.ts';
 
 export interface SchemeOfWorkItem {
   id: string;

@@ -14,6 +14,7 @@ import {
 } from '../types';
 import { PeriodSettingsManager } from './Timetable/PeriodSettingsManager';
 import { ClassStreamManagerModal } from './common/ClassStreamManagerModal';
+import { MonitorRegistrationModal } from './common/MonitorRegistrationModal';
 
 import { useAppTheme } from './common/ThemeCustomizerModal';
 import { INITIAL_STREAM_SETTINGS } from '../constants/defaults';
@@ -99,6 +100,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onRestoreData
 }) => {
   const [activeTab, setActiveTab] = useState<'periods' | 'classes' | 'school' | 'calendar' | 'events' | 'templates' | 'users' | 'audit' | 'network' | 'github' | 'backup' | 'dbhealth' | 'themepresets'>('periods');
+  const [activeMonitorReg, setActiveMonitorReg] = useState<{ className: string; stream: string } | null>(null);
   const { config, updateConfig } = useAppTheme();
   const [customTailwindOverride, setCustomTailwindOverride] = useState<string>(() => {
     return localStorage.getItem('haby_custom_tailwind_override') || 'bg-blue-600 text-white shadow-md';
@@ -367,19 +369,41 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [creatingSchool, setCreatingSchool] = useState(false);
   const [activeSchoolSuccessMsg, setActiveSchoolSuccessMsg] = useState<string | null>(null);
 
-  // Super Admin: Fetch all schools
+  // Super Admin: Fetch all schools from both Backend Cloud SQL and Firestore
   useEffect(() => {
     if (!currentUser?.isSuperAdmin || activeTab !== 'network') return;
 
     setSchoolsLoading(true);
     const fetchSchools = async () => {
       try {
-        const list = await fetchSchoolsFromFirestore();
-        if (list && Array.isArray(list)) {
-          setAllSchools([...list].sort((a, b) => (a.name || '').localeCompare(b.name || '')) as any);
-        }
+        const mergedMap = new Map<string, any>();
+        try {
+          const res = await fetch('/api/db/schools');
+          if (res.ok) {
+            const dbSchools = await res.json();
+            if (Array.isArray(dbSchools)) {
+              dbSchools.forEach((s: any) => {
+                if (s && s.id) mergedMap.set(s.id, s);
+              });
+            }
+          }
+        } catch (_e) {}
+
+        try {
+          const list = await fetchSchoolsFromFirestore();
+          if (list && Array.isArray(list)) {
+            list.forEach((s: any) => {
+              if (s && s.id && !mergedMap.has(s.id)) {
+                mergedMap.set(s.id, s);
+              }
+            });
+          }
+        } catch (_e2) {}
+
+        const combined = Array.from(mergedMap.values()).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+        setAllSchools(combined as any);
       } catch (err) {
-        console.warn("Error fetching schools from Firestore:", err);
+        console.warn("Error fetching schools:", err);
       } finally {
         setSchoolsLoading(false);
       }
@@ -394,72 +418,57 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setCreatingSchool(true);
     try {
       const newSchoolId = generateUUID();
-      
-      // 1. Save school to Firestore & LocalStorage via firestoreService
-      await saveSchoolToFirestore({
+      const schoolCode = `CTR-${Date.now().toString().slice(-4)}`;
+      const schoolPayload = {
         id: newSchoolId,
         name: newSchoolName.trim(),
-        code: `CTR-${Date.now().toString().slice(-4)}`,
+        code: schoolCode,
         district: newSchoolAddress.trim() || 'Tanzania',
         address: newSchoolAddress.trim() || 'P.O. Box, Tanzania',
         phone: newSchoolPhone.trim() || '+255',
         email: newSchoolEmail.trim() || 'info@school.ac.tz',
         principal: newSchoolPrincipal.trim() || 'Headmaster',
         motto: newSchoolMotto.trim() || 'Education & Excellence',
-        status: 'ACTIVE'
-      });
+        status: 'ACTIVE' as const
+      };
 
-      // 2. Initialize school snapshot in durable data store
+      // 1. Save school to Cloud SQL backend
+      await fetch('/api/db/schools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(schoolPayload)
+      }).catch(() => {});
+
+      // 2. Save school to Firestore & LocalStorage via firestoreService
+      await saveSchoolToFirestore(schoolPayload).catch(() => {});
+
+      // 3. Initialize clean school snapshot WITHOUT demo students or demo teachers
       const fullSchoolData = {
         ...DEFAULT_APP_DATA,
+        students: [],
+        teachers: [],
+        exams: [],
+        timetableAssignments: [],
+        examinationRecords: [],
+        disciplineRecords: [],
         schoolInfo: {
           name: newSchoolName.trim(),
+          schoolNumber: schoolCode,
           address: newSchoolAddress.trim() || 'P.O. Box, Tanzania',
           phone: newSchoolPhone.trim() || '+255',
           email: newSchoolEmail.trim() || 'info@school.ac.tz',
           principal: newSchoolPrincipal.trim() || 'Headmaster',
           motto: newSchoolMotto.trim() || 'Education & Excellence',
           logo: DEFAULT_SCHOOL_LOGO,
-          institutionalLevels: ['NURSERY', 'PRIMARY', 'SECONDARY']
-        }
+          institutionalLevels: ['NURSERY', 'PRIMARY', 'SECONDARY'] as InstitutionalLevel[]
+        },
+        _fullSnapshot: true
       };
-      
-      await saveSchoolData(newSchoolId, fullSchoolData);
 
-      // 3. Pre-populate default students & teachers if available
-      try {
-        if (DEFAULT_APP_DATA.students && DEFAULT_APP_DATA.students.length > 0) {
-          for (const s of DEFAULT_APP_DATA.students.slice(0, 5)) {
-            await saveStudentToFirestore({
-              id: generateUUID(),
-              schoolId: newSchoolId,
-              name: s.name,
-              className: s.className || 'Form 1',
-              stream: s.stream || 'STREAM A',
-              gender: s.sex === 'F' ? 'Female' : 'Male',
-              feeStatus: 'UNPAID'
-            });
-          }
-        }
-      } catch (e) {}
+      await saveSchoolData(newSchoolId, fullSchoolData as any);
 
-      try {
-        if (DEFAULT_APP_DATA.teachers && DEFAULT_APP_DATA.teachers.length > 0) {
-          for (const t of DEFAULT_APP_DATA.teachers.slice(0, 3)) {
-            await saveTeacherToFirestore({
-              id: generateUUID(),
-              schoolId: newSchoolId,
-              name: t.name,
-              subject: t.subjects[0] || 'General'
-            });
-          }
-        }
-      } catch (e) {}
-
-      const updatedList = await fetchSchoolsFromFirestore();
-      if (updatedList) {
-        setAllSchools([...updatedList].sort((a, b) => (a.name || '').localeCompare(b.name || '')) as any);
-      }
+      setAllSchools(prev => [...prev, schoolPayload as any].sort((a, b) => (a.name || '').localeCompare(b.name || '')));
+      setTargetSchoolId(newSchoolId);
 
       setNewSchoolName('');
       setNewSchoolAddress('');
@@ -467,7 +476,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       setNewSchoolEmail('');
       setNewSchoolPrincipal('');
       setNewSchoolMotto('');
-      setUserMsg(`Shule "${newSchoolName}" imesajiliwa na kuhifadhiwa kwenye Firestore na database kikamilifu!`);
+      setUserMsg(`Shule "${schoolPayload.name}" imesajiliwa kikamilifu bila data za mfano!`);
       setTimeout(() => setUserMsg(null), 4000);
     } catch (err: any) {
       console.error("Error creating school:", err);
@@ -594,45 +603,64 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
     setLoadingTargetSchoolUsers(true);
     try {
-      console.log("[SettingsView] Querying users for schoolId:", sId);
       const userMap = new Map<string, any>();
 
-      // 1. Query Supabase users and authorized_staff where school_id == sId
+      // 1. Fetch from /api/db/users and /api/db/school-admins
       try {
-        const { data: supaUsers, error: supaErr } = await supabase.from('users').select('*').eq('school_id', sId);
-        if (supaUsers && !supaErr) {
-          supaUsers.forEach((u: any) => userMap.set(u.id, u));
+        const resUsers = await fetch(`/api/db/users?schoolId=${encodeURIComponent(sId)}`);
+        if (resUsers.ok) {
+          const dataUsers = await resUsers.json();
+          if (Array.isArray(dataUsers)) {
+            dataUsers.forEach((u: any) => {
+              const key = String(u.email || u.id || '').toLowerCase();
+              userMap.set(key, {
+                id: u.id,
+                uid: u.id,
+                displayName: u.fullName || u.full_name || u.name || 'Staff Member',
+                fullName: u.fullName || u.full_name || u.name || 'Staff Member',
+                email: u.email,
+                role: u.role || 'TEACHER',
+                schoolId: u.schoolId || u.school_id || sId,
+                password: u.password,
+                assignedSubjects: u.assignedSubjects || u.assigned_subjects || [],
+                isActive: true,
+                createdAt: u.createdAt || u.created_at
+              });
+            });
+          }
         }
       } catch (e1) {
-        console.warn("Could not query users:", e1);
+        console.warn("Could not query /api/db/users:", e1);
       }
 
       try {
-        const { data: supaStaff, error: staffErr } = await supabase.from('authorized_staff').select('*').eq('school_id', sId);
-        if (supaStaff && !staffErr) {
-          supaStaff.forEach((sd: any) => {
-            if (!userMap.has(sd.id)) {
-              userMap.set(sd.id, {
-                id: sd.id,
-                uid: sd.id,
-                displayName: sd.staff_identity || sd.full_name,
-                fullName: sd.staff_identity || sd.full_name,
-                email: sd.auth_email || sd.email,
-                role: sd.role || 'HEADMASTER',
-                schoolId: sId,
-                password: sd.assigned_password,
-                isActive: sd.is_active !== false,
-                createdAt: sd.created_at
+        const resAdmins = await fetch(`/api/db/school-admins?schoolId=${encodeURIComponent(sId)}`);
+        if (resAdmins.ok) {
+          const dataAdmins = await resAdmins.json();
+          if (Array.isArray(dataAdmins)) {
+            dataAdmins.forEach((a: any) => {
+              const key = String(a.email || a.id || '').toLowerCase();
+              const prev = userMap.get(key) || {};
+              userMap.set(key, {
+                ...prev,
+                id: a.id || prev.id,
+                uid: a.id || prev.uid,
+                displayName: a.fullName || a.full_name || prev.fullName || 'School Administrator',
+                fullName: a.fullName || a.full_name || prev.fullName || 'School Administrator',
+                email: a.email || prev.email,
+                role: prev.role || a.role || 'HEADMASTER',
+                schoolId: a.schoolId || a.school_id || sId,
+                password: a.password || prev.password,
+                isActive: true
               });
-            }
-          });
+            });
+          }
         }
       } catch (e2) {
-        console.warn("Could not query authorized_staff:", e2);
+        console.warn("Could not query /api/db/school-admins:", e2);
       }
 
       const list = Array.from(userMap.values());
-      console.log(`[SettingsView] Found ${list.length} users for school ${sId}:`, list);
       setTargetSchoolUsers(list);
     } catch (err) {
       console.error("[SettingsView] Error fetching school users:", err);
@@ -649,7 +677,93 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }
   }, [targetSchoolId]);
 
+  // Also refresh current school users from backend when opening the 'users' tab
+  useEffect(() => {
+    if (activeTab !== 'users') return;
+    const activeSchoolId = currentUser?.schoolId || sessionStorage.getItem('haby_school_id') || localStorage.getItem('currentSchoolId');
+    if (!activeSchoolId) return;
+
+    fetch(`/api/db/users?schoolId=${encodeURIComponent(activeSchoolId)}`)
+      .then(r => r.ok ? r.json() : [])
+      .then((dbUsers: any[]) => {
+        if (Array.isArray(dbUsers) && dbUsers.length > 0 && onUpdateUsers) {
+          const mergedByEmail = new Map<string, UserAccount>();
+          users.forEach(u => {
+            if (u.email) mergedByEmail.set(u.email.toLowerCase(), u);
+          });
+          dbUsers.forEach((u: any) => {
+            const em = String(u.email || '').toLowerCase();
+            if (!em) return;
+            const prev = mergedByEmail.get(em);
+            mergedByEmail.set(em, {
+              id: u.id || prev?.id || `usr_${Date.now()}`,
+              email: em,
+              fullName: u.fullName || u.full_name || prev?.fullName || 'Staff Member',
+              role: (u.role || prev?.role || 'TEACHER') as UserAccount['role'],
+              schoolId: u.schoolId || u.school_id || activeSchoolId,
+              password: u.password || prev?.password || '',
+              assignedSubjects: Array.isArray(u.assignedSubjects)
+                ? u.assignedSubjects
+                : Array.isArray(u.assigned_subjects)
+                ? u.assigned_subjects
+                : (prev?.assignedSubjects || []),
+              isSuperAdmin: Boolean(u.isSuperAdmin || prev?.isSuperAdmin)
+            });
+          });
+          onUpdateUsers(Array.from(mergedByEmail.values()));
+        }
+      })
+      .catch(() => {});
+  }, [activeTab, currentUser?.schoolId]);
+
+  // Combined list of explicit user accounts + all registered teachers
+  const displayUsers = React.useMemo(() => {
+    const userMap = new Map<string, UserAccount>();
+
+    // 1. Explicit user accounts
+    users.forEach(u => {
+      if (u.email) {
+        userMap.set(u.email.toLowerCase().trim(), u);
+      } else if (u.id) {
+        userMap.set(String(u.id).toLowerCase(), u);
+      }
+    });
+
+    // 2. Automatically include registered teachers from teachers roster
+    teachers.forEach(t => {
+      const cleanNameSlug = (t.name || 'mwalimu')
+        .toLowerCase()
+        .replace(/^(mr\.|mrs\.|ms\.|dr\.|mwl\.|prof\.)\s*/i, '')
+        .trim()
+        .replace(/[^a-z0-9]+/g, '.')
+        .replace(/^\.+|\.+$/g, '');
+      const tEmail = (t.email && t.email.includes('@')
+        ? t.email
+        : `${cleanNameSlug || 'mwalimu'}.${t.id}@school.ac.tz`).trim().toLowerCase();
+
+      const existingKey = Array.from(userMap.keys()).find(
+        k => k === tEmail || userMap.get(k)?.fullName.toLowerCase().trim() === t.name.toLowerCase().trim()
+      );
+
+      if (!existingKey) {
+        const tRole: UserAccount['role'] = t.schoolRole === 'Headmaster' ? 'HEADMASTER' : t.schoolRole === 'Academic Master' ? 'ACADEMIC' : 'TEACHER';
+        userMap.set(tEmail, {
+          id: `tch_usr_${t.id}`,
+          email: tEmail,
+          fullName: t.name,
+          role: tRole,
+          password: '123456',
+          assignedSubjects: Array.isArray(t.subjects) ? t.subjects : [],
+          schoolId: currentUser?.schoolId || ''
+        });
+      }
+    });
+
+    return Array.from(userMap.values());
+  }, [users, teachers, currentUser?.schoolId]);
+
   // New user form state
+  const [selectedTeacherIdForUser, setSelectedTeacherIdForUser] = useState<string>('');
   const [newEmail, setNewEmail] = useState('');
   const [newFullName, setNewFullName] = useState('');
   const [newRole, setNewRole] = useState<UserAccount['role']>('TEACHER');
@@ -659,9 +773,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [revealedPasswords, setRevealedPasswords] = useState<Record<string, boolean>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [userMsg, setUserMsg] = useState<string | null>(null);
+  const [userErrorMsg, setUserErrorMsg] = useState<string | null>(null);
+  const [submittingUser, setSubmittingUser] = useState(false);
 
   const handleGeneratePassword = () => {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789!@#$%';
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
     let pass = '';
     for (let i = 0; i < 8; i++) {
       pass += chars.charAt(Math.floor(Math.random() * chars.length));
@@ -670,79 +786,194 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     setShowFormPassword(true);
   };
 
-  const handleAddUser = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newEmail.trim() || !newFullName.trim()) {
-      alert('Please fill in Full Name and Email.');
+  const handleSelectTeacherForAccount = (teacherIdStr: string) => {
+    setSelectedTeacherIdForUser(teacherIdStr);
+    if (!teacherIdStr) return;
+    const found = teachers.find(t => String(t.id) === teacherIdStr);
+    if (!found) return;
+
+    setNewFullName(found.name || '');
+    const cleanNameSlug = (found.name || 'mwalimu')
+      .toLowerCase()
+      .replace(/^(mr\.|mrs\.|ms\.|dr\.|mwl\.|prof\.)\s*/i, '')
+      .trim()
+      .replace(/[^a-z0-9]+/g, '.')
+      .replace(/^\.+|\.+$/g, '');
+    const defaultEmail = found.email && found.email.includes('@')
+      ? found.email.trim().toLowerCase()
+      : `${cleanNameSlug || 'teacher'}@school.ac.tz`;
+    setNewEmail(defaultEmail);
+
+    if (found.schoolRole === 'Headmaster') {
+      setNewRole('HEADMASTER');
+    } else if (found.schoolRole === 'Academic Master') {
+      setNewRole('ACADEMIC');
+    } else {
+      setNewRole('TEACHER');
+    }
+
+    if (Array.isArray(found.subjects) && found.subjects.length > 0) {
+      setNewAssignedSubjects(found.subjects);
+    }
+
+    if (!newPassword) {
+      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
+      let pass = '';
+      for (let i = 0; i < 6; i++) {
+        pass += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      setNewPassword(pass);
+      setShowFormPassword(true);
+    }
+  };
+
+  const handleBulkAuthorizeAllTeachers = async () => {
+    if (!teachers || teachers.length === 0) {
+      setUserErrorMsg('Hakuna walimu waliosajiliwa bado kwenye sehemu ya Walimu (Teachers).');
+      setTimeout(() => setUserErrorMsg(null), 5000);
       return;
     }
 
-    if (!newPassword.trim() || newPassword.trim().length < 6) {
-      alert('Please assign a secure password of at least 6 characters.');
-      return;
-    }
-
-    if (users.some(u => u.email.toLowerCase() === newEmail.trim().toLowerCase())) {
-      alert(`The email "${newEmail.trim()}" is already in use.`);
-      return;
-    }
-
-    const targetSchoolId = currentUser?.schoolId || sessionStorage.getItem('haby_school_id') || 'd7764dfd-3b13-43df-a914-4c598c82a33f';
-    const normalizedEmail = newEmail.trim().toLowerCase();
+    const activeSchoolId = currentUser?.schoolId || sessionStorage.getItem('haby_school_id') || localStorage.getItem('currentSchoolId') || '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
+    setSubmittingUser(true);
+    setUserErrorMsg(null);
+    let createdCount = 0;
+    const updatedUsersList = [...users];
 
     try {
-      if (createSchoolUser) {
-        await createSchoolUser(normalizedEmail, newPassword.trim(), newFullName.trim(), newRole);
-      } else {
-        // Supabase Auth and User insertion
-        const { data: authData, error: authError } = await supabase.auth.signUp({
-          email: normalizedEmail,
-          password: newPassword.trim(),
-        });
-        if (authError) throw authError;
+      for (const t of teachers) {
+        const cleanNameSlug = (t.name || 'mwalimu')
+          .toLowerCase()
+          .replace(/^(mr\.|mrs\.|ms\.|dr\.|mwl\.|prof\.)\s*/i, '')
+          .trim()
+          .replace(/[^a-z0-9]+/g, '.')
+          .replace(/^\.+|\.+$/g, '');
+        const tEmail = (t.email && t.email.includes('@') ? t.email : `${cleanNameSlug || 'mwalimu'}.${t.id}@school.ac.tz`).trim().toLowerCase();
 
-        const uid = authData.user?.id;
-        if (uid) {
-          await supabase.from("users").upsert({
-            id: uid,
-            email: normalizedEmail,
-            full_name: newFullName.trim(),
-            role: String(newRole).toUpperCase(),
-            school_id: targetSchoolId,
-            is_active: true,
-            created_at: new Date().toISOString(),
-          });
+        if (updatedUsersList.some(u => u.email.toLowerCase() === tEmail)) {
+          continue;
         }
+
+        const tRole: UserAccount['role'] = t.schoolRole === 'Headmaster' ? 'HEADMASTER' : t.schoolRole === 'Academic Master' ? 'ACADEMIC' : 'TEACHER';
+        const defaultPass = '123456';
+        const tSubjects = Array.isArray(t.subjects) ? t.subjects : [];
+
+        const res = await fetch('/api/db/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: tEmail,
+            password: defaultPass,
+            fullName: t.name,
+            role: tRole,
+            schoolId: activeSchoolId,
+            assignedSubjects: tSubjects,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        const uid = data?.user?.id || `usr_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
+
+        updatedUsersList.push({
+          id: uid,
+          email: tEmail,
+          fullName: t.name,
+          role: tRole,
+          password: defaultPass,
+          assignedSubjects: tSubjects,
+          schoolId: activeSchoolId,
+        });
+        createdCount++;
       }
 
-      const newUserDoc = {
-        id: 'usr_' + Date.now(),
+      if (onUpdateUsers) {
+        onUpdateUsers(updatedUsersList);
+      }
+
+      if (createdCount > 0) {
+        setUserMsg(`Akaunti ${createdCount} za walimu zimesajiliwa kikamilifu! Nywila ya awali (Default Password): 123456`);
+      } else {
+        setUserMsg('Walimu wote tayari wana akaunti za kuingia kwenye mfumo.');
+      }
+      setTimeout(() => setUserMsg(null), 7000);
+    } catch (err: any) {
+      setUserErrorMsg(err?.message || 'Hitilafu imetokea wakati wa kusajili walimu wote.');
+    } finally {
+      setSubmittingUser(false);
+    }
+  };
+
+  const handleAddUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserErrorMsg(null);
+    setUserMsg(null);
+
+    if (!newEmail.trim() || !newFullName.trim()) {
+      setUserErrorMsg('Tafadhali jaza Jina Kamili na Barua Pepe (Email) ya Mwalimu/Mtumiaji.');
+      return;
+    }
+
+    if (!newPassword.trim() || newPassword.trim().length < 4) {
+      setUserErrorMsg('Tafadhali weka nywila (password) yenye angalau herufi 4.');
+      return;
+    }
+
+    const activeSchoolId = currentUser?.schoolId || sessionStorage.getItem('haby_school_id') || localStorage.getItem('currentSchoolId') || '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
+    const normalizedEmail = newEmail.trim().toLowerCase();
+    const subjectsForUser = newRole === 'TEACHER' ? newAssignedSubjects : [];
+
+    setSubmittingUser(true);
+    try {
+      const response = await fetch('/api/db/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password: newPassword.trim(),
+          fullName: newFullName.trim(),
+          full_name: newFullName.trim(),
+          role: String(newRole).toUpperCase(),
+          schoolId: activeSchoolId,
+          school_id: activeSchoolId,
+          assignedSubjects: subjectsForUser,
+          assigned_subjects: subjectsForUser,
+        }),
+      });
+
+      const resData = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(resData?.error || resData?.details || 'Imeshindikana kuhifadhi mtumiaji kwenye mfumo.');
+      }
+
+      const savedId = resData?.user?.id || 'usr_' + Date.now();
+
+      const newUserDoc: UserAccount = {
+        id: savedId,
         email: normalizedEmail,
-        displayName: newFullName.trim(),
         fullName: newFullName.trim(),
-        role: String(newRole).toUpperCase(),
+        role: String(newRole).toUpperCase() as UserAccount['role'],
         password: newPassword.trim(),
-        assignedSubjects: newRole === 'TEACHER' ? newAssignedSubjects : [],
-        schoolId: targetSchoolId,
-        isActive: true
+        assignedSubjects: subjectsForUser,
+        schoolId: activeSchoolId,
       };
 
-      const updated = [...users, newUserDoc as any];
+      const filteredExisting = users.filter(u => u.email.toLowerCase() !== normalizedEmail);
+      const updated = [...filteredExisting, newUserDoc];
       if (onUpdateUsers) {
         onUpdateUsers(updated);
       }
-      
+
+      setSelectedTeacherIdForUser('');
       setNewEmail('');
       setNewFullName('');
       setNewPassword('');
       setNewAssignedSubjects([]);
-      setUserMsg("User created successfully in Auth & Supabase!");
+      setUserMsg(`Mtumiaji "${newUserDoc.fullName}" (${normalizedEmail}) amesajiliwa kikamilifu! Sasa anaweza kuingia kwenye mfumo.`);
       setTimeout(() => setUserMsg(null), 8000);
-      alert("User created successfully!");
-      
     } catch (error: any) {
       console.error("ADD USER ERROR:", error);
-      alert(error.message || error);
+      setUserErrorMsg(error.message || 'Imeshindikana kusajili mtumiaji.');
+    } finally {
+      setSubmittingUser(false);
     }
   };
 
@@ -759,20 +990,25 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     }));
   };
 
-  const handleDeleteUser = (userId: string, fullName: string) => {
+  const handleDeleteUser = async (userId: string, fullName: string) => {
     if (users.length <= 1) {
-      alert('Cannot delete the only remaining account.');
+      setUserErrorMsg('Huwezi kufuta akaunti pekee iliyobaki kwenye mfumo.');
       return;
     }
     if (currentUser && currentUser.id === userId) {
-      alert('You cannot delete your own active account.');
+      setUserErrorMsg('Huwezi kufuta akaunti yako mwenyewe uliyoingia nayo.');
       return;
     }
-    if (confirm(`Are you sure you want to delete user account for "${fullName}"?`)) {
+    try {
+      await fetch(`/api/db/users/${encodeURIComponent(userId)}`, { method: 'DELETE' }).catch(() => {});
       const updated = users.filter(u => u.id !== userId);
       if (onUpdateUsers) {
         onUpdateUsers(updated);
       }
+      setUserMsg(`Akaunti ya "${fullName}" imeondolewa.`);
+      setTimeout(() => setUserMsg(null), 4000);
+    } catch (err) {
+      console.error("Error deleting user:", err);
     }
   };
 
@@ -806,16 +1042,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleSuperAdminRegisterSchoolAdmin = async (e: React.FormEvent) => {
     e.preventDefault();
+    setAdminRegisterMsg(null);
     if (!targetSchoolId) {
-      alert('Please select the target school.');
+      setAdminRegisterMsg({ type: 'error', text: 'Tafadhali chagua shule (Select School Workspace) kwanza.' });
       return;
     }
     if (!adminFullName.trim() || !adminEmail.trim()) {
-      alert('Please fill in Admin Full Name and Email.');
+      setAdminRegisterMsg({ type: 'error', text: 'Tafadhali jaza Jina Kamili na Barua Pepe ya Admin wa Shule.' });
       return;
     }
-    if (!adminPassword.trim() || adminPassword.trim().length < 6) {
-      alert('Please assign a secure password of at least 6 characters.');
+    if (!adminPassword.trim() || adminPassword.trim().length < 4) {
+      setAdminRegisterMsg({ type: 'error', text: 'Tafadhali weka nywila (password) yenye angalau herufi 4.' });
       return;
     }
 
@@ -825,20 +1062,41 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       const schoolDisplayName = targetSchool ? targetSchool.name : targetSchoolId;
       const normalizedEmail = adminEmail.trim().toLowerCase();
 
-      console.log("[Registration] Starting atomic registration for:", { normalizedEmail, targetSchoolId });
-
-      // 1. Create user in Supabase Authentication
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email: normalizedEmail,
-        password: adminPassword.trim(),
+      // Call backend /api/db/school-admins which saves to school_admins & users with a valid UUID
+      const response = await fetch('/api/db/school-admins', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          schoolId: targetSchoolId,
+          school_id: targetSchoolId,
+          email: normalizedEmail,
+          fullName: adminFullName.trim(),
+          full_name: adminFullName.trim(),
+          password: adminPassword.trim(),
+          role: 'HEADMASTER',
+        }),
       });
-      if (authError) throw authError;
-      const uid = authData.user?.id;
-      if (!uid) throw new Error("Could not create user in Supabase.");
-      
-      console.log("[Registration] Step 1 Success: Created Auth user with UID:", uid);
 
-      console.log("[Registration] Step 2: Creating Supabase user documents with UID:", uid);
+      const resData = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(resData?.error || resData?.details || 'Imeshindikana kusajili Admin wa Shule.');
+      }
+
+      const uid = resData?.admin?.id || generateUUID();
+
+      // Also sync via /api/db/users so authorized_staff is updated too
+      await fetch('/api/db/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: uid,
+          schoolId: targetSchoolId,
+          email: normalizedEmail,
+          fullName: adminFullName.trim(),
+          password: adminPassword.trim(),
+          role: 'HEADMASTER',
+        }),
+      }).catch(() => {});
 
       const userDocData = {
         id: uid,
@@ -846,7 +1104,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         email: normalizedEmail,
         displayName: adminFullName.trim(),
         fullName: adminFullName.trim(),
-        role: 'HEADMASTER',
+        role: 'HEADMASTER' as const,
         schoolRole: 'School Administrator',
         schoolId: targetSchoolId,
         school_id: targetSchoolId,
@@ -856,63 +1114,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         password: adminPassword.trim()
       };
 
-      // a) Write to `users` table
-      await supabase.from('users').upsert({
-        id: uid,
-        email: normalizedEmail,
-        full_name: adminFullName.trim(),
-        role: 'HEADMASTER',
-        school_id: targetSchoolId,
-        created_at: new Date().toISOString()
-      });
-      console.log("[Registration] Step 2a Success: Inserted into 'users' table with ID:", uid);
-
-      // b) Write to `school_admins` table
-      await supabase.from('school_admins').upsert({
-        id: uid,
-        school_id: targetSchoolId,
-        email: normalizedEmail,
-        created_at: new Date().toISOString()
-      });
-      console.log("[Registration] Step 2b Success: Inserted into 'school_admins' table with ID:", uid);
-
-      // c) Write to `authorized_staff` table (Supabase equivalent)
-      await supabase.from('authorized_staff').upsert({
-        id: uid,
-        school_id: targetSchoolId,
-        name: adminFullName.trim(),
-        email: normalizedEmail,
-        role: 'HEADMASTER',
-        created_at: new Date().toISOString()
-      });
-      console.log("[Registration] Step 2c Success: Inserted into authorized_staff table for school:", targetSchoolId);
-
-      // Mirror to Supabase for robustness
+      // Save to local registered school admins storage for offline/fallback login
       try {
-        await supabase.from('users').upsert({
-          id: uid,
-          email: normalizedEmail,
-          full_name: adminFullName.trim(),
-          role: 'HEADMASTER',
-          school_id: targetSchoolId,
-          schoolId: targetSchoolId,
-          created_at: new Date().toISOString()
-        });
+        const existingAdmins = JSON.parse(localStorage.getItem('haby_registered_school_admins_v1') || '[]');
+        const filtered = existingAdmins.filter((a: any) => String(a.email || '').toLowerCase() !== normalizedEmail);
+        filtered.push(userDocData);
+        localStorage.setItem('haby_registered_school_admins_v1', JSON.stringify(filtered));
       } catch (e) {
-        console.warn("Supabase user insert warning:", e);
+        console.warn("Local admin storage warning:", e);
       }
 
-      // Re-fetch users for this school so the table below updates immediately!
+      // Re-fetch users for this school so the table below updates immediately
       await fetchUsersForTargetSchool(targetSchoolId);
 
-      // Update local users list if provided
       if (onUpdateUsers && users) {
-        onUpdateUsers([...users, userDocData as any]);
+        const filteredUsers = users.filter(u => u.email.toLowerCase() !== normalizedEmail);
+        onUpdateUsers([...filteredUsers, userDocData as any]);
       }
 
       setAdminRegisterMsg({
         type: 'success',
-        text: `School Administrator "${adminFullName.trim()}" registered and authorized successfully! UID: ${uid}. They can now log in to manage "${schoolDisplayName}".`,
+        text: `Admin wa Shule "${adminFullName.trim()}" amesajiliwa kikamilifu kwa ajili ya "${schoolDisplayName}"! Sasa anaweza kuingia (login) kwa kutumia barua pepe na nywila yake.`,
         creds: {
           email: normalizedEmail,
           pass: adminPassword.trim(),
@@ -927,9 +1149,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       console.error("[Registration Error] Error registering school admin:", err);
       setAdminRegisterMsg({
         type: 'error',
-        text: `Failed to register school admin: ${err.message || 'Supabase write error'}`
+        text: `Imeshindikana kusajili Admin wa Shule: ${err.message || 'Database error'}`
       });
-      alert(`Registration error: ${err.message || err}`);
     } finally {
       setRegisteringAdmin(false);
     }
@@ -1516,6 +1737,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       {setting.streams.map(st => (
                         <span key={st} className="inline-flex items-center gap-1.5 px-2 py-1 text-xs font-bold bg-white border border-slate-200 rounded-lg text-slate-800 shadow-2xs">
                           <span>{st}</span>
+                          <button
+                            type="button"
+                            onClick={() => setActiveMonitorReg({ className: setting.className, stream: st })}
+                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 text-[10px] font-black cursor-pointer"
+                            title={`Sajili Monitor & Monitress wa ${setting.className} - ${st}`}
+                          >
+                            <UserCheck className="w-3 h-3" />
+                            <span>Monitor</span>
+                          </button>
                           {onUpdateStreamSettings && (
                             <button
                               type="button"
@@ -1885,7 +2115,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <div className="flex flex-col items-end gap-1">
                 <span className="px-2.5 py-1 text-[11px] font-bold bg-blue-50 text-blue-800 rounded-full border border-blue-200">
-                  {users.length} Registered Staff
+                  {displayUsers.length} Registered Staff
                 </span>
                 <span className="text-[10px] text-slate-400 font-mono">School ID: {currentUser?.schoolId}</span>
               </div>
@@ -1903,15 +2133,54 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
             {userMsg && (
               <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-lg text-xs font-semibold flex items-center gap-2">
-                <Check className="w-4 h-4 text-emerald-600" />
-                {userMsg}
+                <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{userMsg}</span>
+              </div>
+            )}
+
+            {userErrorMsg && (
+              <div className="p-3 bg-rose-50 border border-rose-200 text-rose-800 rounded-lg text-xs font-semibold flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                <span>{userErrorMsg}</span>
               </div>
             )}
 
             <form onSubmit={handleAddUser} className="space-y-4">
+              {/* Quick Teacher Selector + Bulk Authorize */}
+              {teachers.length > 0 && (
+                <div className="p-3.5 bg-indigo-50/70 border border-indigo-200 rounded-xl flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+                  <div className="flex-1 space-y-1">
+                    <label className="text-[10px] font-black text-indigo-900 uppercase tracking-widest block">
+                      Chagua Mwalimu Aliyesajiliwa Shuleni (Auto-Fill Taarifa Zake)
+                    </label>
+                    <select
+                      value={selectedTeacherIdForUser}
+                      onChange={e => handleSelectTeacherForAccount(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-lg border border-indigo-300 bg-white font-semibold text-slate-800 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      <option value="">-- Chagua Mwalimu kutoka kwenye Orodha ({teachers.length}) au Jaza Hapa Chini --</option>
+                      {teachers.map(t => (
+                        <option key={t.id} value={String(t.id)}>
+                          {t.name} {t.email ? `(${t.email})` : ''} — {Array.isArray(t.subjects) && t.subjects.length > 0 ? t.subjects.join(', ') : 'General'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={submittingUser}
+                    onClick={handleBulkAuthorizeAllTeachers}
+                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer transition-all shrink-0 disabled:opacity-50"
+                  >
+                    <Users className="w-3.5 h-3.5" />
+                    <span>Sajili Akaunti za Walimu Wote ({teachers.length})</span>
+                  </button>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 items-end">
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Full Name</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Full Name (Jina Kamili)</label>
                   <input
                     type="text"
                     value={newFullName}
@@ -1923,12 +2192,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Staff Email</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Staff Email (Barua Pepe ya Kuingia)</label>
                   <input
                     type="email"
                     value={newEmail}
                     onChange={e => setNewEmail(e.target.value)}
-                    placeholder="e.g. grace@school.edu"
+                    placeholder="e.g. grace@school.ac.tz"
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 transition-all outline-none"
                     required
                   />
@@ -1936,7 +2205,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
                 <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Login Password</label>
+                    <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Login Password (Nywila)</label>
                     <button
                       type="button"
                       onClick={handleGeneratePassword}
@@ -1950,7 +2219,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       type={showFormPassword ? "text" : "password"}
                       value={newPassword}
                       onChange={e => setNewPassword(e.target.value)}
-                      placeholder="Min 6 characters"
+                      placeholder="Min 4 characters"
                       className="w-full px-3 py-2 pr-8 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 transition-all outline-none font-mono"
                       required
                     />
@@ -1965,15 +2234,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </div>
 
                 <div className="space-y-1">
-                  <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Academic Role</label>
+                  <label className="text-[10px] font-black text-slate-500 uppercase mb-1 block tracking-widest">Academic Role (Cheo)</label>
                   <select
                     value={newRole}
                     onChange={e => setNewRole(e.target.value as UserAccount['role'])}
                     className="w-full px-3 py-2 text-xs rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none bg-white capitalize"
                   >
-                    <option value="TEACHER">Staff Teacher (Subject Marks Only)</option>
-                    <option value="ACADEMIC">Academic Master (Curriculum & Results)</option>
-                    <option value="HEADMASTER">Headmaster / Principal (Full Admin)</option>
+                    <option value="TEACHER">Staff Teacher (Mwalimu wa Somo)</option>
+                    <option value="ACADEMIC">Academic Master (Mtaaluma)</option>
+                    <option value="HEADMASTER">Headmaster / Principal (Mkuu wa Shule)</option>
+                    <option value="MONITOR">Monitor / Monitress wa Darasa (Class Journal)</option>
                   </select>
                 </div>
               </div>
@@ -1984,7 +2254,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
                       <BookOpen className="w-3.5 h-3.5 text-blue-600" />
-                      Assign Registered Subjects to Teacher
+                      Assign Registered Subjects to Teacher (Masomo Anayofundisha)
                     </label>
                     <span className="text-[10px] text-slate-500">
                       Teacher mode will strictly restrict mark entry to these subjects
@@ -2025,10 +2295,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div className="flex justify-end pt-1">
                 <button
                   type="submit"
-                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95"
+                  disabled={submittingUser}
+                  className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg shadow-md flex items-center justify-center gap-1.5 cursor-pointer transition-all active:scale-95 disabled:opacity-50"
                 >
-                  <UserPlus className="w-3.5 h-3.5" />
-                  <span>Authorize & Register Staff</span>
+                  {submittingUser ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+                  <span>Authorize &amp; Register Staff (Sajili Mtumiaji)</span>
                 </button>
               </div>
             </form>
@@ -2054,7 +2325,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {users.map(u => {
+                  {displayUsers.map(u => {
                     const isCurrent = currentUser?.id === u.id;
                     const isRevealed = revealedPasswords[u.id];
                     const pwd = u.password || '••••••••';
@@ -3388,7 +3659,51 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           }
         }}
         students={students}
+        users={users}
+        schoolId={currentUser?.schoolId}
       />
+
+      {activeMonitorReg && (
+        <MonitorRegistrationModal
+          isOpen={!!activeMonitorReg}
+          onClose={() => setActiveMonitorReg(null)}
+          className={activeMonitorReg.className}
+          stream={activeMonitorReg.stream}
+          schoolId={currentUser?.schoolId || ''}
+          users={users || []}
+          students={students || []}
+          onSave={async (monitorId, monitressId, monitorName, monitressName) => {
+            try {
+              const storageKey = `haby_class_monitors_${currentUser?.schoolId || ''}`;
+              const existing = JSON.parse(localStorage.getItem(storageKey) || '{}');
+              existing[`${activeMonitorReg.className}__${activeMonitorReg.stream}`] = {
+                monitorId,
+                monitressId,
+                monitorName: monitorName || null,
+                monitressName: monitressName || null
+              };
+              localStorage.setItem(storageKey, JSON.stringify(existing));
+            } catch {}
+            try {
+              await fetch('/api/classes/find-and-update-monitors', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  className: activeMonitorReg.className,
+                  stream: activeMonitorReg.stream,
+                  monitorId,
+                  monitressId,
+                  monitorName,
+                  monitressName,
+                  schoolId: currentUser?.schoolId || ''
+                })
+              });
+            } catch (e) {
+              console.error('Error saving monitor:', e);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

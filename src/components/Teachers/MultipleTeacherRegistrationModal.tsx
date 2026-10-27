@@ -73,6 +73,10 @@ export const MultipleTeacherRegistrationModal: React.FC<MultipleTeacherRegistrat
   ]);
 
   const [csvNotice, setCsvNotice] = useState<string | null>(null);
+  const [allowDuplicateBatchPermission, setAllowDuplicateBatchPermission] = useState(false);
+
+  const normalizeName = (val: string) =>
+    String(val || '').trim().toLowerCase().replace(/^mwl\.?\s*/i, '').replace(/\s+/g, ' ');
 
   if (!isOpen) return null;
 
@@ -258,11 +262,34 @@ export const MultipleTeacherRegistrationModal: React.FC<MultipleTeacherRegistrat
     e.target.value = '';
   };
 
+  const duplicateNameWarnings = (() => {
+    const existingSet = new Set(existingTeachers.map(t => normalizeName(t.name)).filter(Boolean));
+    const seenInBatch = new Set<string>();
+    const duplicates: string[] = [];
+
+    rows.forEach(r => {
+      const norm = normalizeName(r.name);
+      if (!norm) return;
+      if (existingSet.has(norm) || seenInBatch.has(norm)) {
+        duplicates.push(r.name.trim());
+      }
+      seenInBatch.add(norm);
+    });
+    return Array.from(new Set(duplicates));
+  })();
+
   // Submit all valid teacher rows
   const handleSaveAllTeachers = () => {
     const validRows = rows.filter(r => r.name.trim().length > 0);
     if (validRows.length === 0) {
-      alert('Tafadhali jaza angalau jina la mwalimu mmoja.');
+      setCsvNotice('Tafadhali jaza angalau jina la mwalimu mmoja.');
+      return;
+    }
+
+    if (duplicateNameWarnings.length > 0 && !allowDuplicateBatchPermission) {
+      setCsvNotice(
+        `ZUIZO LA USAJILI: Majina yafuatayo yanajirudia (${duplicateNameWarnings.join(', ')}). Tafadhali weka tiki ya ruhusa chini ya jedwali kama ni walimu tofauti wenye majina yanayofanana.`
+      );
       return;
     }
 
@@ -293,6 +320,7 @@ export const MultipleTeacherRegistrationModal: React.FC<MultipleTeacherRegistrat
     });
 
     onBulkAddTeachers(newTeachersList);
+    setAllowDuplicateBatchPermission(false);
     onClose();
   };
 
@@ -565,6 +593,29 @@ export const MultipleTeacherRegistrationModal: React.FC<MultipleTeacherRegistrat
           </div>
         </div>
 
+        {/* Duplicate Warning & Permission Override in Batch Mode */}
+        {duplicateNameWarnings.length > 0 && (
+          <div className="mx-4 mb-2 p-3 bg-amber-50 border border-amber-300 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs text-amber-950">
+            <div className="flex items-start gap-2">
+              <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+              <div>
+                <span className="font-black">Tahadhari ya Majina Yanayojirudia:</span>{' '}
+                Walimu wafuatao tayari wapo au wamerudiwa kwenye jedwali:{' '}
+                <strong>{duplicateNameWarnings.join(', ')}</strong>.
+              </div>
+            </div>
+            <label className="flex items-center gap-2 font-bold text-amber-900 bg-white px-3 py-1.5 rounded-lg border border-amber-300 cursor-pointer shrink-0">
+              <input
+                type="checkbox"
+                checked={allowDuplicateBatchPermission}
+                onChange={e => setAllowDuplicateBatchPermission(e.target.checked)}
+                className="rounded border-amber-400 text-amber-600 focus:ring-amber-500 cursor-pointer"
+              />
+              <span>Toa Ruhusa (Ni walimu tofauti wenye majina sawa)</span>
+            </label>
+          </div>
+        )}
+
         {/* Footer */}
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between gap-3 text-xs">
           <div className="text-slate-600 font-medium">
@@ -583,7 +634,7 @@ export const MultipleTeacherRegistrationModal: React.FC<MultipleTeacherRegistrat
             <button
               type="button"
               onClick={handleSaveAllTeachers}
-              disabled={filledCount === 0}
+              disabled={filledCount === 0 || (duplicateNameWarnings.length > 0 && !allowDuplicateBatchPermission)}
               className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-black rounded-xl shadow-sm flex items-center gap-1.5 cursor-pointer transition active:scale-95"
             >
               <CheckCircle2 className="w-4 h-4" />

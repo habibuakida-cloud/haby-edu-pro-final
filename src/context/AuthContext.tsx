@@ -14,14 +14,14 @@ interface AuthContextType {
   signInWithEmail: (email: string, password: string) => Promise<void>;
   loginAsDemo: (role: UserRole) => void;
   switchSchool: (schoolId: string) => Promise<void>;
-  createSchoolUser: (email: string, password: string, displayName: string, role: UserRole) => Promise<boolean>;
+  createSchoolUser: (email: string, password: string, displayName: string, role: UserRole, assignedSubjects?: string[], overrideSchoolId?: string) => Promise<boolean>;
   loginWithFingerprint: (teacherId: string | number) => Promise<void>;
 }
 
 export const SUPERADMIN_EMAIL = 'habibuakida@gmail.com';
-export const SUPERADMIN_MASTER_PASSWORD = 'Mdimilage$Habibu%1991$_3';
+export const SUPERADMIN_MASTER_PASSWORD = '';
 export const ADMIN_EMAIL = 'admin@haby.com';
-export const ADMIN_PASSWORD = 'Mdimilage$Habibu%1991$_3';
+export const ADMIN_PASSWORD = '';
 
 export const DEFAULT_SUPERADMIN_ACCOUNT: UserAccount = {
   id: 'usr_superadmin_habibu',
@@ -63,21 +63,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   });
   const [loading, setLoading] = useState(false);
 
-  // Helper to persist session across browser reloads
-  const setPersistedAccount = (acct: UserAccount | null) => {
-    setUserAccount(acct);
-    if (typeof window !== 'undefined') {
-      if (acct) {
-        safeSetItem(window.localStorage, 'haby_auth_user', JSON.stringify(acct));
-        safeSetItem(window.sessionStorage, 'haby_demo_user', JSON.stringify(acct));
-        if (acct.schoolId) {
-          safeSetItem(window.localStorage, 'currentSchoolId', acct.schoolId);
-          safeSetItem(window.localStorage, 'schoolId', acct.schoolId);
-          safeSetItem(window.sessionStorage, 'haby_school_id', acct.schoolId);
+  // Helper to persist session across browser reloads (without storing plaintext passwords)
+  const setPersistedAccount = (acct: UserAccount | null, token?: string) => {
+    if (acct) {
+      const sanitizedAcct = { ...acct };
+      delete (sanitizedAcct as any).password;
+      setUserAccount(sanitizedAcct);
+      if (typeof window !== 'undefined') {
+        safeSetItem(window.localStorage, 'haby_auth_user', JSON.stringify(sanitizedAcct));
+        safeSetItem(window.sessionStorage, 'haby_demo_user', JSON.stringify(sanitizedAcct));
+        if (token) {
+          safeSetItem(window.sessionStorage, 'haby_auth_token', token);
         }
-      } else {
+        if (sanitizedAcct.schoolId) {
+          safeSetItem(window.localStorage, 'currentSchoolId', sanitizedAcct.schoolId);
+          safeSetItem(window.localStorage, 'schoolId', sanitizedAcct.schoolId);
+          safeSetItem(window.sessionStorage, 'haby_school_id', sanitizedAcct.schoolId);
+        }
+      }
+    } else {
+      setUserAccount(null);
+      if (typeof window !== 'undefined') {
         safeRemoveItem(window.localStorage, 'haby_auth_user');
         safeRemoveItem(window.sessionStorage, 'haby_demo_user');
+        safeRemoveItem(window.sessionStorage, 'haby_auth_token');
       }
     }
   };
@@ -180,7 +189,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           setLoading(false);
         });
       } else {
-        const savedDemo = typeof window !== 'undefined' ? safeGetItem(window.sessionStorage, 'haby_demo_user') : null;
+        const savedDemo = typeof window !== 'undefined'
+          ? safeGetItem(window.sessionStorage, 'haby_demo_user') || safeGetItem(window.localStorage, 'haby_auth_user')
+          : null;
         if (!savedDemo) {
           setUserAccount(null);
         }
@@ -195,39 +206,74 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  // ==== FUNCTION YA KUSAJILI USER - ATOMIC AUTH + SUPABASE ====
-  const createSchoolUser = async (email: string, password: string, displayName: string, role: UserRole): Promise<boolean> => {
-    const adminSchoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
-    if (!adminSchoolId) throw new Error("Admin hana schoolId - tafadhali login tena");
+  // ==== FUNCTION YA KUSAJILI USER - BACKEND DATABASE + FALLBACK ====
+  const createSchoolUser = async (
+    email: string,
+    password: string,
+    displayName: string,
+    role: UserRole,
+    assignedSubjects: string[] = [],
+    overrideSchoolId?: string
+  ): Promise<boolean> => {
+    const adminSchoolId = overrideSchoolId || userAccount?.schoolId || localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
+    if (!adminSchoolId) throw new Error("Admin hana schoolId - tafadhali ingia (login) tena");
 
     const normalizedEmail = email.toLowerCase().trim();
+    const roleUpper = String(role || 'TEACHER').toUpperCase();
 
     try {
-      // 1. Create User in Firebase Auth
-      const { createUserWithEmailAndPassword } = await import('firebase/auth');
-      const authRes = await createUserWithEmailAndPassword(auth, normalizedEmail, password);
-      const newUid = authRes.user.uid;
+      // 1. Save directly to Cloud SQL via /api/db/users (which also syncs school_admins & authorized_staff)
+      const response = await fetch('/api/db/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: normalizedEmail,
+          password: password || '123456',
+          fullName: displayName.trim(),
+          full_name: displayName.trim(),
+          role: roleUpper,
+          schoolId: adminSchoolId,
+          school_id: adminSchoolId,
+          assignedSubjects: assignedSubjects || [],
+          assigned_subjects: assignedSubjects || [],
+        }),
+      });
 
-      // 2. Insert into users collection
-      await setDoc(doc(db, 'users', newUid), {
-        id: newUid,
-        email: normalizedEmail,
-        full_name: displayName.trim(),
-        role: String(role).toUpperCase(),
-        school_id: adminSchoolId,
-        created_at: new Date().toISOString()
-      }, { merge: true });
+      const resData = await response.json().catch(() => ({}));
+      const savedUid = resData?.user?.id || (typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `usr_${Date.now()}`);
 
-      // 3. Handle school_admins (if role is HEADMASTER/ADMIN)
-      if (role === 'HEADMASTER') {
-        await setDoc(doc(db, 'school_admins', newUid), {
-          id: newUid,
+      // 2. Also sync to Firestore as non-blocking backup if available
+      try {
+        await setDoc(doc(db, 'users', savedUid), {
+          id: savedUid,
           email: normalizedEmail,
           full_name: displayName.trim(),
-          password: password,
-          role: 'school_admin',
-          school_id: adminSchoolId
+          fullName: displayName.trim(),
+          role: roleUpper,
+          school_id: adminSchoolId,
+          schoolId: adminSchoolId,
+          assigned_subjects: assignedSubjects || [],
+          assignedSubjects: assignedSubjects || [],
+          created_at: new Date().toISOString()
         }, { merge: true });
+
+        if (roleUpper === 'HEADMASTER') {
+          await setDoc(doc(db, 'school_admins', savedUid), {
+            id: savedUid,
+            email: normalizedEmail,
+            full_name: displayName.trim(),
+            fullName: displayName.trim(),
+            role: 'HEADMASTER',
+            school_id: adminSchoolId,
+            schoolId: adminSchoolId
+          }, { merge: true });
+        }
+      } catch (_fbIgnore) {
+        // Ignore Firestore errors when Cloud SQL is primary
+      }
+
+      if (!response.ok) {
+        throw new Error(resData?.error || resData?.details || 'Imeshindikana kusajili mtumiaji kwenye hifadhidata.');
       }
 
       return true;
@@ -244,14 +290,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const { GoogleAuthProvider, signInWithPopup } = await import('firebase/auth');
       const provider = new GoogleAuthProvider();
       const res = await signInWithPopup(auth, provider);
-      const email = res.user.email?.toLowerCase();
-      const isSuper = email === SUPERADMIN_EMAIL.toLowerCase() || email === 'habibuakida@gmail.com';
+      const email = res.user.email?.toLowerCase().trim() || '';
+      const isSuper = email === SUPERADMIN_EMAIL.toLowerCase() || email === 'habibuakida@gmail.com' || email === ADMIN_EMAIL.toLowerCase();
       const targetSchoolId = sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
+      
+      let userRole: UserRole = isSuper ? 'SUPER_ADMIN' : 'TEACHER';
+      let fullName = res.user.displayName || (isSuper ? 'Mwl. Habibu Akida (Super Admin)' : 'Authorized Teacher');
+      
+      try {
+        const snapRaw = localStorage.getItem(`haby_school_data_${targetSchoolId}`) || localStorage.getItem(`haby_school_data_snapshot_${targetSchoolId}`);
+        if (snapRaw) {
+          const snapData = JSON.parse(snapRaw);
+          const teachersList: any[] = Array.isArray(snapData.teachers) ? snapData.teachers : [];
+          const matchedTch = teachersList.find((t: any) => (t.email || '').toLowerCase().trim() === email);
+          if (matchedTch) {
+            fullName = matchedTch.name || fullName;
+            if (matchedTch.schoolRole === 'Headmaster' || matchedTch.schoolRole === 'Headmistress') {
+              userRole = 'HEADMASTER';
+            } else if (matchedTch.schoolRole === 'Academic Master' || matchedTch.schoolRole === 'Academic Mistress') {
+              userRole = 'ACADEMIC';
+            } else if (matchedTch.schoolRole === 'Class Teacher / Master' || matchedTch.isClassTeacher) {
+              userRole = 'CLASS_TEACHER';
+            } else {
+              userRole = 'TEACHER';
+            }
+          }
+        }
+      } catch (_e) {}
+
       const account: UserAccount = {
         id: res.user.uid,
         email: res.user.email || 'user@school.tz',
-        fullName: res.user.displayName || (isSuper ? 'Mwl. Habibu Akida (Super Admin)' : 'Authorized User'),
-        role: isSuper ? 'SUPER_ADMIN' : 'HEADMASTER',
+        fullName,
+        role: userRole,
         schoolId: targetSchoolId,
         school_id: targetSchoolId,
         isSuperAdmin: isSuper
@@ -262,17 +333,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUserAccount(account);
     } catch (err: any) {
       console.warn("[Auth] Firebase Google login notice:", err?.message || err);
-      // Fallback: If popup is blocked by browser/iframe, log in as Super Admin
-      const schoolId = sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
-      const adminAccount: UserAccount = { 
-        ...DEFAULT_SUPERADMIN_ACCOUNT, 
-        schoolId, 
-        school_id: schoolId 
-      };
-      sessionStorage.setItem('haby_demo_user', JSON.stringify(adminAccount));
-      sessionStorage.setItem('haby_school_id', schoolId);
-      localStorage.setItem('currentSchoolId', schoolId);
-      setUserAccount(adminAccount);
+      alert('Uingiaji wa Google umefungwa na kivinjari au kubatilishwa. Tafadhali ingia kwa kutumia barua pepe na nywila yako au chagua Mwalimu wako kwenye Mfumo.');
     } finally {
       setLoading(false);
     }
@@ -282,9 +343,50 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setLoading(true);
     if (typeof window !== 'undefined') { safeRemoveItem(window.sessionStorage, 'haby_explicit_logout'); }
     const normalizedEmail = inputEmail.trim().toLowerCase();
+    let lastError: Error | null = null;
 
     try {
-      // 1. DIRECT SUPER ADMIN AUTH FOR OWNER (habibuakida@gmail.com / admin@haby.com)
+      // 1. BACKEND AUTH VIA CLOUD SQL (/api/auth/login) WITH BCRYPT & SIGNED SESSION TOKEN
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email: normalizedEmail, password: inputPass })
+        });
+        const data = await res.json();
+        if (data.success && data.user) {
+          const u = data.user;
+          const schoolId = u.schoolId || sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
+          sessionStorage.setItem('haby_school_id', schoolId);
+          localStorage.setItem('currentSchoolId', schoolId);
+          localStorage.setItem('schoolId', schoolId);
+          if (u.isSuperAdmin) {
+            localStorage.setItem('user_role', 'super_admin');
+          }
+          const acct: UserAccount = {
+            id: u.id,
+            email: u.email,
+            fullName: u.fullName,
+            role: u.role,
+            schoolId,
+            school_id: schoolId,
+            assignedSubjects: Array.isArray(u.assignedSubjects) ? u.assignedSubjects : [],
+            isSuperAdmin: !!u.isSuperAdmin,
+          };
+          setPersistedAccount(acct, data.token);
+          setLoading(false);
+          return;
+        } else if (data.error) {
+          lastError = new Error(data.error);
+        }
+      } catch (apiErr: any) {
+        if (apiErr.message && !apiErr.message.includes('fetch')) {
+          lastError = apiErr;
+        }
+      }
+
+      // 2. OFFLINE FALLBACK FOR OWNER IF NETWORK IS UNREACHABLE
       if (normalizedEmail === SUPERADMIN_EMAIL.toLowerCase() || normalizedEmail === 'habibuakida@gmail.com' || normalizedEmail === ADMIN_EMAIL.toLowerCase()) {
         const schoolId = sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID;
         sessionStorage.setItem('haby_school_id', schoolId);
@@ -298,63 +400,85 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           role: 'SUPER_ADMIN', 
           schoolId, 
           school_id: schoolId,
-          isSuperAdmin: true, 
-          password: inputPass 
+          isSuperAdmin: true,
         };
-        sessionStorage.setItem('haby_demo_user', JSON.stringify(adminAccount));
         setPersistedAccount(adminAccount);
         setLoading(false);
         return;
       }
 
-      // 2. BACKEND AUTH VIA CLOUD SQL (/api/auth/login)
+      // 3. FIRESTORE FALLBACK FOR REGISTERED USERS
       try {
-        const res = await fetch('/api/auth/login', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: normalizedEmail, password: inputPass })
-        });
-        const data = await res.json();
-        if (data.success && data.user) {
-          const u = data.user;
-          const schoolId = u.schoolId || DEFAULT_PRIMARY_SCHOOL_ID;
-          sessionStorage.setItem('haby_school_id', schoolId);
-          localStorage.setItem('currentSchoolId', schoolId);
-          localStorage.setItem('schoolId', schoolId);
-          const acct: UserAccount = {
-            id: u.id,
-            email: u.email,
-            fullName: u.fullName,
-            role: u.role,
-            schoolId,
-            school_id: schoolId,
-            isSuperAdmin: !!u.isSuperAdmin,
-            password: inputPass
+        const { collection, query, where, getDocs } = await import('firebase/firestore');
+        const usersCol = collection(db, 'users');
+        const qSnap = await getDocs(query(usersCol, where('email', '==', normalizedEmail)));
+        if (!qSnap.empty) {
+          const docData = qSnap.docs[0].data();
+          const targetSchool = docData.schoolId || docData.school_id || DEFAULT_PRIMARY_SCHOOL_ID;
+          const rawRole = String(docData.role || 'TEACHER').toUpperCase();
+          const userRole = (rawRole === 'HEADMASTER' || rawRole === 'ACADEMIC' || rawRole === 'MONITOR' ? rawRole : 'TEACHER') as UserRole;
+          const fsAccount: UserAccount = {
+            id: qSnap.docs[0].id,
+            email: normalizedEmail,
+            fullName: docData.fullName || docData.full_name || docData.name || normalizedEmail.split('@')[0],
+            role: userRole,
+            schoolId: targetSchool,
+            school_id: targetSchool,
+            assignedSubjects: docData.assignedSubjects || docData.assigned_subjects || [],
+            isSuperAdmin: Boolean(docData.isSuperAdmin || userRole === 'SUPER_ADMIN')
           };
-          setPersistedAccount(acct);
+          setPersistedAccount(fsAccount);
           setLoading(false);
           return;
-        } else if (data.error) {
-          throw new Error(data.error);
         }
-      } catch (apiErr: any) {
-        if (apiErr.message && !apiErr.message.includes('fetch')) {
-          throw apiErr;
-        }
+      } catch (_fbErr) {
+        // Non-blocking Firestore lookup
       }
 
-      // 3. FALLBACK DEMO LOGIN
-      const defaultSchool = DEFAULT_PRIMARY_SCHOOL_ID;
-      const genericAccount: UserAccount = {
-        id: 'usr_' + Date.now(),
-        email: normalizedEmail,
-        fullName: normalizedEmail.split('@')[0],
-        role: 'TEACHER',
-        schoolId: defaultSchool,
-        school_id: defaultSchool,
-        isSuperAdmin: false
-      };
-      setPersistedAccount(genericAccount);
+      // 4. LOCAL SCHOOL DATA ROSTER FALLBACK
+      try {
+        const storedSchoolId = localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
+        const snapRaw = localStorage.getItem(`haby_school_data_${storedSchoolId}`) || localStorage.getItem(`haby_school_data_snapshot_${storedSchoolId}`);
+        if (snapRaw) {
+          const snapData = JSON.parse(snapRaw);
+          const teachersList: any[] = Array.isArray(snapData.teachers) ? snapData.teachers : [];
+          const digitsOnly = normalizedEmail.replace(/[^0-9]/g, '');
+          const matchedTch = teachersList.find((t: any) => {
+            const tEm = (t.email || '').toLowerCase().trim();
+            const tName = (t.name || '').toLowerCase().trim();
+            const tPhone = (t.phone || '').replace(/[^0-9]/g, '');
+            return (
+              (tEm && tEm === normalizedEmail) ||
+              (tEm && tEm.startsWith(normalizedEmail + '@')) ||
+              (tName && tName === normalizedEmail) ||
+              (digitsOnly.length >= 7 && tPhone.endsWith(digitsOnly.slice(-7)))
+            );
+          });
+          if (matchedTch) {
+            const role = (matchedTch.schoolRole === 'Headmaster' ? 'HEADMASTER' : matchedTch.schoolRole === 'Academic Master' ? 'ACADEMIC' : 'TEACHER') as UserRole;
+            const tchAccount: UserAccount = {
+              id: String(matchedTch.id || `tch_${Date.now()}`),
+              email: matchedTch.email || normalizedEmail,
+              fullName: matchedTch.name || 'Mwalimu',
+              role,
+              schoolId: storedSchoolId,
+              school_id: storedSchoolId,
+              assignedSubjects: Array.isArray(matchedTch.subjects) ? matchedTch.subjects : [],
+              isSuperAdmin: false
+            };
+            setPersistedAccount(tchAccount);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (_localErr) {}
+
+      // If password was incorrect or user not found, throw descriptive error
+      if (lastError) {
+        throw lastError;
+      }
+
+      throw new Error('Mtumiaji hajapatikana kwenye mfumo. Tafadhali hakikisha barua pepe, jina au namba ya simu uliyoingiza ni sahihi.');
     } finally { 
       setLoading(false); 
     }
@@ -378,12 +502,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         schoolId: DEFAULT_PRIMARY_SCHOOL_ID,
         school_id: DEFAULT_PRIMARY_SCHOOL_ID,
         isSuperAdmin: true,
-        password: SUPERADMIN_MASTER_PASSWORD
       },
       HEADMASTER: { id: 'demo_headmaster', email: 'headmaster.demo@haby.com', fullName: 'Mwl. Peter Mwita (Headmaster Demo)', role: 'HEADMASTER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID, isSuperAdmin: false },
       ACADEMIC: { id: 'usr_academic', email: 'academic@kiomonisec.ac.tz', fullName: 'David Mwakipesile (Academic Master)', role: 'ACADEMIC', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID },
       TEACHER: { id: 'usr_teacher', email: 'teacher@kiomonisec.ac.tz', fullName: 'Grace Mchome (Staff Teacher)', role: 'TEACHER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID, assignedSubjects: ['English Language', 'ENG'] },
-      ENVIRONMENT_TEACHER: { id: 'usr_env', email: 'environment@kiomonisec.ac.tz', fullName: 'Mwl. Mazingira (Environment Teacher)', role: 'ENVIRONMENT_TEACHER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID }
+      ENVIRONMENT_TEACHER: { id: 'usr_env', email: 'environment@kiomonisec.ac.tz', fullName: 'Mwl. Mazingira (Environment Teacher)', role: 'ENVIRONMENT_TEACHER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID },
+      MONITOR: { id: 'usr_monitor', email: 'monitor.demo@haby.com', fullName: 'John Doe (Class Monitor)', role: 'MONITOR', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID },
+      ADMIN: { id: 'usr_admin', email: 'admin@haby.com', fullName: 'Admin User', role: 'ADMIN', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID },
+      CLASS_TEACHER: { id: 'usr_class_teacher', email: 'classteacher@haby.com', fullName: 'Mwl. Habibu (Class Teacher Form 1 A)', role: 'CLASS_TEACHER', schoolId: DEFAULT_PRIMARY_SCHOOL_ID, school_id: DEFAULT_PRIMARY_SCHOOL_ID, isClassTeacher: true, classTeacherOf: 'Form 1 - STREAM A' }
     };
     const account = demoAccounts[role];
     if (typeof window!== 'undefined') {
@@ -402,12 +528,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       safeSetItem(window.sessionStorage, 'haby_explicit_logout', 'true');
       safeRemoveItem(window.sessionStorage, 'haby_demo_user');
+      safeRemoveItem(window.sessionStorage, 'haby_auth_token');
       safeRemoveItem(window.localStorage, 'haby_auth_user');
       safeRemoveItem(window.sessionStorage, 'haby_school_id');
       safeRemoveItem(window.localStorage, 'currentSchoolId');
       safeRemoveItem(window.localStorage, 'schoolId');
     }
     setPersistedAccount(null);
+    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' }).catch(() => {});
     await auth.signOut().catch(() => {});
   };
 
@@ -426,7 +554,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!match) {
       throw new Error("Mwalimu hakupatikana kwenye mfumo wa shule.");
     }
-    if (!match.fingerprint_enrolled && !match.fingerprintEnrolled) {
+    if (!match.fingerprint_enrolled && !match.fingerprintEnrolled && !match.has_biometric && !match.hasBiometric) {
       throw new Error("Alama ya vidole haijasajiliwa na Mkuu wa Shule (Admin Fingerprint Enrollment required). Tafadhali mwambie Admin akusajili.");
     }
 

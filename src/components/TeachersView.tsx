@@ -10,8 +10,10 @@ import {
   Cell, 
   ReferenceLine 
 } from 'recharts';
+import { jsPDF } from 'jspdf';
 import { 
   UserCheck, 
+  Fingerprint,
   Trash2, 
   Edit3, 
   ShieldAlert, 
@@ -48,7 +50,8 @@ import {
   Zap,
   CheckCircle2,
   MessageSquare,
-  Send
+  Send,
+  AlertCircle
 } from 'lucide-react';
 import { GenderSummary, formatGenderSummaryText } from './common/GenderSummary';
 import { CameraCaptureModal } from './common/CameraCaptureModal';
@@ -60,7 +63,9 @@ import {
   UserAccount, 
   StreamSetting,
   TimetableAssignment,
-  PeriodSetting 
+  PeriodSetting,
+  InvigilationSession,
+  Supervisor
 } from '../types';
 import { SUBJECT_LIST, INVIGILATOR_COLORS, STAFF_ROLES_LIST, DEFAULT_CLASSES } from '../constants/defaults';
 import { SubjectRegistry } from '../constants/SubjectRegistry';
@@ -72,16 +77,20 @@ import { MultipleTeacherRegistrationModal } from './Teachers/MultipleTeacherRegi
 import { PhoneInputPlugin } from './common/PhoneInputPlugin';
 import { StudentPhoneBadge } from './common/StudentPhoneBadge';
 import { useConfirmDelete } from '../context/ConfirmDeleteContext';
+import { BiometricRegistration } from './Teachers/BiometricRegistration';
 import { computeTeacherInitial } from '../utils/teacherInitials';
 import { TeacherTimetable } from './Timetable/TeacherTimetable';
+import { TeacherProfileDashboard } from './Teachers/TeacherProfileDashboard';
 import { isSamePeriod, isSameStream } from '../lib/timetableService';
 import { isSameClass } from '../utils/reportCardUtils';
+import { parseClassTeacherOf, formatClassTeacherString } from '../utils/classTeacherUtils';
 
 interface TeachersViewProps {
   teachers: Teacher[];
   onAddTeacher: (teacher: Teacher) => void;
   onBulkAddTeachers?: (teachers: Teacher[]) => void;
   onUpdateTeacher: (teacher: Teacher) => void;
+  onBulkUpdateTeachers?: (teachers: Teacher[]) => void;
   onDeleteTeacher: (id: number) => void;
   onBulkDeleteTeachers?: (ids: number[]) => void;
   teacherEvaluations?: TeacherEvaluation[];
@@ -91,6 +100,11 @@ interface TeachersViewProps {
   timetableAssignments?: TimetableAssignment[];
   onUpdateTimetableAssignments?: (assignments: TimetableAssignment[]) => void;
   periodSettings?: PeriodSetting[];
+  sessions?: InvigilationSession[];
+  invigilationAssignments?: Record<string, number>;
+  supervisors?: Supervisor[];
+  journalRecords?: Record<string, any>;
+  onUpdateJournal?: (records: Record<string, any>) => void;
   schoolInfo?: SchoolInfo;
   currentUser?: UserAccount | null;
 }
@@ -104,6 +118,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   onAddTeacher,
   onBulkAddTeachers,
   onUpdateTeacher,
+  onBulkUpdateTeachers,
   onDeleteTeacher,
   onBulkDeleteTeachers,
   teacherEvaluations = [],
@@ -113,18 +128,44 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   timetableAssignments = [],
   onUpdateTimetableAssignments,
   periodSettings = [],
+  sessions = [],
+  invigilationAssignments = {},
+  supervisors = [],
+  journalRecords = {},
+  onUpdateJournal,
   schoolInfo,
   currentUser
 }) => {
   const { openConfirmDelete } = useConfirmDelete();
-  const [activeSubTab, setActiveSubTab] = useState<'roster' | 'evaluations' | 'workload'>('roster');
+  const [activeSubTab, setActiveSubTab] = useState<'roster' | 'evaluations' | 'workload' | 'profile_dashboard'>('roster');
+  const [profileDashboardTeacherId, setProfileDashboardTeacherId] = useState<number | undefined>(undefined);
   const [isMultipleTeacherModalOpen, setIsMultipleTeacherModalOpen] = useState(false);
   const [selectedTeacherIds, setSelectedTeacherIds] = useState<number[]>([]);
+  const [registeringBiometricId, setRegisteringBiometricId] = useState<string | null>(null);
+
 
   // If logged in as TEACHER: show ONLY the current teacher (hide list of other teachers)
   const isTeacherUser = currentUser?.role === 'TEACHER' && !currentUser?.isSuperAdmin;
   const currentTeacherName = (currentUser?.fullName || '').toLowerCase().trim();
   const currentTeacherEmail = (currentUser?.email || '').toLowerCase().trim();
+
+  const isFemaleTeacher = (t: { gender?: string; schoolRole?: string }) => {
+    const g = (t.gender || '').toLowerCase().trim();
+    if (g.startsWith('f') || g === 'ke' || g === 'girl' || g === 'mwanamke' || g === 'g') return true;
+    const r = (t.schoolRole || '').toLowerCase();
+    if (r.includes('mistress') || r.includes('matron')) return true;
+    return false;
+  };
+
+  const compareTeachersFemaleFirst = (
+    a: { name?: string; gender?: string; schoolRole?: string },
+    b: { name?: string; gender?: string; schoolRole?: string }
+  ) => {
+    const aFem = isFemaleTeacher(a);
+    const bFem = isFemaleTeacher(b);
+    if (aFem !== bFem) return aFem ? -1 : 1;
+    return (a.name || '').localeCompare(b.name || '');
+  };
 
   const effectiveTeachers = useMemo(() => {
     let list = !isTeacherUser ? teachers : teachers.filter(t => {
@@ -145,7 +186,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
         gender: 'Male'
       } as Teacher];
     }
-    return [...list].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    return [...list].sort(compareTeachersFemaleFirst);
   }, [teachers, isTeacherUser, currentTeacherName, currentTeacherEmail, currentUser]);
 
   // Workload Analytics State
@@ -192,7 +233,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     } else if (workloadSort === 'ASC') {
       list.sort((a, b) => a.lessonsCount - b.lessonsCount);
     } else if (workloadSort === 'ALPHA') {
-      list.sort((a, b) => a.name.localeCompare(b.name));
+      list.sort((a, b) => compareTeachersFemaleFirst({ name: a.name, gender: a.gender, schoolRole: a.role }, { name: b.name, gender: b.gender, schoolRole: b.role }));
     }
 
     if (workloadFilter === 'TOP10') {
@@ -229,6 +270,11 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
   const [customRole, setCustomRole] = useState('');
   const [isCustomRole, setIsCustomRole] = useState(false);
   const [formNotice, setFormNotice] = useState<string | null>(null);
+
+  // Class Teacher Assignment States
+  const [isClassTeacher, setIsClassTeacher] = useState<boolean>(false);
+  const [classTeacherClass, setClassTeacherClass] = useState<string>('Form 1');
+  const [classTeacherStream, setClassTeacherStream] = useState<string>('STREAM A');
   
   // MULTIPLE TEACHING SUBJECTS WITH STREAM ID (One after another)
   const [subjects, setSubjects] = useState<string[]>([]);
@@ -460,74 +506,35 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!name.trim()) {
-      alert('Please enter teacher full name.');
-      return;
-    }
+  const [teacherFormError, setTeacherFormError] = useState<string | null>(null);
+  const [duplicateTeacherModal, setDuplicateTeacherModal] = useState<{
+    existingMatches: Teacher[];
+    pendingTeacher: Teacher;
+    isEditing: boolean;
+  } | null>(null);
+  const [allowDuplicateTeacherPermission, setAllowDuplicateTeacherPermission] = useState(false);
 
-    const effectiveSubjectsList = subjects.length > 0
-      ? subjects
-      : (customSubjectText.trim() || allocSubject.trim() ? [customSubjectText.trim() || allocSubject.trim()] : []);
+  const normalizePersonName = (val: string) =>
+    String(val || '').trim().toLowerCase().replace(/^mwl\.?\s*/i, '').replace(/\s+/g, ' ');
 
-    if (effectiveSubjectsList.length === 0) {
-      alert('Please select at least one teaching subject.');
-      return;
-    }
+  const matchingExistingTeachersByName = useMemo(() => {
+    const targetName = normalizePersonName(name);
+    if (!targetName || targetName.length < 3) return [];
+    return teachers.filter(t => {
+      if (editingTeacher && t.id === editingTeacher.id) return false;
+      return normalizePersonName(t.name) === targetName;
+    });
+  }, [name, teachers, editingTeacher]);
 
-    const cleanedSubjects = Array.from(new Set(effectiveSubjectsList.map(cleanSubjectName).filter(Boolean)));
-    const finalRole = isCustomRole ? (customRole.trim() || 'Subject Teacher') : schoolRole;
-    const finalGender = gender || (finalRole.includes('Mistress') || finalRole.includes('Headmistress') ? 'Female' : 'Male');
-
-    if (editingTeacher) {
-      const updatedTeacher: Teacher = {
-        ...editingTeacher,
-        name: name.trim(),
-        initial: generateInitials(name.trim(), editingTeacher.id),
-        gender: finalGender,
-        schoolRole: finalRole,
-        subjects: cleanedSubjects,
-        excludeInvigilation,
-        color: customColor,
-        phone: phone.trim() || undefined,
-        email: email.trim() || undefined,
-        passportPhoto: passportPhoto || undefined,
-        teachingStreams,
-        maxPeriodsPerWeek
-      };
-      onUpdateTeacher(updatedTeacher);
-      setEditingTeacher(null);
-      setIsEditTeacherModalOpen(false);
-      setFormNotice(`✓ Taarifa za Mwalimu ${updatedTeacher.name} zimehaririwa na kuhifadhiwa kikamilifu (${cleanedSubjects.join(', ')})!`);
-      setTimeout(() => setFormNotice(null), 5000);
-    } else {
-      const newTeacher: Teacher = {
-        id: Date.now(),
-        name: name.trim(),
-        initial: currentInitial,
-        gender: finalGender,
-        schoolRole: finalRole,
-        subjects: cleanedSubjects,
-        excludeInvigilation,
-        color: customColor,
-        phone: phone.trim() || undefined,
-        email: email.trim() || undefined,
-        passportPhoto: passportPhoto || undefined,
-        teachingStreams,
-        maxPeriodsPerWeek
-      };
-      onAddTeacher(newTeacher);
-      setFormNotice(`Teacher ${newTeacher.name} (${newTeacher.initial}) registered successfully with subjects: ${cleanedSubjects.join(', ')}!`);
-      setTimeout(() => setFormNotice(null), 4000);
-    }
-    
-    // Reset form
+  const resetTeacherForm = () => {
     setName('');
     setGender('Male');
     setSchoolRole('Subject Teacher');
     setIsCustomRole(false);
     setCustomRole('');
+    setIsClassTeacher(false);
+    setClassTeacherClass('Form 1');
+    setClassTeacherStream('STREAM A');
     setSubjects([]);
     setSubjectSearch('');
     setExcludeInvigilation(false);
@@ -542,6 +549,121 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     setAllocStreams(['A', 'B']);
     setCustomSubjectText('');
     setManualSubjectStreamInput('');
+    setTeacherFormError(null);
+  };
+
+  const finalizeSaveTeacher = (teacherRecord: Teacher, isEditMode: boolean) => {
+    if (isEditMode) {
+      onUpdateTeacher(teacherRecord);
+      setEditingTeacher(null);
+      setIsEditTeacherModalOpen(false);
+      setFormNotice(`✓ Taarifa za Mwalimu ${teacherRecord.name} zimehaririwa na kuhifadhiwa kikamilifu (${teacherRecord.subjects.join(', ')})!`);
+      setTimeout(() => setFormNotice(null), 5000);
+    } else {
+      onAddTeacher(teacherRecord);
+      setFormNotice(`✓ Mwalimu ${teacherRecord.name} (${teacherRecord.initial}) amesajiliwa kikamilifu kwenye masomo: ${teacherRecord.subjects.join(', ')}!`);
+      setTimeout(() => setFormNotice(null), 4000);
+    }
+    setDuplicateTeacherModal(null);
+    setAllowDuplicateTeacherPermission(false);
+    resetTeacherForm();
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setTeacherFormError(null);
+
+    if (!name.trim()) {
+      setTeacherFormError('Tafadhali jaza jina kamili la mwalimu.');
+      return;
+    }
+
+    const effectiveSubjectsList = subjects.length > 0
+      ? subjects
+      : (customSubjectText.trim() || allocSubject.trim() ? [customSubjectText.trim() || allocSubject.trim()] : []);
+
+    if (effectiveSubjectsList.length === 0) {
+      setTeacherFormError('Tafadhali chagua angalau somo moja la kufundisha.');
+      return;
+    }
+
+    // Strict restriction on duplicate email
+    const normalizedEmail = email.trim().toLowerCase();
+    if (normalizedEmail) {
+      const existingByEmail = teachers.find(t => {
+        if (editingTeacher && t.id === editingTeacher.id) return false;
+        return String(t.email || '').trim().toLowerCase() === normalizedEmail;
+      });
+      if (existingByEmail) {
+        setTeacherFormError(
+          `ZUIZO LA USAJILI: Barua pepe "${email.trim()}" tayari inatumiwa na Mwl. ${existingByEmail.name}. Hairuhusiwi kusajili walimu wawili wenye barua pepe moja.`
+        );
+        return;
+      }
+    }
+
+    const cleanedSubjects = Array.from(new Set(effectiveSubjectsList.map(cleanSubjectName).filter(Boolean)));
+    const finalRole = isCustomRole ? (customRole.trim() || 'Subject Teacher') : schoolRole;
+    const finalGender = gender || (finalRole.includes('Mistress') || finalRole.includes('Headmistress') ? 'Female' : 'Male');
+
+    const classTeacherVal = isClassTeacher
+      ? `${classTeacherClass} - ${classTeacherStream.replace(/^STREAM\s+/i, 'STREAM ')}`
+      : undefined;
+
+    const candidateTeacher: Teacher = editingTeacher
+      ? {
+          ...editingTeacher,
+          name: name.trim(),
+          initial: generateInitials(name.trim(), editingTeacher.id),
+          gender: finalGender,
+          schoolRole: finalRole,
+          subjects: cleanedSubjects,
+          excludeInvigilation,
+          color: customColor,
+          phone: phone.trim() || undefined,
+          email: email.trim() || undefined,
+          passportPhoto: passportPhoto || undefined,
+          teachingStreams,
+          maxPeriodsPerWeek,
+          isClassTeacher,
+          classTeacherOf: classTeacherVal
+        }
+      : {
+          id: Date.now(),
+          name: name.trim(),
+          initial: currentInitial,
+          gender: finalGender,
+          schoolRole: finalRole,
+          subjects: cleanedSubjects,
+          excludeInvigilation,
+          color: customColor,
+          phone: phone.trim() || undefined,
+          email: email.trim() || undefined,
+          passportPhoto: passportPhoto || undefined,
+          teachingStreams,
+          maxPeriodsPerWeek,
+          isClassTeacher,
+          classTeacherOf: classTeacherVal
+        };
+
+    // Check for duplicate teacher name and require explicit permission override
+    const normalizedTargetName = normalizePersonName(name);
+    const sameNameMatches = teachers.filter(t => {
+      if (editingTeacher && t.id === editingTeacher.id) return false;
+      return normalizePersonName(t.name) === normalizedTargetName;
+    });
+
+    if (sameNameMatches.length > 0) {
+      setAllowDuplicateTeacherPermission(false);
+      setDuplicateTeacherModal({
+        existingMatches: sameNameMatches,
+        pendingTeacher: candidateTeacher,
+        isEditing: Boolean(editingTeacher)
+      });
+      return;
+    }
+
+    finalizeSaveTeacher(candidateTeacher, Boolean(editingTeacher));
   };
 
   const handleEdit = (teacher: Teacher) => {
@@ -559,6 +681,18 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     } else {
       setSchoolRole('Subject Teacher');
       setIsCustomRole(false);
+    }
+
+    const parsedCT = parseClassTeacherOf(teacher.classTeacherOf);
+    if (parsedCT || teacher.isClassTeacher || teacher.schoolRole === 'Class Teacher / Master') {
+      setIsClassTeacher(true);
+      setClassTeacherClass(parsedCT?.className || 'Form 1');
+      const rawStr = parsedCT?.stream ? (parsedCT.stream.toUpperCase().startsWith('STREAM') ? parsedCT.stream.toUpperCase() : `STREAM ${parsedCT.stream.toUpperCase()}`) : 'STREAM A';
+      setClassTeacherStream(rawStr);
+    } else {
+      setIsClassTeacher(false);
+      setClassTeacherClass('Form 1');
+      setClassTeacherStream('STREAM A');
     }
 
     setSubjects(teacher.subjects && teacher.subjects.length > 0 ? [...teacher.subjects] : []);
@@ -586,6 +720,9 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     setSchoolRole('Subject Teacher');
     setIsCustomRole(false);
     setCustomRole('');
+    setIsClassTeacher(false);
+    setClassTeacherClass('Form 1');
+    setClassTeacherStream('STREAM A');
     setSubjects([]);
     setSubjectSearch('');
     setExcludeInvigilation(false);
@@ -620,44 +757,6 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       total: teachers.length
     };
   }, [teachers]);
-
-  const handleExportTeachersCSV = () => {
-    const headers = ['#', 'Full Name', 'Gender', 'Role', 'Initial', 'Contact Phone', 'Email', 'Teaching Subjects', 'Assigned Periods/Wk'];
-    const rows = teachers.map((t, idx) => {
-      const isFemale = t.gender?.toLowerCase().startsWith('f') || (t.schoolRole && (t.schoolRole.includes('Mistress') || t.schoolRole.includes('Headmistress')));
-      const g = isFemale ? 'Female' : 'Male';
-      const tSlots = timetableAssignments.filter(a => {
-        const matchId = a.teacherId === t.id;
-        const aT = (('teacher' in a ? (a as any).teacher : '') || '').toLowerCase();
-        return matchId || aT === t.name.toLowerCase() || (t.initial && aT === t.initial.toLowerCase());
-      });
-      return [
-        idx + 1,
-        `"${t.name.replace(/"/g, '""')}"`,
-        g,
-        `"${(t.schoolRole || 'Subject Teacher').replace(/"/g, '""')}"`,
-        t.initial,
-        `"${t.phone || ''}"`,
-        `"${t.email || ''}"`,
-        `"${(t.subjects || []).join('; ')}"`,
-        tSlots.length
-      ].join(',');
-    });
-    const csvContent = [headers.join(','), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Teachers_Faculty_Roster_${new Date().toISOString().split('T')[0]}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  };
-
-  const handlePrintTeachersRoster = () => {
-    window.print();
-  };
 
   // Filter teachers by search and role
   const filteredTeachers = effectiveTeachers.filter(t => {
@@ -703,6 +802,30 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     );
   };
 
+  const handleBulkInvigilationToggle = (enable: boolean) => {
+    if (selectedTeacherIds.length === 0) return;
+    const updatedList: Teacher[] = [];
+    teachers.forEach(t => {
+      if (selectedTeacherIds.includes(t.id)) {
+        const updatedTeacher = { ...t, excludeInvigilation: !enable };
+        updatedList.push(updatedTeacher);
+        onUpdateTeacher(updatedTeacher);
+      }
+    });
+
+    if (onBulkUpdateTeachers && updatedList.length > 0) {
+      onBulkUpdateTeachers(updatedList);
+    }
+
+    setFormNotice(
+      `✓ Taarifa zimebadilishwa: Walimu ${selectedTeacherIds.length} sasa ${
+        enable ? 'WANASIMAMIA mitihani (Enabled Invigilation)' : 'HAWASIMAMII mitihani (Disabled Invigilation)'
+      }!`
+    );
+    setTimeout(() => setFormNotice(null), 5000);
+    setSelectedTeacherIds([]);
+  };
+
   const handleBulkDeleteTeachersClick = () => {
     if (selectedTeacherIds.length === 0) return;
     openConfirmDelete(
@@ -734,6 +857,150 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
       return 'bg-emerald-100 text-emerald-800 border-emerald-300 font-bold';
     }
     return 'bg-slate-100 text-slate-700 border-slate-200';
+  };
+
+  // Export Faculty Roster to CSV
+  const handleExportTeachersCSV = () => {
+    if (!filteredTeachers || filteredTeachers.length === 0) {
+      alert('Hakuna walimu katika orodha iliyochaguliwa.');
+      return;
+    }
+
+    const headers = ['#', 'Full Name', 'Gender', 'School Role', 'Class Teacher Of', 'Initial', 'Teaching Subjects', 'Teaching Streams', 'Phone', 'Email', 'Invigilation Status'];
+    const rows = filteredTeachers.map((t, idx) => [
+      idx + 1,
+      `"${t.name || ''}"`,
+      t.gender || 'Male',
+      `"${t.schoolRole || 'Subject Teacher'}"`,
+      `"${formatClassTeacherString(t.classTeacherOf) || (t.isClassTeacher ? 'Yes' : 'No')}"`,
+      t.initial || '',
+      `"${(t.subjects || []).join(', ')}"`,
+      `"${(t.teachingStreams || []).join(', ')}"`,
+      `"${t.phone || ''}"`,
+      `"${t.email || ''}"`,
+      t.excludeInvigilation ? 'Disabled' : 'Active'
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `Orodha_ya_Walimu_${(schoolInfo?.name || 'Faculty').replace(/\s+/g, '_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Export Faculty Roster to Vector PDF using jsPDF
+  const handleExportTeachersPDF = () => {
+    if (!filteredTeachers || filteredTeachers.length === 0) {
+      alert('Hakuna walimu katika orodha ya kuchapisha.');
+      return;
+    }
+
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'mm',
+      format: 'a4'
+    });
+
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 10;
+    const innerW = pageW - margin * 2;
+
+    // Header Letterhead
+    doc.setFont('times', 'bold');
+    doc.setFontSize(14);
+    doc.text((schoolInfo?.name || 'HABYEDUPRO ACADEMIC FACULTY').toUpperCase(), pageW / 2, margin + 8, { align: 'center' });
+    
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9);
+    doc.text(`CENTER NO: ${schoolInfo?.schoolNumber || 'S.0123'}  |  ${schoolInfo?.address || 'P.O. Box Tanzania'}  |  TEL: ${schoolInfo?.phone || '+255'}`, pageW / 2, margin + 14, { align: 'center' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text('OFFICIAL FACULTY ROSTER & TEACHING STAFF ALLOCATION REPORT', pageW / 2, margin + 21, { align: 'center' });
+
+    doc.setLineWidth(0.5);
+    doc.line(margin, margin + 24, pageW - margin, margin + 24);
+
+    // Summary Line
+    const femaleCount = filteredTeachers.filter(t => t.gender?.toLowerCase().startsWith('f')).length;
+    const maleCount = filteredTeachers.length - femaleCount;
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`Jumla ya Walimu (Total Staff): ${filteredTeachers.length}  |  Walimu Wanawake (Female/KE): ${femaleCount}  |  Walimu Wanaume (Male/ME): ${maleCount}  |  Tarehe: ${new Date().toLocaleDateString('sw-TZ')}`, margin, margin + 30);
+
+    // Table Header
+    let y = margin + 35;
+    const colWidths = [10, 50, 20, 42, 14, 65, 42, 34];
+    const colTitles = ['#', 'Jina Kamili la Mwalimu', 'Jinsia', 'Cheo / Role', 'Init.', 'Masomo Anayofundisha', 'Mikondo', 'Simu / Contact'];
+
+    doc.setFillColor(31, 77, 139);
+    doc.rect(margin, y, innerW, 7, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(8.5);
+    
+    let curX = margin + 2;
+    colTitles.forEach((t, i) => {
+      doc.text(t, curX, y + 5);
+      curX += colWidths[i];
+    });
+
+    y += 7;
+    doc.setTextColor(0, 0, 0);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+
+    filteredTeachers.forEach((t, idx) => {
+      if (y > pageH - 25) {
+        doc.addPage();
+        y = margin + 10;
+      }
+
+      if (idx % 2 === 1) {
+        doc.setFillColor(245, 247, 250);
+        doc.rect(margin, y, innerW, 6.5, 'F');
+      }
+
+      let x = margin + 2;
+      doc.text(String(idx + 1), x, y + 4.5); x += colWidths[0];
+      doc.text((t.name || '').slice(0, 28), x, y + 4.5); x += colWidths[1];
+      doc.text(t.gender?.toLowerCase().startsWith('f') ? 'Female (KE)' : 'Male (ME)', x, y + 4.5); x += colWidths[2];
+      doc.text((t.schoolRole || 'Subject Teacher').slice(0, 24), x, y + 4.5); x += colWidths[3];
+      doc.text(t.initial || 'TR', x, y + 4.5); x += colWidths[4];
+      doc.text((t.subjects || []).join(', ').slice(0, 42), x, y + 4.5); x += colWidths[5];
+      doc.text((t.teachingStreams || []).join(', ').slice(0, 28) || 'All Streams', x, y + 4.5); x += colWidths[6];
+      doc.text(t.phone || t.email || '-', x, y + 4.5);
+
+      doc.setDrawColor(226, 232, 240);
+      doc.line(margin, y + 6.5, pageW - margin, y + 6.5);
+      y += 6.5;
+    });
+
+    // Verification Box
+    y += 6;
+    if (y < pageH - 25) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.text('UTHIBITISHO WA ANWANI YA TAALUMA (ACADEMIC VERIFICATION)', margin, y);
+      y += 4;
+      doc.rect(margin, y, 120, 15);
+      doc.text('Mkuu wa Shule / Headmaster Signature & Stamp:', margin + 2, y + 4);
+      doc.text('Tarehe: ____ / ____ / 20___', margin + 2, y + 11);
+
+      doc.rect(margin + 130, y, 130, 15);
+      doc.text('Mwalimu Mkuu wa Taaluma (Academic Master) Signature:', margin + 132, y + 4);
+      doc.text('Tarehe: ____ / ____ / 20___', margin + 132, y + 11);
+    }
+
+    doc.save(`Orodha_ya_Walimu_${(schoolInfo?.name || 'Faculty').replace(/\s+/g, '_')}.pdf`);
+  };
+
+  // Direct Print Handler
+  const handlePrintTeachersRoster = () => {
+    handleExportTeachersPDF();
   };
 
   // Filter subjects for the multi-select search
@@ -828,7 +1095,25 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
     onUpdateTimetableAssignments(updated);
   };
 
+  if (registeringBiometricId) {
+    const selectedBioTeacher =
+      teachers.find(t => String(t.id) === String(registeringBiometricId) || String(t.firestoreDocId || '') === String(registeringBiometricId)) ||
+      effectiveTeachers.find(t => String(t.id) === String(registeringBiometricId)) ||
+      null;
+    return (
+      <BiometricRegistration 
+        teacherId={registeringBiometricId}
+        teacher={selectedBioTeacher}
+        schoolId={currentUser?.schoolId}
+        onUpdateTeacher={onUpdateTeacher}
+        onBack={() => setRegisteringBiometricId(null)}
+        onSuccess={() => setRegisteringBiometricId(null)}
+      />
+    );
+  }
+
   return (
+
     <div className="space-y-6">
       {/* Sub-Tabs Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-3 rounded-2xl border border-slate-200 shadow-xs">
@@ -891,6 +1176,19 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
               {teacherEvaluations.length}
             </span>
           </button>
+
+          <button
+            type="button"
+            onClick={() => setActiveSubTab('profile_dashboard')}
+            className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+              activeSubTab === 'profile_dashboard'
+                ? 'bg-gradient-to-r from-indigo-900 to-blue-800 text-white shadow-xs ring-2 ring-amber-400'
+                : 'bg-indigo-50 text-indigo-900 hover:bg-indigo-100 border border-indigo-200'
+            }`}
+          >
+            <Sparkles className="w-4 h-4 text-amber-400" />
+            <span>👤 Teacher Profile Dashboard (Lessons, Invigilation &amp; Journal)</span>
+          </button>
         </div>
 
         {activeSubTab === 'roster' && (
@@ -899,6 +1197,24 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
           </span>
         )}
       </div>
+
+      {/* SPECIALIZED TEACHER PROFILE DASHBOARD SUB-TAB */}
+      {activeSubTab === 'profile_dashboard' && (
+        <TeacherProfileDashboard
+          teachers={teachers}
+          timetableAssignments={timetableAssignments}
+          periodSettings={periodSettings}
+          sessions={sessions}
+          invigilationAssignments={invigilationAssignments}
+          supervisors={supervisors}
+          journalRecords={journalRecords}
+          onUpdateJournal={onUpdateJournal}
+          streamSettings={streamSettings}
+          schoolInfo={schoolInfo}
+          currentUser={currentUser}
+          initialTeacherId={profileDashboardTeacherId}
+        />
+      )}
 
       {/* ------------------------------------------------------------------ */}
       {/* RECHARTS VISUAL SUMMARY WIDGET FOR ACADEMIC MASTER WORKLOAD MONITOR */}
@@ -1422,6 +1738,19 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
 
                 {/* Inputs Column */}
                 <div className="lg:col-span-3 space-y-5">
+                  {teacherFormError && (
+                    <div className="p-3 bg-rose-50 border border-rose-300 rounded-xl flex items-start gap-2.5 text-rose-900">
+                      <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                      <div className="text-xs font-bold flex-1">{teacherFormError}</div>
+                      <button
+                        type="button"
+                        onClick={() => setTeacherFormError(null)}
+                        className="text-rose-500 hover:text-rose-700 cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+                  )}
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                     <div>
                       <label className="text-xs font-bold text-slate-600 uppercase block mb-1">Teacher Full Name *</label>
@@ -1429,10 +1758,28 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                         type="text"
                         placeholder="e.g. Adelmarcy Mallya"
                         value={name}
-                        onChange={e => setName(e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-slate-300 rounded-xl focus:ring-2 focus:ring-blue-500 bg-white"
+                        onChange={e => {
+                          setName(e.target.value);
+                          if (teacherFormError) setTeacherFormError(null);
+                        }}
+                        className={`w-full px-3 py-2 text-sm border rounded-xl focus:ring-2 bg-white ${
+                          matchingExistingTeachersByName.length > 0
+                            ? 'border-amber-400 focus:ring-amber-500 bg-amber-50/30'
+                            : 'border-slate-300 focus:ring-blue-500'
+                        }`}
                         required
                       />
+                      {matchingExistingTeachersByName.length > 0 && (
+                        <div className="mt-1.5 p-2 bg-amber-50 border border-amber-300 rounded-lg text-[11px] text-amber-900 flex items-start gap-1.5">
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                          <div>
+                            <span className="font-black">Tahadhari ya Kujirudia Jina:</span> Mwalimu mwenye jina{' '}
+                            <strong>"{name.trim()}"</strong> tayari yupo (
+                            {matchingExistingTeachersByName.map(m => `${m.name} - ${m.schoolRole || 'Teacher'}`).join(', ')}
+                            ). Ukibonyeza kusajili utahitajika kutoa ruhusa maalum kama ni walimu wawili tofauti.
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                     {/* Teacher Gender */}
@@ -1519,6 +1866,71 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                           >
                             <X className="w-3.5 h-3.5" />
                           </button>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Class Teacher Assignment Card */}
+                    <div className="sm:col-span-2 md:col-span-3 bg-emerald-50/90 border border-emerald-300 rounded-2xl p-4 space-y-3 shadow-xs">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={isClassTeacher}
+                            onChange={e => setIsClassTeacher(e.target.checked)}
+                            className="w-4 h-4 text-emerald-600 rounded focus:ring-emerald-500 cursor-pointer"
+                          />
+                          <span className="text-xs font-black text-emerald-950 uppercase tracking-wide flex items-center gap-1.5">
+                            <Award className="w-4 h-4 text-emerald-600" />
+                            Mteue Mwalimu Huyu Kuwa Mwalimu wa Darasa (Assign as Class Teacher)
+                          </span>
+                        </label>
+                        {isClassTeacher && (
+                          <span className="px-2.5 py-0.5 bg-emerald-600 text-white font-black text-[10px] rounded-full uppercase tracking-wider shadow-xs">
+                            Mwalimu wa Darasa
+                          </span>
+                        )}
+                      </div>
+
+                      {isClassTeacher && (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-3 border-t border-emerald-200 animate-in fade-in">
+                          <div>
+                            <label className="block text-[11px] font-extrabold text-emerald-950 uppercase mb-1">
+                              1. Chagua Darasa (Class):
+                            </label>
+                            <select
+                              value={classTeacherClass}
+                              onChange={e => setClassTeacherClass(e.target.value)}
+                              className="w-full px-3 py-2 text-xs font-black bg-white text-slate-900 border border-emerald-400 rounded-xl focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                            >
+                              {DEFAULT_CLASSES.map(c => (
+                                <option key={c} value={c}>{c}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="block text-[11px] font-extrabold text-emerald-950 uppercase mb-1">
+                              2. Chagua Mkondo (Stream):
+                            </label>
+                            <select
+                              value={classTeacherStream}
+                              onChange={e => setClassTeacherStream(e.target.value)}
+                              className="w-full px-3 py-2 text-xs font-black bg-white text-slate-900 border border-emerald-400 rounded-xl focus:ring-2 focus:ring-emerald-500 cursor-pointer"
+                            >
+                              {['STREAM A', 'STREAM B', 'STREAM C', 'STREAM D', 'STREAM E'].map(str => (
+                                <option key={str} value={str}>{str}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          <div className="sm:col-span-2 text-[11px] text-emerald-950 font-bold bg-white/90 p-2.5 rounded-xl border border-emerald-200 flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-amber-500 shrink-0 animate-pulse" />
+                            <span>
+                              Mwalimu <strong>{name || 'huyu'}</strong> atasimamia <strong>{classTeacherClass} - {classTeacherStream}</strong>.
+                              Ataweza kuita majina (Roll Call) na kutoa Ripoti za Maendeleo za darasa hili pekee!
+                            </span>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -2138,26 +2550,47 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
 
             {/* Bulk Action Selection Banner */}
             {selectedTeacherIds.length > 0 && (
-              <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between gap-3 text-xs font-bold text-rose-900 animate-in fade-in">
+              <div className="p-3.5 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 border-2 border-blue-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs font-bold text-blue-950 shadow-xs animate-in fade-in">
                 <div className="flex items-center gap-2">
-                  <Trash2 className="w-4 h-4 text-rose-600" />
-                  <span>{selectedTeacherIds.length} staff member(s) selected</span>
+                  <Users className="w-4 h-4 text-blue-600" />
+                  <span>{selectedTeacherIds.length} staff member(s) selected:</span>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <button
                     type="button"
-                    onClick={() => setSelectedTeacherIds([])}
-                    className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-lg cursor-pointer transition-colors"
+                    onClick={() => handleBulkInvigilationToggle(true)}
+                    className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all active:scale-95"
+                    title="Enable exam invigilation availability for all selected teachers"
                   >
-                    Clear Selection
+                    <CheckCircle2 className="w-3.5 h-3.5 text-white" />
+                    <span>Enable Invigilation ({selectedTeacherIds.length})</span>
                   </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleBulkInvigilationToggle(false)}
+                    className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all active:scale-95"
+                    title="Disable exam invigilation (exclude from invigilation) for selected teachers"
+                  >
+                    <X className="w-3.5 h-3.5 text-white" />
+                    <span>Disable Invigilation ({selectedTeacherIds.length})</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={handleBulkDeleteTeachersClick}
-                    className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-lg flex items-center gap-1.5 shadow-2xs cursor-pointer transition-colors"
+                    className="px-3 py-1.5 bg-rose-600 hover:bg-rose-700 text-white rounded-xl flex items-center gap-1.5 shadow-2xs cursor-pointer transition-all active:scale-95"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete Selected ({selectedTeacherIds.length})</span>
+                    <span>Delete ({selectedTeacherIds.length})</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTeacherIds([])}
+                    className="px-3 py-1.5 bg-white border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl cursor-pointer transition-colors"
+                  >
+                    Clear Selection
                   </button>
                 </div>
               </div>
@@ -2189,6 +2622,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                     <th className="p-2.5 border-r border-slate-200 text-center">Initial</th>
                     <th className="p-2.5 border-r border-slate-200">Teaching Subjects</th>
                     <th className="p-2.5 border-r border-slate-200">Class Timetable &amp; Streams</th>
+                    <th className="p-2.5 border-r border-slate-200 text-center">Exam Invigilation</th>
                     <th className="p-2.5 border-r border-slate-200">Contact</th>
                     <th className="p-2.5 text-center">Actions</th>
                   </tr>
@@ -2196,7 +2630,7 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredTeachers.length === 0 ? (
                     <tr>
-                      <td colSpan={11} className="p-8 text-center text-slate-400">
+                      <td colSpan={12} className="p-8 text-center text-slate-400">
                         No faculty members found matching your search.
                       </td>
                     </tr>
@@ -2256,9 +2690,16 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                             )}
                           </td>
                           <td className="p-2.5 border-r border-slate-200">
-                            <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] border shadow-2xs ${getRoleBadgeStyle(t.schoolRole)}`}>
-                              {t.schoolRole || 'Subject Teacher'}
-                            </span>
+                            <div className="space-y-1">
+                              <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] border shadow-2xs ${getRoleBadgeStyle(t.schoolRole)}`}>
+                                {t.schoolRole || 'Subject Teacher'}
+                              </span>
+                              {(t.classTeacherOf || t.isClassTeacher) && (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-black bg-emerald-100 text-emerald-900 border border-emerald-300 shadow-2xs block w-fit">
+                                  🎓 Mwalimu wa Darasa: {formatClassTeacherString(t.classTeacherOf) || 'Form 1 - STREAM A'}
+                                </span>
+                              )}
+                            </div>
                           </td>
                           <td className="p-2.5 border-r border-slate-200 text-center">
                             <span
@@ -2312,6 +2753,36 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                               </div>
                             </div>
                           </td>
+                          <td className="p-2.5 border-r border-slate-200 text-center">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                onUpdateTeacher({ ...t, excludeInvigilation: !t.excludeInvigilation });
+                              }}
+                              className={`px-2.5 py-1 text-[11px] font-black rounded-xl border transition-all cursor-pointer inline-flex items-center gap-1.5 shadow-2xs hover:scale-[1.03] active:scale-95 ${
+                                t.excludeInvigilation
+                                  ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100 hover:border-rose-400'
+                                  : 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100 hover:border-emerald-400'
+                              }`}
+                              title={
+                                t.excludeInvigilation
+                                  ? 'Mwalimu HUYU HASIMAMII mitihani. Bofya hapa ili kumruhusu asinamie mitihani.'
+                                  : 'Mwalimu HUYU ANASIMAMIA mitihani. Bofya hapa ili kuzuia asisimamie mitihani.'
+                              }
+                            >
+                              {t.excludeInvigilation ? (
+                                <>
+                                  <X className="w-3.5 h-3.5 text-rose-600 shrink-0 font-black" />
+                                  <span>Hasimamii</span>
+                                </>
+                              ) : (
+                                <>
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span>Anasimamia</span>
+                                </>
+                              )}
+                            </button>
+                          </td>
                           <td className="p-2.5 border-r border-slate-200">
                             {t.phone ? (
                               <StudentPhoneBadge 
@@ -2326,17 +2797,56 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
                           </td>
                           <td className="p-2.5 text-center">
                             <div className="flex items-center justify-center gap-1">
-                              <button
-                                type="button"
-                                onClick={() => handleEdit(t)}
-                                className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-colors cursor-pointer ${
-                                  editingTeacher?.id === t.id 
-                                    ? 'bg-amber-600 text-white border-amber-600' 
-                                    : 'text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200'
-                                }`}
-                              >
-                                {editingTeacher?.id === t.id ? 'Editing...' : 'Edit'}
-                              </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setProfileDashboardTeacherId(t.id);
+                                    setActiveSubTab('profile_dashboard');
+                                  }}
+                                  className="px-2 py-1 text-[11px] font-bold rounded-lg border border-indigo-200 text-indigo-800 bg-indigo-50 hover:bg-indigo-100 transition-colors cursor-pointer flex items-center gap-1"
+                                  title="Fungua Teacher Profile Dashboard ya mwalimu huyu (Vipindi, Usimamizi & Journal)"
+                                >
+                                  <User className="w-3 h-3 text-indigo-600" />
+                                  <span>Profile</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleEdit(t)}
+                                  className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-colors cursor-pointer ${
+                                    editingTeacher?.id === t.id 
+                                      ? 'bg-amber-600 text-white border-amber-600' 
+                                      : 'text-amber-700 bg-amber-50 hover:bg-amber-100 border-amber-200'
+                                  }`}
+                                >
+                                  {editingTeacher?.id === t.id ? 'Editing...' : 'Edit'}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => onUpdateTeacher({ ...t, excludeInvigilation: !t.excludeInvigilation })}
+                                  className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-colors cursor-pointer flex items-center gap-1 ${
+                                    t.excludeInvigilation
+                                      ? 'border-rose-300 text-rose-800 bg-rose-50 hover:bg-rose-100'
+                                      : 'border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100'
+                                  }`}
+                                  title={t.excludeInvigilation ? 'Mwalimu huyu hasimamii. Bofya kubadilisha awe anasimamia' : 'Mwalimu huyu anasimamia. Bofya kubadilisha asisimamie'}
+                                >
+                                  <ShieldAlert className="w-3 h-3" />
+                                  <span>{t.excludeInvigilation ? 'Hasimamii' : 'Anasimamia'}</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setRegisteringBiometricId(String(t.id))}
+                                  className={`px-2 py-1 text-[11px] font-bold rounded-lg border transition-colors cursor-pointer flex items-center gap-1 ${
+                                    t.hasBiometric || t.fingerprintEnrolled
+                                      ? 'border-emerald-300 text-emerald-800 bg-emerald-50 hover:bg-emerald-100'
+                                      : 'border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100'
+                                  }`}
+                                  title={t.hasBiometric || t.fingerprintEnrolled ? 'Biometric & PIN Imesajiliwa (Bofya kuhariri)' : 'Sajili Alama ya Kidole na PIN'}
+                                >
+                                  <Fingerprint className="w-3 h-3" />
+                                  <span>{t.hasBiometric || t.fingerprintEnrolled ? 'Biometric ✅' : 'Sajili Vidole'}</span>
+                                </button>
+
                               <button
                                 type="button"
                                 onClick={() => {
@@ -2938,6 +3448,92 @@ export const TeachersView: React.FC<TeachersViewProps> = ({
         }}
         existingTeachers={teachers}
       />
+
+      {/* Duplicate Teacher Registration Restriction & Permission Modal */}
+      {duplicateTeacherModal && (
+        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full shadow-2xl border-2 border-amber-400 overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            <div className="bg-amber-500 text-slate-950 p-4 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/90 text-amber-600 flex items-center justify-center shadow-xs">
+                  <AlertCircle className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-black uppercase tracking-wide">
+                    Tahadhari: Jina la Mwalimu Linajirudia!
+                  </h4>
+                  <p className="text-[11px] font-bold text-amber-950">
+                    Mfumo umezuia usajili wa moja kwa moja ili kuepuka kurudia mwalimu
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDuplicateTeacherModal(null);
+                  setAllowDuplicateTeacherPermission(false);
+                }}
+                className="p-1 rounded-lg hover:bg-amber-600/30 text-slate-900 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-950 space-y-1.5">
+                <p className="font-bold">
+                  Unajaribu kusajili mwalimu mwenye jina{' '}
+                  <span className="underline font-black">"{duplicateTeacherModal.pendingTeacher.name}"</span> ambaye tayari anaonekana kwenye orodha ya walimu:
+                </p>
+                <ul className="list-disc list-inside space-y-1 font-semibold text-amber-900 pt-1">
+                  {duplicateTeacherModal.existingMatches.map(m => (
+                    <li key={m.id}>
+                      <strong>{m.name}</strong> ({m.initial}) — Wadhifa: <strong>{m.schoolRole || 'Subject Teacher'}</strong>, Masomo:{' '}
+                      <span className="font-mono">{(m.subjects || []).join(', ') || 'Bado'}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl">
+                <label className="flex items-start gap-2.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={allowDuplicateTeacherPermission}
+                    onChange={e => setAllowDuplicateTeacherPermission(e.target.checked)}
+                    className="mt-0.5 rounded border-slate-300 text-amber-600 focus:ring-amber-500 w-4 h-4 cursor-pointer"
+                  />
+                  <span className="text-xs font-bold text-slate-800 leading-snug">
+                    Ninathibitisha na kutoa ruhusa kuwa huyu ni mwalimu mwingine tofauti ingawa majina yao yanafanana (Ruhusu kusajili mwalimu huyu kwa initials za "{duplicateTeacherModal.pendingTeacher.initial}").
+                  </span>
+                </label>
+              </div>
+
+              <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDuplicateTeacherModal(null);
+                    setAllowDuplicateTeacherPermission(false);
+                  }}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs cursor-pointer transition"
+                >
+                  Sitisha Usajili (Cancel)
+                </button>
+                <button
+                  type="button"
+                  disabled={!allowDuplicateTeacherPermission}
+                  onClick={() => finalizeSaveTeacher(duplicateTeacherModal.pendingTeacher, duplicateTeacherModal.isEditing)}
+                  className="px-4 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-black rounded-xl text-xs shadow-sm cursor-pointer transition flex items-center gap-1.5"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>Ruhusu na Sajili Mwalimu</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

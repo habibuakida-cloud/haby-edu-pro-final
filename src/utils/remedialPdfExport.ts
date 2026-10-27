@@ -21,22 +21,27 @@ export interface RemedialTimetableEntry {
 export interface RemedialPdfExportOptions {
   entries: RemedialTimetableEntry[];
   schoolInfo?: SchoolInfo;
-  className: string;
-  streamName: string;
+  className?: string;
+  streamName?: string;
   academicYear?: string;
+  title?: string;
+  subtitle?: string;
+  showClassColumn?: boolean;
 }
 
 /**
- * Generates an official, clean Remedial Timetable PDF for a specific class & stream.
- * Requirement: PDF ya ratiba iwe na logo ya HABY EDU PRO na kichwa: RATIBA YA REMEDIAL - DARASA 5A - 2026
+ * Generates an official, clean Remedial Timetable PDF for class, teacher, or general whole-school schedule.
  */
 export function exportRemedialTimetablePDF(options: RemedialPdfExportOptions): void {
   const {
     entries,
     schoolInfo,
-    className,
-    streamName,
-    academicYear = new Date().getFullYear().toString()
+    className = 'Class 5',
+    streamName = 'All Streams',
+    academicYear = new Date().getFullYear().toString(),
+    title,
+    subtitle,
+    showClassColumn = false
   } = options;
 
   const doc = new jsPDF({
@@ -73,17 +78,19 @@ export function exportRemedialTimetablePDF(options: RemedialPdfExportOptions): v
 
   let y = margin + 28;
 
-  // Title Box: e.g. "RATIBA YA REMEDIAL - DARASA 5A - 2026"
-  let classDisplay = className.trim().toUpperCase();
-  if (/^(CLASS|STANDARD|STD)\s*(\d+)/i.test(classDisplay)) {
-    const num = classDisplay.replace(/^(CLASS|STANDARD|STD)\s*/i, '');
-    classDisplay = `DARASA ${num}`;
+  // Title Box
+  let titleText = title;
+  if (!titleText) {
+    let classDisplay = className.trim().toUpperCase();
+    if (/^(CLASS|STANDARD|STD)\s*(\d+)/i.test(classDisplay)) {
+      const num = classDisplay.replace(/^(CLASS|STANDARD|STD)\s*/i, '');
+      classDisplay = `DARASA ${num}`;
+    }
+    const cleanStream = streamName === 'All Streams' || streamName === 'All' 
+      ? ' (MIKONDO YOTE)' 
+      : streamName.replace(/^STREAM\s+/i, '').trim().toUpperCase();
+    titleText = `RATIBA YA REMEDIAL - ${classDisplay}${cleanStream !== ' (MIKONDO YOTE)' ? cleanStream : cleanStream} - ${academicYear}`;
   }
-  const cleanStream = streamName === 'All Streams' || streamName === 'All' 
-    ? ' (MIKONDO YOTE)' 
-    : streamName.replace(/^STREAM\s+/i, '').trim().toUpperCase();
-
-  const titleText = `RATIBA YA REMEDIAL - ${classDisplay}${cleanStream !== ' (MIKONDO YOTE)' ? cleanStream : cleanStream} - ${academicYear}`;
 
   doc.setFillColor(241, 245, 249);
   doc.setDrawColor(31, 77, 139);
@@ -99,26 +106,36 @@ export function exportRemedialTimetablePDF(options: RemedialPdfExportOptions): v
   doc.setFontSize(8);
   doc.setTextColor(71, 85, 105);
   const printDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
-  doc.text(`Kipindi cha Masomo ya Ziada na Matayarisho • Imetolewa Tarehe: ${printDate} • Vipindi Jumla: ${entries.length}`, pageWidth / 2, y + 10.5, { align: 'center' });
+  const subText = subtitle || `Kipindi cha Masomo ya Ziada na Matayarisho • Imetolewa Tarehe: ${printDate} • Vipindi Jumla: ${entries.length}`;
+  doc.text(subText, pageWidth / 2, y + 10.5, { align: 'center' });
 
   y += 18;
 
   // Table Headers
-  doc.setFillColor(30, 41, 59); // Slate 800
-  doc.rect(margin, y, contentWidth, 7.5, 'F');
+  const drawHeaders = (atY: number) => {
+    doc.setFillColor(30, 41, 59); // Slate 800
+    doc.rect(margin, atY, contentWidth, 7.5, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7.5);
 
-  doc.setTextColor(255, 255, 255);
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+    doc.text('#', margin + 3, atY + 5);
+    doc.text('SIKU (DAY)', margin + 8, atY + 5);
+    doc.text('MUDA (TIME)', margin + 30, atY + 5);
+    if (showClassColumn) {
+      doc.text('DARASA (CLASS)', margin + 58, atY + 5);
+      doc.text('SOMO (SUBJECT)', margin + 92, atY + 5);
+      doc.text('MWALIMU (TEACHER)', margin + 138, atY + 5);
+      doc.text('CHUMBA', margin + 174, atY + 5);
+    } else {
+      doc.text('TAREHE', margin + 58, atY + 5);
+      doc.text('SOMO (SUBJECT)', margin + 86, atY + 5);
+      doc.text('MWALIMU (TEACHER)', margin + 138, atY + 5);
+      doc.text('CHUMBA', margin + 174, atY + 5);
+    }
+  };
 
-  doc.text('#', margin + 3, y + 5);
-  doc.text('SIKU (DAY)', margin + 10, y + 5);
-  doc.text('TAREHE (DATE)', margin + 34, y + 5);
-  doc.text('MUDA (TIME)', margin + 62, y + 5);
-  doc.text('SOMO (SUBJECT)', margin + 95, y + 5);
-  doc.text('MWALIMU (TEACHER)', margin + 138, y + 5);
-  doc.text('CHUMBA (ROOM)', margin + 172, y + 5);
-
+  drawHeaders(y);
   y += 7.5;
 
   const rowHeight = 7.5;
@@ -142,18 +159,7 @@ export function exportRemedialTimetablePDF(options: RemedialPdfExportOptions): v
       if (y + rowHeight > pageHeight - margin - 25) {
         doc.addPage();
         y = margin + 10;
-        // Repeat Table Header on new page
-        doc.setFillColor(30, 41, 59);
-        doc.rect(margin, y, contentWidth, 7.5, 'F');
-        doc.setTextColor(255, 255, 255);
-        doc.setFont('helvetica', 'bold');
-        doc.text('#', margin + 3, y + 5);
-        doc.text('SIKU (DAY)', margin + 10, y + 5);
-        doc.text('TAREHE (DATE)', margin + 34, y + 5);
-        doc.text('MUDA (TIME)', margin + 62, y + 5);
-        doc.text('SOMO (SUBJECT)', margin + 95, y + 5);
-        doc.text('MWALIMU (TEACHER)', margin + 138, y + 5);
-        doc.text('CHUMBA (ROOM)', margin + 172, y + 5);
+        drawHeaders(y);
         y += 7.5;
       }
 
@@ -168,32 +174,54 @@ export function exportRemedialTimetablePDF(options: RemedialPdfExportOptions): v
 
       doc.setTextColor(31, 77, 139);
       doc.setFont('helvetica', 'bold');
-      doc.text(entry.day_of_week || 'Monday', margin + 10, y + 5);
-
-      doc.setFont('helvetica', 'normal');
-      doc.setTextColor(51, 65, 85);
-      doc.text(entry.date || '-', margin + 34, y + 5);
+      doc.text((entry.day_of_week || 'Monday').slice(0, 9), margin + 8, y + 5);
 
       // Time
       const timeStr = entry.start_time && entry.end_time 
-        ? `${entry.start_time} - ${entry.end_time}` 
-        : (entry.period_time || '16:00 - 17:30');
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(15, 23, 42);
-      doc.text(timeStr, margin + 62, y + 5);
-
-      // Subject
-      doc.setTextColor(15, 23, 42);
-      doc.setFont('helvetica', 'bold');
-      doc.text(entry.subject.slice(0, 26), margin + 95, y + 5);
-
-      // Teacher
+        ? `${entry.start_time}-${entry.end_time}` 
+        : (entry.period_time || '16:00-17:30');
       doc.setFont('helvetica', 'normal');
-      doc.setTextColor(51, 65, 85);
-      doc.text((entry.teacher_name || 'Mwalimu').slice(0, 22), margin + 138, y + 5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(timeStr, margin + 30, y + 5);
 
-      // Room
-      doc.text(entry.room || 'Classroom', margin + 172, y + 5);
+      if (showClassColumn) {
+        // Class & Stream
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(51, 65, 85);
+        const classSt = `${entry.class_name} (${entry.stream === 'All Streams' ? 'Yote' : entry.stream})`;
+        doc.text(classSt.slice(0, 16), margin + 58, y + 5);
+
+        // Subject
+        doc.setFont('helvetica', 'bold');
+        doc.setTextColor(15, 23, 42);
+        doc.text(entry.subject.slice(0, 24), margin + 92, y + 5);
+
+        // Teacher
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        doc.text((entry.teacher_name || 'Mwalimu').slice(0, 20), margin + 138, y + 5);
+
+        // Room
+        doc.text((entry.room || 'Classroom').slice(0, 12), margin + 174, y + 5);
+      } else {
+        // Date
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        doc.text(entry.date || '-', margin + 58, y + 5);
+
+        // Subject
+        doc.setTextColor(15, 23, 42);
+        doc.setFont('helvetica', 'bold');
+        doc.text(entry.subject.slice(0, 26), margin + 86, y + 5);
+
+        // Teacher
+        doc.setFont('helvetica', 'normal');
+        doc.setTextColor(51, 65, 85);
+        doc.text((entry.teacher_name || 'Mwalimu').slice(0, 20), margin + 138, y + 5);
+
+        // Room
+        doc.text((entry.room || 'Classroom').slice(0, 12), margin + 174, y + 5);
+      }
 
       y += rowHeight;
     });

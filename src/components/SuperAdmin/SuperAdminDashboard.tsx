@@ -267,14 +267,28 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
     setSchoolError(null);
 
     try {
+      const response = await fetch('/api/db/schools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newSchoolName.trim(),
+          email: newSchoolEmail.trim() || undefined,
+          phone: newSchoolPhone.trim() || undefined,
+          status: 'ACTIVE'
+        })
+      });
+      const resData = await response.json().catch(() => ({}));
+      const createdId = resData?.school?.id;
+
       await saveSchoolToFirestore({
+        id: createdId,
         name: newSchoolName.trim(),
         email: newSchoolEmail.trim() || undefined,
         phone: newSchoolPhone.trim() || undefined,
         status: 'ACTIVE'
-      });
+      }).catch(() => {});
 
-      showNotification('success', `Shule ya "${newSchoolName.trim()}" imesajiliwa kikamilifu kwenye Firestore na Database!`);
+      showNotification('success', `Shule ya "${newSchoolName.trim()}" imesajiliwa kikamilifu kwenye mfumo!`);
       setNewSchoolName('');
       setNewSchoolEmail('');
       setNewSchoolPhone('');
@@ -399,16 +413,13 @@ export const SuperAdminDashboard: React.FC<SuperAdminDashboardProps> = ({
   // Handle Delete Admin
   const handleDeleteAdmin = async (adminId: string, adminEmail: string) => {
     if (adminEmail === 'habibuakida@gmail.com') {
-      alert('Huwezi kufuta akaunti kuu ya Root Super Admin.');
-      return;
-    }
-
-    if (!window.confirm(`Je, una uhakika unataka kufuta mtawala "${adminEmail}"?`)) {
+      showNotification('error', 'Huwezi kufuta akaunti kuu ya Root Super Admin.');
       return;
     }
 
     try {
-      await deleteDoc(doc(db, 'school_admins', adminId));
+      await fetch(`/api/db/school-admins/${encodeURIComponent(adminId)}`, { method: 'DELETE' });
+      await deleteDoc(doc(db, 'school_admins', adminId)).catch(() => {});
       showNotification('success', `Mtawala "${adminEmail}" amefutwa.`);
       await fetchEcosystemData();
     } catch (err: any) {

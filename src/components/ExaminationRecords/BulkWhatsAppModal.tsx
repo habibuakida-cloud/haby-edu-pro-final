@@ -62,7 +62,7 @@ export const BulkWhatsAppModal: React.FC<BulkWhatsAppModalProps> = ({
 
       const pointsStr = rec.points !== undefined && rec.points !== null ? String(rec.points) : '-';
       const divStr = rec.division || rec.overallGrade || '-';
-      const remarks = getGradeRemark(rec.overallGrade);
+      const remarks = getGradeRemark(rec.overallGrade as any);
 
       const streamText = rec.stream ? `Stream ${rec.stream}` : '';
       const formattedMessage = `HABY EDUPRO - ${schoolInfo.name.toUpperCase()}

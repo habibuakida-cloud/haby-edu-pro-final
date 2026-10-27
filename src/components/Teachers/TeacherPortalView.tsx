@@ -25,9 +25,14 @@ import {
   Download,
   UserCheck,
   ChevronRight,
-  ShieldCheck
+  ShieldCheck,
+  KeyRound,
+  FileEdit,
+  ClipboardCheck,
+  ShieldAlert
 } from 'lucide-react';
-import { Student, Teacher, SchoolInfo, StreamSetting, UserAccount, Exam, AcademicTermDates, TimetableAssignment, PeriodSetting, InvigilationSession, Supervisor } from '../../types';
+import { ChangePasswordModal } from '../common/ChangePasswordModal';
+import { Student, Teacher, SchoolInfo, StreamSetting, UserAccount, Exam, AcademicTermDates, TimetableAssignment, PeriodSetting, InvigilationSession, Supervisor, DutyRosterData, DisciplineRecord } from '../../types';
 import { format } from 'date-fns';
 import { generateAutoLessonPlan } from '../../utils/lessonPlanGenerator';
 import { LessonPlan } from '../../types/lessonPlan';
@@ -35,6 +40,10 @@ import { ReportCardDocument } from '../ReportCard/ReportCardDocument';
 import { EditReportCardModal } from '../ReportCard/EditReportCardModal';
 import { SUBJECT_LIST } from '../../constants/defaults';
 import { TeacherTimetable } from '../Timetable/TeacherTimetable';
+import { TeacherProfileDashboard } from './TeacherProfileDashboard';
+import { TeacherIndividualTestBank } from './TeacherIndividualTestBank';
+import { TeacherDutyRosterTab } from './TeacherDutyRosterTab';
+import { parseClassTeacherOf, formatClassTeacherString, getTeacherAllocatedStreams, isStudentEnrolledInSubject } from '../../utils/classTeacherUtils';
 
 interface TeacherPortalViewProps {
   teachers: Teacher[];
@@ -56,7 +65,12 @@ interface TeacherPortalViewProps {
   sessions?: InvigilationSession[];
   invigilationAssignments?: Record<string, number>;
   supervisors?: Supervisor[];
+  journalRecords?: Record<string, any>;
+  onUpdateJournal?: (records: Record<string, any>) => void;
   onUpdateTeacher?: (teacher: Teacher) => void;
+  dutyRosterData?: DutyRosterData;
+  onUpdateDutyRoster?: (data: DutyRosterData) => void;
+  disciplineRecords?: DisciplineRecord[];
 }
 
 export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
@@ -79,7 +93,12 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
   sessions = [],
   invigilationAssignments = {},
   supervisors = [],
-  onUpdateTeacher
+  journalRecords = {},
+  onUpdateJournal,
+  onUpdateTeacher,
+  dutyRosterData,
+  onUpdateDutyRoster,
+  disciplineRecords = []
 }) => {
   // 1. Identify Logged-in / Selected Teacher Context
   const isTeacherOnly = currentUser?.role === 'TEACHER' && !currentUser?.isSuperAdmin;
@@ -114,10 +133,22 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
     return count;
   }, [currentTeacher, sessions, invigilationAssignments]);
 
+  // Check if current teacher is an assigned Supervisor / Msimamizi Mkuu
+  const isSupervisor = useMemo(() => {
+    if (!currentTeacher || !supervisors || supervisors.length === 0) return false;
+    return supervisors.some(s => 
+      Number(s.teacherId) === Number(currentTeacher.id) ||
+      (s.name && currentTeacher.name && s.name.toLowerCase().includes(currentTeacher.name.toLowerCase())) ||
+      (currentTeacher.name && s.name && currentTeacher.name.toLowerCase().includes(s.name.toLowerCase()))
+    );
+  }, [currentTeacher, supervisors]);
+
   // Active Tab inside Teacher Portal
-  const [activeTab, setActiveTab] = useState<'timetable' | 'invigilation' | 'attendance' | 'markentry' | 'lessonplan' | 'scheme' | 'reports' | 'biometric'>('timetable');
+  const [activeTab, setActiveTab] = useState<'profile_dashboard' | 'timetable' | 'invigilation' | 'attendance' | 'test_records' | 'duty_roster' | 'markentry' | 'lessonplan' | 'scheme' | 'reports' | 'biometric'>('profile_dashboard');
+  const [attendanceMode, setAttendanceMode] = useState<'subject_period' | 'class_official'>('subject_period');
   const [bioScanState, setBioScanState] = useState<'idle' | 'scanning' | 'registered'>(() => currentTeacher?.fingerprintEnrolled ? 'registered' : 'idle');
   const [bioToast, setBioToast] = useState<string | null>(null);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   useEffect(() => {
     if (currentTeacher) {
@@ -131,52 +162,83 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
   const [selectedStream, setSelectedStream] = useState<string>('STREAM A');
   const [selectedSubject, setSelectedSubject] = useState<string>('Mathematics');
 
+  // Class Teacher Assignment Details
+  const classTeacherAssignment = useMemo(() => {
+    if (!currentTeacher) return null;
+    const parsed = parseClassTeacherOf(currentTeacher.classTeacherOf);
+    if (parsed) return parsed;
+    if (currentTeacher.isClassTeacher || currentTeacher.schoolRole === 'Class Teacher / Master') {
+      return { className: 'Form 1', stream: 'STREAM A' };
+    }
+    return null;
+  }, [currentTeacher]);
+
+  const isClassTeacher = Boolean(classTeacherAssignment);
+
+  // Auto-switch class & stream if switching to attendance / reports tab for Class Teacher
+  useEffect(() => {
+    if ((activeTab === 'attendance' || activeTab === 'reports') && classTeacherAssignment) {
+      setSelectedClass(classTeacherAssignment.className);
+      const str = classTeacherAssignment.stream.toUpperCase().startsWith('STREAM') 
+        ? classTeacherAssignment.stream.toUpperCase() 
+        : `STREAM ${classTeacherAssignment.stream.toUpperCase()}`;
+      setSelectedStream(str);
+    }
+  }, [activeTab, classTeacherAssignment]);
+
+  // Compute all allocated teaching streams for current teacher
+  const allocatedStreamKeys = useMemo(() => {
+    return getTeacherAllocatedStreams(currentTeacher, timetableAssignments);
+  }, [currentTeacher, timetableAssignments]);
+
   // Auto-set teacher's primary subject & class on teacher change
   useEffect(() => {
     if (currentTeacher) {
       if (currentTeacher.subjects && currentTeacher.subjects.length > 0) {
         setSelectedSubject(currentTeacher.subjects[0]);
       }
-      if (currentTeacher.teachingStreams && currentTeacher.teachingStreams.length > 0) {
-        const raw = currentTeacher.teachingStreams[0];
-        const parts = raw.split('-');
+      if (allocatedStreamKeys.length > 0) {
+        const raw = allocatedStreamKeys[0];
+        const parts = raw.split(/[-–—/]/);
         if (parts.length >= 2) {
           setSelectedClass(parts[0].trim());
-          setSelectedStream(parts[1].trim());
+          const str = parts[1].trim().toUpperCase().startsWith('STREAM') ? parts[1].trim().toUpperCase() : `STREAM ${parts[1].trim().toUpperCase()}`;
+          setSelectedStream(str);
         }
       }
     }
-  }, [currentTeacher]);
+  }, [currentTeacher, allocatedStreamKeys]);
 
   // Available Classes & Streams mapped from current teacher's assigned teachingStreams or streamSettings
   const availableClasses = useMemo(() => {
-    if (currentTeacher && currentTeacher.teachingStreams && currentTeacher.teachingStreams.length > 0) {
-      const classesFromTeacher = Array.from(new Set(currentTeacher.teachingStreams.map(ts => {
-        const parts = ts.split('-');
+    if (allocatedStreamKeys.length > 0) {
+      const classesFromAlloc = Array.from(new Set(allocatedStreamKeys.map(st => {
+        const parts = st.split(/[-–—/]/);
         return parts[0]?.trim() || '';
       }).filter(Boolean)));
-      if (classesFromTeacher.length > 0) return classesFromTeacher;
+      if (classesFromAlloc.length > 0) return classesFromAlloc;
     }
     const list = Array.from(new Set(streamSettings.map(s => s.className)));
-    if (list.length === 0) return ['Form 1', 'Form 2', 'Form 3', 'Form 4', 'Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7'];
+    if (list.length === 0) return ['Form 1', 'Form 2', 'Form 3', 'Form 4', 'Standard 1', 'Standard 2', 'Standard 3', 'Standard 4', 'Standard 5', 'Standard 6', 'Standard 7'];
     return list;
-  }, [currentTeacher, streamSettings]);
+  }, [allocatedStreamKeys, streamSettings]);
 
   const availableStreams = useMemo(() => {
-    if (currentTeacher && currentTeacher.teachingStreams && currentTeacher.teachingStreams.length > 0) {
-      const streamsForClass = currentTeacher.teachingStreams
-        .filter(ts => ts.toLowerCase().includes(selectedClass.toLowerCase()))
-        .map(ts => {
-          const parts = ts.split('-');
-          return parts[1]?.trim() || ts;
+    if (allocatedStreamKeys.length > 0) {
+      const streamsForClass = allocatedStreamKeys
+        .filter(st => st.toLowerCase().includes(selectedClass.toLowerCase()))
+        .map(st => {
+          const parts = st.split(/[-–—/]/);
+          const raw = parts[1]?.trim() || st;
+          return raw.toUpperCase().startsWith('STREAM') ? raw.toUpperCase() : `STREAM ${raw.toUpperCase()}`;
         });
       if (streamsForClass.length > 0) {
         return Array.from(new Set(streamsForClass));
       }
     }
     const streamObj = streamSettings.find(s => s.className === selectedClass);
-    return streamObj?.streams || ['STREAM A', 'STREAM B', 'A', 'B'];
-  }, [currentTeacher, streamSettings, selectedClass]);
+    return streamObj?.streams || ['STREAM A', 'STREAM B', 'STREAM C', 'STREAM D'];
+  }, [allocatedStreamKeys, streamSettings, selectedClass]);
 
   // Available Subjects for Teacher mapped from current teacher's assigned subjects in state
   const teacherSubjects = useMemo(() => {
@@ -190,10 +252,17 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
   const classStudents = useMemo(() => {
     return students.filter(s => {
       const matchClass = (s.className || '').toLowerCase().trim() === selectedClass.toLowerCase().trim();
-      const matchStream = !selectedStream || selectedStream === 'ALL' || (s.stream || '').toLowerCase().trim() === selectedStream.toLowerCase().trim();
+      const sStream = (s.stream || '').toLowerCase().trim().replace(/^stream\s+/i, '');
+      const selStream = selectedStream.toLowerCase().trim().replace(/^stream\s+/i, '');
+      const matchStream = !selectedStream || selectedStream === 'ALL' || sStream === selStream || sStream.includes(selStream) || selStream.includes(sStream);
       return matchClass && matchStream;
     });
   }, [students, selectedClass, selectedStream]);
+
+  // Students enrolled in selected teaching subject (For Mark Entry & Subject Rosters)
+  const subjectClassStudents = useMemo(() => {
+    return classStudents.filter(s => isStudentEnrolledInSubject(s, selectedSubject));
+  }, [classStudents, selectedSubject]);
 
   // --------------------------------------------------------------------------
   // TAB 1: ATTENDANCE ROLL CALL (Kuita Majina)
@@ -237,21 +306,21 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
   const [subjectMarks, setSubjectMarks] = useState<Record<string, number | string>>({});
   const [marksToast, setMarksToast] = useState<string | null>(null);
 
-  // Load existing subject marks for class students
+  // Load existing subject marks for students enrolled in selectedSubject
   useEffect(() => {
     const initialMarks: Record<string, number | string> = {};
-    classStudents.forEach(st => {
+    subjectClassStudents.forEach(st => {
       const val = st.marks?.[selectedSubject];
       initialMarks[st.id] = val !== undefined && val !== null ? val : '';
     });
     setSubjectMarks(initialMarks);
-  }, [classStudents, selectedSubject]);
+  }, [subjectClassStudents, selectedSubject]);
 
   const handleSaveSubjectMarks = () => {
     if (!onUpdateStudents) return;
 
     const updatedStudentsList = students.map(st => {
-      const isTarget = classStudents.some(cs => cs.id === st.id);
+      const isTarget = subjectClassStudents.some(cs => cs.id === st.id);
       if (!isTarget) return st;
 
       const markVal = subjectMarks[st.id];
@@ -269,7 +338,7 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
     });
 
     onUpdateStudents(updatedStudentsList);
-    setMarksToast(`Marks za somo la ${selectedSubject} zimehifadhiwa kikamilifu kwa wanafunzi wa ${selectedClass} ${selectedStream}!`);
+    setMarksToast(`Marks za somo la ${selectedSubject} zimehifadhiwa kikamilifu kwa wanafunzi ${subjectClassStudents.length} wa ${selectedClass} ${selectedStream}!`);
     setTimeout(() => setMarksToast(null), 4000);
   };
 
@@ -328,8 +397,16 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
 
           {/* Teacher Selector Profile Card */}
           <div className="bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl p-4 shrink-0 space-y-2 min-w-[280px]">
-            <div className="text-[10px] font-black uppercase text-amber-300 tracking-wider">
-              Mwalimu Aliyeingia (Active Teacher)
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] font-black uppercase text-amber-300 tracking-wider">
+                Mwalimu Aliyeingia (Active Teacher)
+              </div>
+              {isSupervisor && (
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 shadow-xs flex items-center gap-1">
+                  <ShieldCheck className="w-3 h-3" />
+                  <span>SUPERVISOR</span>
+                </span>
+              )}
             </div>
             {isTeacherOnly ? (
               <div className="w-full px-3 py-2 text-xs font-black bg-slate-900 text-amber-300 border border-white/20 rounded-xl flex items-center gap-2">
@@ -374,8 +451,25 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
                 </div>
               </div>
             )}
+
+            <div className="pt-2 border-t border-white/10 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setIsChangePasswordOpen(true)}
+                className="w-full py-2 px-3 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl font-black text-xs flex items-center justify-center gap-1.5 shadow-md transition cursor-pointer"
+              >
+                <KeyRound className="w-3.5 h-3.5 text-slate-950" />
+                <span>Badili Nywila (Change Password)</span>
+              </button>
+            </div>
           </div>
         </div>
+
+        <ChangePasswordModal
+          currentUser={currentUser || null}
+          isOpen={isChangePasswordOpen}
+          onClose={() => setIsChangePasswordOpen(false)}
+        />
 
         {/* Global Class & Subject Filter Bar */}
         <div className="mt-6 pt-5 border-t border-white/15 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -430,6 +524,19 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
       <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none border-b border-slate-200">
         <button
           type="button"
+          onClick={() => setActiveTab('profile_dashboard')}
+          className={`px-4 py-2.5 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'profile_dashboard'
+              ? 'bg-gradient-to-r from-indigo-900 to-blue-800 text-white shadow-md ring-2 ring-amber-400'
+              : 'bg-white text-indigo-950 hover:bg-indigo-50 border border-indigo-200'
+          }`}
+        >
+          <Sparkles className="w-4 h-4 text-amber-400" />
+          <span>👤 Teacher Profile Dashboard (Wasifu & Journal)</span>
+        </button>
+
+        <button
+          type="button"
           onClick={() => setActiveTab('timetable')}
           className={`px-4 py-2.5 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
             activeTab === 'timetable'
@@ -474,6 +581,32 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
         >
           <UserCheck className="w-4 h-4 text-amber-300" />
           <span>1. Kuita Majina (Attendance)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('test_records')}
+          className={`px-4 py-2.5 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'test_records'
+              ? 'bg-indigo-600 text-white shadow-md ring-2 ring-amber-300'
+              : 'bg-white text-indigo-950 hover:bg-indigo-50 border border-indigo-200'
+          }`}
+        >
+          <FileEdit className="w-4 h-4 text-amber-300" />
+          <span>📝 Test Binafsi (Individual Test Bank)</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setActiveTab('duty_roster')}
+          className={`px-4 py-2.5 rounded-xl font-extrabold text-xs flex items-center gap-2 transition-all cursor-pointer whitespace-nowrap shrink-0 ${
+            activeTab === 'duty_roster'
+              ? 'bg-teal-700 text-white shadow-md'
+              : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-200'
+          }`}
+        >
+          <ClipboardCheck className="w-4 h-4 text-teal-300" />
+          <span>📘 Kitabu cha Zamu (Duty Log Book)</span>
         </button>
 
         <button
@@ -543,6 +676,27 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
       </div>
 
       {/* -------------------------------------------------------------------- */}
+      {/* TAB 00: SPECIALIZED TEACHER PROFILE DASHBOARD                        */}
+      {/* -------------------------------------------------------------------- */}
+      {activeTab === 'profile_dashboard' && (
+        <TeacherProfileDashboard
+          teachers={teachers}
+          timetableAssignments={timetableAssignments}
+          periodSettings={periodSettings}
+          sessions={sessions}
+          invigilationAssignments={invigilationAssignments}
+          supervisors={supervisors}
+          journalRecords={journalRecords}
+          onUpdateJournal={onUpdateJournal}
+          streamSettings={streamSettings}
+          schoolInfo={schoolInfo}
+          currentUser={currentUser}
+          initialTeacherId={selectedTeacherId}
+          onNavigateToView={onNavigateToView}
+        />
+      )}
+
+      {/* -------------------------------------------------------------------- */}
       {/* TAB 0A: RATIBA YA MASOMO (TEACHER TEACHING TIMETABLE)                */}
       {/* -------------------------------------------------------------------- */}
       {activeTab === 'timetable' && (
@@ -577,7 +731,37 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
       )}
 
       {/* -------------------------------------------------------------------- */}
-      {/* TAB 1: KUITA MAJINA (STUDENT ROLL CALL)                              */}
+      {/* TAB 1A: TEST BINAFSI ZA MWALIMU (TEACHER INDIVIDUAL TEST BANK)        */}
+      {/* -------------------------------------------------------------------- */}
+      {activeTab === 'test_records' && (
+        <TeacherIndividualTestBank
+          currentTeacher={currentTeacher}
+          students={students}
+          schoolInfo={schoolInfo}
+          streamSettings={streamSettings}
+          selectedClass={selectedClass}
+          selectedStream={selectedStream}
+          selectedSubject={selectedSubject}
+        />
+      )}
+
+      {/* -------------------------------------------------------------------- */}
+      {/* TAB 1B: KITABU CHA ZAMU (DUTY ROSTER & TEACHER LOG)                    */}
+      {/* -------------------------------------------------------------------- */}
+      {activeTab === 'duty_roster' && (
+        <TeacherDutyRosterTab
+          currentTeacher={currentTeacher}
+          currentUser={currentUser}
+          teachers={teachers}
+          students={students}
+          schoolInfo={schoolInfo}
+          dutyRosterData={dutyRosterData}
+          onUpdateDutyRoster={onUpdateDutyRoster}
+        />
+      )}
+
+      {/* -------------------------------------------------------------------- */}
+      {/* TAB 1C: KUITA MAJINA (STUDENT ROLL CALL)                              */}
       {/* -------------------------------------------------------------------- */}
       {activeTab === 'attendance' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-5">
@@ -591,6 +775,87 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
             </div>
           )}
 
+          {/* Attendance Type Selector Tabs */}
+          <div className="p-1.5 bg-slate-100 rounded-2xl flex items-center gap-2 border border-slate-200 w-fit">
+            <button
+              type="button"
+              onClick={() => setAttendanceMode('subject_period')}
+              className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer ${
+                attendanceMode === 'subject_period'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-700 hover:text-slate-900'
+              }`}
+            >
+              <BookOpen className="w-4 h-4" />
+              <span>1. Mahudhurio ya Kipindi cha Somo (Per-Period Subject)</span>
+              <span className="px-2 py-0.5 bg-amber-400 text-slate-950 font-black text-[9px] rounded-full">100% Pre-ticked</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setAttendanceMode('class_official')}
+              className={`px-4 py-2 rounded-xl text-xs font-black flex items-center gap-2 transition cursor-pointer ${
+                attendanceMode === 'class_official'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-slate-700 hover:text-slate-900'
+              }`}
+            >
+              <UserCheck className="w-4 h-4" />
+              <span>2. Mahudhurio Rasmi ya Shule (Class Morning Roll Call)</span>
+              {isClassTeacher && <span className="px-2 py-0.5 bg-amber-300 text-slate-950 text-[9px] rounded-full font-black">Darasa Lako</span>}
+            </button>
+          </div>
+
+          {attendanceMode === 'subject_period' ? (
+            /* Mode A: Subject Per-Period Attendance */
+            <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-2">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <h4 className="text-xs font-black text-blue-950 uppercase tracking-wide flex items-center gap-2">
+                  <BookOpen className="w-4 h-4 text-blue-600" />
+                  <span>Mahudhurio ya Kipindi cha {selectedSubject} ({selectedClass} {selectedStream})</span>
+                </h4>
+                <span className="text-[10px] text-blue-800 font-bold bg-blue-100 border border-blue-300 px-2.5 py-1 rounded-full">
+                  Wanafunzi wote wamewekwa Yupo (Present) kwa default. Untick wale tu ambao hawapo.
+                </span>
+              </div>
+              <p className="text-[11px] text-blue-900 font-medium">
+                Rekodi hii ya somo ni kwa ajili ya kufuatilia mahudhurio ya vipindi vyako darasani. Inaonyesha wanafunzi wote waliohudhuria somo la {selectedSubject}.
+              </p>
+            </div>
+          ) : (
+            /* Mode B: Official Morning Roll Call */
+            isClassTeacher && classTeacherAssignment ? (
+              <div className="p-4 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black text-lg shrink-0 shadow-xs">
+                    🎓
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black text-emerald-950 uppercase tracking-wide flex items-center gap-1.5">
+                      Mwalimu wa Darasa (Class Teacher): {classTeacherAssignment.className} - {classTeacherAssignment.stream}
+                    </h4>
+                    <p className="text-[11px] text-emerald-900 font-medium">
+                      Unaita majina na kusimamia mahudhurio ya kila siku (Roll Call) kwa darasa yako rasmi. Taarifa hizi zinaingia kwenye Database kuu ya Shule na Ripoti za Wanafunzi.
+                    </p>
+                  </div>
+                </div>
+                <span className="px-3 py-1 bg-emerald-700 text-white font-black text-[10px] rounded-full uppercase tracking-wider shadow-2xs shrink-0">
+                  Darasa Lako Rasmi
+                </span>
+              </div>
+            ) : (
+              <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl flex items-start gap-3">
+                <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div className="text-xs text-amber-900 space-y-1">
+                  <h4 className="font-black uppercase tracking-wide">Taarifa kwa Mwalimu wa Somo:</h4>
+                  <p>
+                    Wewe ni Mwalimu wa Somo kwa darasa la {selectedClass} {selectedStream}. Mahudhurio haya rasmi ya asubuhi yanaidhinishwa na Mwalimu wa Darasa (Class Teacher) au Mwalimu wa Nidhamu. Unaweza kutumia Tab 1 ya "Mahudhurio ya Kipindi cha Somo" kujaza mahudhurio ya somo lako.
+                  </p>
+                </div>
+              </div>
+            )
+          )}
+
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div>
               <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
@@ -598,7 +863,7 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
                 <span>Orodha ya Wanafunzi - Kuita Majina ({selectedClass} {selectedStream})</span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
-                Chagua tarehe kisha uandikishe uwepo (Present / Absent / Late) kwa kila mwanafunzi.
+                Chagua tarehe kisha uandikishe uwepo (Present / Absent / Ruhusa / Sick) kwa kila mwanafunzi.
               </p>
             </div>
 
@@ -661,7 +926,7 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
                           </div>
                           <span>{st.name}</span>
                         </td>
-                        <td className="py-3 px-4 text-slate-500 font-mono">{st.id || `STU-${idx+1}`}</td>
+                        <td className="py-3 px-4 text-slate-500 font-mono">{st.regNo || st.id || `STU-${idx+1}`}</td>
                         <td className="py-3 px-4">
                           <div className="flex items-center justify-center gap-1.5">
                             <button
@@ -674,7 +939,7 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
                               }`}
                             >
                               <CheckCircle2 className="w-3.5 h-3.5" />
-                              <span>Yupo (Present)</span>
+                              <span>Yupo</span>
                             </button>
 
                             <button
@@ -687,20 +952,33 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
                               }`}
                             >
                               <XCircle className="w-3.5 h-3.5" />
-                              <span>Hayupo (Absent)</span>
+                              <span>Hayupo</span>
                             </button>
 
                             <button
                               type="button"
-                              onClick={() => setRollCallState(prev => ({ ...prev, [st.id]: 'late' }))}
+                              onClick={() => setRollCallState(prev => ({ ...prev, [st.id]: 'ruhusa' }))}
                               className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
-                                currentStatus === 'late'
+                                currentStatus === 'ruhusa'
+                                  ? 'bg-purple-600 text-white font-bold shadow-xs'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-purple-50 hover:text-purple-700'
+                              }`}
+                            >
+                              <Clock className="w-3.5 h-3.5" />
+                              <span>Ruhusa</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => setRollCallState(prev => ({ ...prev, [st.id]: 'sick' }))}
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1 ${
+                                currentStatus === 'sick'
                                   ? 'bg-amber-500 text-slate-950 font-black shadow-xs'
                                   : 'bg-slate-100 text-slate-600 hover:bg-amber-50 hover:text-amber-700'
                               }`}
                             >
-                              <Clock className="w-3.5 h-3.5" />
-                              <span>Amechelewa (Late)</span>
+                              <AlertCircle className="w-3.5 h-3.5" />
+                              <span>Mgonjwa</span>
                             </button>
                           </div>
                         </td>
@@ -711,6 +989,45 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
               </table>
             </div>
           )}
+
+          {/* Class Teacher Discipline Feed Link */}
+          {isClassTeacher && disciplineRecords && disciplineRecords.length > 0 && (
+            <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3 pt-4">
+              <div className="flex items-center justify-between">
+                <h4 className="text-xs font-black uppercase text-slate-800 tracking-wider flex items-center gap-2">
+                  <ShieldAlert className="w-4 h-4 text-amber-600" />
+                  <span>Kumbukumbu za Nidhamu za Darasa Lako ({selectedClass} {selectedStream})</span>
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => onNavigateToView && onNavigateToView('discipline')}
+                  className="text-xs font-bold text-indigo-600 hover:text-indigo-800 underline"
+                >
+                  Fungua Moduli ya Nidhamu →
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {disciplineRecords
+                  .filter(r => r.className?.toLowerCase() === selectedClass.toLowerCase())
+                  .slice(0, 3)
+                  .map(r => (
+                    <div key={r.id} className="p-2.5 bg-white rounded-xl border border-slate-200 text-xs flex items-center justify-between">
+                      <div>
+                        <span className="font-bold text-slate-900">{r.studentName}</span>
+                        <span className="text-slate-500 text-[11px] ml-2">• {r.title} ({r.category})</span>
+                      </div>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        r.status === 'Resolved' ? 'bg-emerald-100 text-emerald-800' : 'bg-amber-100 text-amber-800'
+                      }`}>
+                        {r.status}
+                      </span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
+
         </div>
       )}
 
@@ -763,10 +1080,24 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
             </div>
           </div>
 
-          {classStudents.length === 0 ? (
+          {subjectClassStudents.length < classStudents.length && classStudents.length > 0 && (
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 font-bold flex items-center justify-between">
+              <span>
+                📚 Inaonyesha wanafunzi <strong>{subjectClassStudents.length}</strong> kati ya <strong>{classStudents.length}</strong> wa {selectedClass} {selectedStream} waliosajiliwa kusoma somo la <strong>{selectedSubject}</strong>.
+              </span>
+              <span className="text-[10px] bg-blue-200 text-blue-950 px-2 py-0.5 rounded font-black">
+                {classStudents.length - subjectClassStudents.length} Hawajasajiliwa Somo Hili
+              </span>
+            </div>
+          )}
+
+          {subjectClassStudents.length === 0 ? (
             <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-2">
               <AlertCircle className="w-8 h-8 text-amber-500 mx-auto" />
-              <h4 className="text-sm font-bold text-slate-800">Hakuna Wanafunzi Kwenye {selectedClass} {selectedStream}</h4>
+              <h4 className="text-sm font-bold text-slate-800">Hakuna Wanafunzi Waliosajiliwa Somo la {selectedSubject} Katika {selectedClass} {selectedStream}</h4>
+              <p className="text-xs text-slate-500">
+                Tafadhali kagua usajili wa masomo ya wanafunzi au chagua darasa jingine.
+              </p>
             </div>
           ) : (
             <div className="overflow-x-auto rounded-xl border border-slate-200">
@@ -782,7 +1113,7 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-800">
-                  {classStudents.map((st, idx) => {
+                  {subjectClassStudents.map((st, idx) => {
                     const currentVal = subjectMarks[st.id] !== undefined ? subjectMarks[st.id] : '';
                     const numVal = currentVal !== '' ? Number(currentVal) : null;
                     
@@ -997,28 +1328,63 @@ export const TeacherPortalView: React.FC<TeacherPortalViewProps> = ({
       {/* -------------------------------------------------------------------- */}
       {activeTab === 'reports' && (
         <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-xs space-y-5">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
-            <div>
-              <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
-                <FileText className="w-5 h-5 text-amber-600" />
-                <span>Ripoti za Wanafunzi wa Darasa - {selectedClass} {selectedStream}</span>
-              </h2>
-              <p className="text-xs text-slate-500 mt-0.5">
-                Kama Mwalimu wa Darasa (Class Teacher), toa, hakiki au chapa (Print) Ripoti za Maendeleo za wanafunzi wako wote.
+          {!isClassTeacher && isTeacherOnly ? (
+            <div className="p-8 text-center bg-amber-50/90 border border-amber-300 rounded-2xl space-y-3 shadow-xs">
+              <AlertCircle className="w-10 h-10 text-amber-600 mx-auto" />
+              <h3 className="text-base font-black text-amber-950">
+                Ripoti za Maendeleo Zinasimamiwa na Mwalimu wa Darasa (Class Teacher)
+              </h3>
+              <p className="text-xs text-amber-900 max-w-lg mx-auto font-medium">
+                Kama Mwalimu wa Somo, unaingiza alama za masomo yako kwenye Tab ya 2 (Kuingiza Marks). Ripoti za Maendeleo (Report Cards) za darasa zinasimamiwa, kuandikwa maoni, na kuchapishwa na Mwalimu wa Darasa (Class Teacher) husika au Uongozi wa Shule.
               </p>
             </div>
+          ) : (
+            <>
+              {isClassTeacher && classTeacherAssignment && (
+                <div className="p-4 bg-emerald-50/90 border border-emerald-300 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-2xs">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-xl bg-emerald-600 text-white flex items-center justify-center font-black text-lg shrink-0 shadow-xs">
+                      🎓
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black text-emerald-950 uppercase tracking-wide flex items-center gap-1.5">
+                        Mwalimu wa Darasa (Class Teacher): {classTeacherAssignment.className} - {classTeacherAssignment.stream}
+                      </h4>
+                      <p className="text-[11px] text-emerald-900 font-medium">
+                        Unakagua, kuandika maoni (Remarks), na kuchapa Ripoti za Maendeleo za darasa yako.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 bg-emerald-700 text-white font-black text-[10px] rounded-full uppercase tracking-wider shadow-2xs shrink-0">
+                    Darasa Lako
+                  </span>
+                </div>
+              )}
 
-            <div className="flex items-center gap-2 shrink-0">
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5"
-              >
-                <Printer className="w-4 h-4" />
-                <span>Print Ripoti Zote Za Darasa</span>
-              </button>
-            </div>
-          </div>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+                <div>
+                  <h2 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                    <FileText className="w-5 h-5 text-amber-600" />
+                    <span>Ripoti za Wanafunzi wa Darasa - {selectedClass} {selectedStream}</span>
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Kama Mwalimu wa Darasa (Class Teacher), toa, hakiki au chapa (Print) Ripoti za Maendeleo za wanafunzi wako wote.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => window.print()}
+                    className="px-4 py-2 bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs rounded-xl shadow-xs transition cursor-pointer flex items-center gap-1.5"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Print Ripoti Zote Za Darasa</span>
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
 
           {classStudents.length === 0 ? (
             <div className="p-8 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-2">

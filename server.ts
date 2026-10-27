@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'path';
 import fs from 'fs';
+import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
@@ -29,7 +30,7 @@ import {
   UPPER_PRIMARY_SUBJECTS_LIST,
   NURSERY_SUBJECTS_LIST
 } from './src/constants/defaults.ts';
-import { eq, inArray, notInArray, and, asc, desc, getTableColumns, sql } from 'drizzle-orm';
+import { eq, or, inArray, notInArray, and, asc, desc, getTableColumns, sql } from 'drizzle-orm';
 
 dotenv.config();
 
@@ -39,7 +40,172 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = Number(process.env.PORT) || 3000;
 
+app.disable('x-powered-by');
 app.use(express.json({ limit: '10mb' }));
+
+// ============================================================================
+// 1. SECURITY HEADERS & SENSITIVE FILE / DOTFILE BLOCKER
+// ============================================================================
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (process.env.NODE_ENV === 'production') {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
+
+  // Block publicly exposed dotfiles, git metadata, env files, SQL dumps, and server configs
+  const decodedPath = decodeURIComponent(req.path || '').toLowerCase();
+  if (
+    /(^|\/)\.(git|env|htaccess|DS_Store|npmrc|dockerignore)/i.test(decodedPath) ||
+    /\.(sql|bak|old|swp|orig|log)$/i.test(decodedPath) ||
+    decodedPath === '/server.ts' ||
+    decodedPath === '/drizzle.config.ts'
+  ) {
+    return res.status(403).json({ error: 'Forbidden' });
+  }
+  next();
+});
+
+// ============================================================================
+// 2. SLIDING-WINDOW RATE LIMITER FOR AUTH & SENSITIVE ENDPOINTS
+// ============================================================================
+const rateLimitBuckets = new Map<string, { count: number; resetAt: number }>();
+function createRateLimiter(maxRequests: number, windowMs: number) {
+  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const clientIp = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.socket.remoteAddress) || 'unknown';
+    const key = `${req.path}:${clientIp}`;
+    const now = Date.now();
+    const record = rateLimitBuckets.get(key);
+    if (!record || now > record.resetAt) {
+      rateLimitBuckets.set(key, { count: 1, resetAt: now + windowMs });
+      return next();
+    }
+    record.count += 1;
+    if (record.count > maxRequests) {
+      const retryAfterSec = Math.ceil((record.resetAt - now) / 1000);
+      res.setHeader('Retry-After', String(retryAfterSec));
+      return res.status(429).json({
+        success: false,
+        error: `Umejaribu mara nyingi sana. Tafadhali subiri sekunde ${retryAfterSec} kabla ya kujaribu tena (Too many requests).`,
+      });
+    }
+    next();
+  };
+}
+
+const authRateLimiter = createRateLimiter(20, 15 * 60 * 1000); // 20 attempts per 15 min
+const aiRateLimiter = createRateLimiter(30, 15 * 60 * 1000);   // 30 requests per 15 min
+
+// ============================================================================
+// 3. CRYPTOGRAPHIC SESSION TOKENS & PASSWORD HASHING / REDACTION HELPERS
+// ============================================================================
+const SESSION_SECRET =
+  process.env.JWT_SECRET ||
+  crypto
+    .createHash('sha256')
+    .update(
+      `${process.env.SQL_HOST || ''}:${process.env.SQL_DB_NAME || ''}:${
+        process.env.SQL_PASSWORD || process.env.SQL_ADMIN_PASSWORD || 'haby-edu-pro-hardened-session-secret-2026'
+      }:haby-jwt-v1`
+    )
+    .digest('hex');
+
+export interface SessionPayload {
+  uid: string;
+  email: string;
+  role: string;
+  schoolId: string;
+  isSuperAdmin: boolean;
+  exp: number;
+}
+
+function signSessionToken(payload: Omit<SessionPayload, 'exp'>, ttlMs = 12 * 60 * 60 * 1000): string {
+  const fullPayload: SessionPayload = {
+    ...payload,
+    exp: Date.now() + ttlMs,
+  };
+  const dataB64 = Buffer.from(JSON.stringify(fullPayload), 'utf8').toString('base64url');
+  const sigB64 = crypto.createHmac('sha256', SESSION_SECRET).update(dataB64).digest('base64url');
+  return `${dataB64}.${sigB64}`;
+}
+
+function verifySessionToken(token?: string | null): SessionPayload | null {
+  if (!token || typeof token !== 'string' || !token.includes('.')) return null;
+  try {
+    const [dataB64, sigB64] = token.split('.');
+    if (!dataB64 || !sigB64) return null;
+    const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(dataB64).digest('base64url');
+    const sigBuf = Buffer.from(sigB64);
+    const expectedBuf = Buffer.from(expectedSig);
+    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
+      return null;
+    }
+    const parsed = JSON.parse(Buffer.from(dataB64, 'base64url').toString('utf8')) as SessionPayload;
+    if (!parsed || typeof parsed.exp !== 'number' || Date.now() > parsed.exp) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function extractSession(req: express.Request): SessionPayload | null {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const verified = verifySessionToken(authHeader.slice(7).trim());
+    if (verified) return verified;
+  }
+  const customHeader = req.headers['x-haby-token'];
+  if (typeof customHeader === 'string') {
+    const verified = verifySessionToken(customHeader.trim());
+    if (verified) return verified;
+  }
+  const cookieHeader = req.headers.cookie || '';
+  const match = cookieHeader.match(/(?:^|;\s*)haby_session=([^;]+)/);
+  if (match && match[1]) {
+    const verified = verifySessionToken(decodeURIComponent(match[1]));
+    if (verified) return verified;
+  }
+  return null;
+}
+
+const BCRYPT_HASH_REGEX = /^\$2[aby]\$\d{2}\$.{53}$/;
+function isBcryptHash(val: any): boolean {
+  return typeof val === 'string' && BCRYPT_HASH_REGEX.test(val);
+}
+
+async function hashPasswordSafe(rawPassword: any): Promise<string> {
+  const str = String(rawPassword || '').trim();
+  if (!str) return '';
+  if (isBcryptHash(str)) return str;
+  return bcrypt.hash(str, 12);
+}
+
+async function verifyPasswordSafe(inputPassword: string, storedSecret: string): Promise<{ valid: boolean; needsRehash: boolean }> {
+  if (!storedSecret) return { valid: false, needsRehash: false };
+  if (isBcryptHash(storedSecret)) {
+    const match = await bcrypt.compare(String(inputPassword), storedSecret);
+    return { valid: match, needsRehash: false };
+  }
+  // Constant-time comparison for legacy plaintext passwords before automatic bcrypt upgrade
+  const a = Buffer.from(String(inputPassword), 'utf8');
+  const b = Buffer.from(String(storedSecret), 'utf8');
+  if (a.length !== b.length) return { valid: false, needsRehash: false };
+  const valid = crypto.timingSafeEqual(a, b);
+  return { valid, needsRehash: valid };
+}
+
+function redactUserSensitiveFields(row: Record<string, any>): Record<string, any> {
+  if (!row || typeof row !== 'object') return row;
+  const copy = { ...row };
+  delete copy.password;
+  delete copy.passwordHash;
+  delete copy.password_hash;
+  return copy;
+}
 
 const DEFAULT_SCHOOL_UUID = '02dff10d-78fb-4af6-ab5a-db1d275d7e06';
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -161,6 +327,15 @@ const TABLE_KEY_MAP: Record<string, any> = {
   past_papers: schema.pastPapers,
   teacher_attendance: schema.teacherAttendance,
   staff_payroll: schema.staffPayroll,
+  remedial_payment_history: schema.staffPayroll,
+  class_journals: schema.classJournals,
+  election_events: schema.electionEvents,
+  election_positions: schema.electionPositions,
+  election_candidates: schema.electionCandidates,
+  election_votes: schema.electionVotes,
+  joint_exams: schema.jointExams,
+  joint_schools: schema.jointSchools,
+  joint_results: schema.jointResults,
 };
 
 function resolveColumn(tableObj: any, colName: string): { jsKey: string; colDef: any } | null {
@@ -264,7 +439,12 @@ async function normalizeRecordForTable(tableObj: any, rawRecord: Record<string, 
       if (jsKey === 'className') rawVal = rawRecord.class || rawRecord.classLevel || rawRecord.class_level || 'Form 1';
       if (jsKey === 'schoolId') rawVal = rawRecord.school_id || rawRecord.schoolId || DEFAULT_SCHOOL_UUID;
       if (jsKey === 'fullName') rawVal = rawRecord.name || rawRecord.full_name || 'User';
-      if (jsKey === 'passwordHash') rawVal = rawRecord.password || rawRecord.password_hash || '123456';
+      if (jsKey === 'passwordHash') {
+        rawVal = rawRecord.password || rawRecord.password_hash || rawRecord.passwordHash;
+        if (!rawVal) {
+          rawVal = crypto.randomBytes(16).toString('hex');
+        }
+      }
       if (jsKey === 'startTime') rawVal = rawRecord.start || rawRecord.start_time || '08:00';
       if (jsKey === 'endTime') rawVal = rawRecord.end || rawRecord.end_time || '08:40';
       if (jsKey === 'periodTime') rawVal = rawRecord.period_time || '16:00-17:00';
@@ -275,6 +455,11 @@ async function normalizeRecordForTable(tableObj: any, rawRecord: Record<string, 
     }
 
     if (rawVal !== undefined) {
+      if ((jsKey === 'passwordHash' || jsKey === 'password') && typeof rawVal === 'string' && rawVal.trim() !== '') {
+        if (tableObj === schema.users || tableObj === schema.schoolAdmins) {
+          rawVal = await hashPasswordSafe(rawVal);
+        }
+      }
       result[jsKey] = coerceColumnValue(colDef, jsKey, rawVal);
     } else if (!isUpdate) {
       if (jsKey === 'id') {
@@ -311,6 +496,9 @@ function toDualCaseRow(tableObj: any, row: Record<string, any>): Record<string, 
     } else if (row[sqlName] !== undefined && enriched[jsKey] === undefined) {
       enriched[jsKey] = row[sqlName];
     }
+  }
+  if (tableObj === schema.users || tableObj === schema.schoolAdmins) {
+    return redactUserSensitiveFields(enriched);
   }
   return enriched;
 }
@@ -356,6 +544,9 @@ async function upsertTableRecords(tableName: string, tableObj: any, rawRecords: 
   } else if (tableName === 'parents' && tableObj.phone) {
     conflictTarget = tableObj.phone;
     conflictKeyName = 'phone';
+  } else if (tableName === 'users' && tableObj.email) {
+    conflictTarget = tableObj.email;
+    conflictKeyName = 'email';
   }
 
   // Normalize & deduplicate records by conflict key
@@ -387,6 +578,7 @@ async function upsertTableRecords(tableName: string, tableObj: any, rawRecords: 
   for (const [jsKey, colDef] of Object.entries(cols) as [string, any][]) {
     if (jsKey === 'id' || jsKey === 'createdAt') continue;
     if (conflictKeyName === 'schoolId' && jsKey === 'schoolId') continue;
+    if (conflictKeyName === 'email' && jsKey === 'email') continue;
     excludedSet[jsKey] = sql.raw(`excluded."${colDef.name}"`);
   }
 
@@ -417,7 +609,7 @@ async function upsertTableRecords(tableName: string, tableObj: any, rawRecords: 
             if (inserted[0]) results.push(toDualCaseRow(tableObj, inserted[0]));
           } else {
             const updateSet = { ...normalized };
-            if (conflictKeyName === 'schoolId') delete updateSet.id;
+            if (conflictKeyName === 'schoolId' || conflictKeyName === 'email') delete updateSet.id;
             const upserted = await db.insert(tableObj).values(normalized).onConflictDoUpdate({
               target: conflictTarget,
               set: updateSet,
@@ -480,7 +672,7 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
     }
 
     // 1. Students (canonical deterministic ID + prune deleted rows)
-    const rawStudents = Array.isArray(raw.students) ? raw.students : DEFAULT_APP_DATA.students;
+    const rawStudents = Array.isArray(raw.students) ? raw.students : [];
     const canonicalStudentIds: string[] = [];
     const seenStudentKeys = new Set<string>();
     const studentPayloads: any[] = [];
@@ -508,10 +700,12 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
           .where(and(eq(schema.students.schoolId, validSchoolUuid), notInArray(schema.students.id, canonicalStudentIds)))
           .catch(() => {});
       }
+    } else if (Array.isArray(raw.students) && raw.students.length === 0) {
+      await db.delete(schema.students).where(eq(schema.students.schoolId, validSchoolUuid)).catch(() => {});
     }
 
     // 2. Teachers (canonical deterministic ID + prune deleted teachers)
-    const rawTeachers = Array.isArray(raw.teachers) ? raw.teachers : DEFAULT_APP_DATA.teachers;
+    const rawTeachers = Array.isArray(raw.teachers) ? raw.teachers : [];
     const canonicalTeacherIds: string[] = [];
     const seenTeacherKeys = new Set<string>();
     const teacherPayloads: any[] = [];
@@ -549,6 +743,8 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
         assignedSubjects: Array.isArray(t.subjects) ? t.subjects : [],
         isActive: true,
       })));
+    } else if (Array.isArray(raw.teachers) && raw.teachers.length === 0) {
+      await db.delete(schema.teachers).where(eq(schema.teachers.schoolId, validSchoolUuid)).catch(() => {});
     }
 
     // 3. Subjects Catalog (seed once per school boot)
@@ -569,7 +765,7 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
     }
 
     // 4. Exams, Exam Records & Exam Results
-    const rawExams = Array.isArray(raw.exams) ? raw.exams : DEFAULT_APP_DATA.exams;
+    const rawExams = Array.isArray(raw.exams) ? raw.exams : [];
     const firstExamUuid = rawExams.length > 0
       ? toDeterministicUuid(`exm_${validSchoolUuid}_${rawExams[0].id || rawExams[0].name}`)
       : null;
@@ -598,7 +794,7 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
       ? raw.examinationRecords
       : Array.isArray(raw.examination_records)
       ? raw.examination_records
-      : DEFAULT_APP_DATA.examinationRecords;
+      : [];
     if (examRecs.length > 0) {
       const canonicalRecIds: string[] = [];
       await upsertTableRecords('exam_records', schema.examRecords, examRecs.map((r: any, idx: number) => {
@@ -1098,7 +1294,7 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
       await upsertTableRecords('student_ledger', schema.studentLedger, ledgerSample);
     }
 
-    // 11D. Remedial Payment Settings & Remedial Timetable baseline
+    // 11D. Remedial Payment Settings, Remedial Timetable & Student Government Elections baseline
     await upsertTableRecords('remedial_payment_settings', schema.remedialPaymentSettings, [
       {
         id: toDeterministicUuid(`rem_pay_${validSchoolUuid}_form1`),
@@ -1108,6 +1304,70 @@ async function syncRelationalTablesFromSnapshot(schoolId: string, raw: Record<st
         effectiveDate: '2026-01-15',
       },
     ]);
+
+    if (isFirstStaticSeed) {
+      const existingRemCnt = await db.execute(sql`SELECT count(*)::int as c FROM remedial_timetable`).catch(() => ({ rows: [{ c: 0 }] }));
+      if (Number(existingRemCnt.rows[0]?.c || 0) === 0 && rawTeachers.length > 0) {
+        const sampleRem = [
+          { dayOfWeek: 'Monday', periodTime: '15:30-16:30', className: 'Form 4', stream: 'A', subject: 'Basic Mathematics', teacherName: rawTeachers[0]?.name || 'Mwl. Juma' },
+          { dayOfWeek: 'Tuesday', periodTime: '15:30-16:30', className: 'Form 4', stream: 'A', subject: 'Physics', teacherName: rawTeachers[1]?.name || rawTeachers[0]?.name || 'Mwl. Asha' },
+          { dayOfWeek: 'Wednesday', periodTime: '15:30-16:30', className: 'Form 2', stream: 'A', subject: 'Chemistry', teacherName: rawTeachers[2]?.name || rawTeachers[0]?.name || 'Mwl. Bakari' },
+          { dayOfWeek: 'Thursday', periodTime: '15:30-16:30', className: 'Form 4', stream: 'B', subject: 'Biology', teacherName: rawTeachers[3]?.name || rawTeachers[0]?.name || 'Mwl. Neema' },
+          { dayOfWeek: 'Friday', periodTime: '15:30-16:30', className: 'Form 2', stream: 'B', subject: 'English Language', teacherName: rawTeachers[4]?.name || rawTeachers[0]?.name || 'Mwl. John' },
+          { dayOfWeek: 'Saturday', periodTime: '08:00-10:00', className: 'Form 4', stream: 'A', subject: 'Geography', teacherName: rawTeachers[5]?.name || rawTeachers[0]?.name || 'Mwl. Halima' },
+        ].map((item, idx) => ({
+          id: toDeterministicUuid(`rem_tt_${validSchoolUuid}_${idx}`),
+          schoolId: validSchoolUuid,
+          dayOfWeek: item.dayOfWeek,
+          periodTime: item.periodTime,
+          className: item.className,
+          stream: item.stream,
+          subject: item.subject,
+          teacherName: item.teacherName,
+          term: 'Term 1',
+        }));
+        await upsertTableRecords('remedial_timetable', schema.remedialTimetable, sampleRem);
+      }
+
+      const existingElecCnt = await db.execute(sql`SELECT count(*)::int as c FROM election_events`).catch(() => ({ rows: [{ c: 0 }] }));
+      if (Number(existingElecCnt.rows[0]?.c || 0) === 0) {
+        const defaultElectionId = toDeterministicUuid(`elec_event_2026_${validSchoolUuid}`);
+        await upsertTableRecords('election_events', schema.electionEvents, [
+          {
+            id: defaultElectionId,
+            schoolId: validSchoolUuid,
+            title: 'Uchaguzi Mkuu wa Serikali ya Wanafunzi 2026',
+            academicYear: '2026',
+            nominationStart: new Date(Date.now() - 2 * 86400000),
+            nominationEnd: new Date(Date.now() + 5 * 86400000),
+            votingStart: new Date(Date.now() + 6 * 86400000),
+            votingEnd: new Date(Date.now() + 8 * 86400000),
+            status: 'NOMINATION_OPEN',
+            createdByDisciplineHead: 'Mkuu wa Nidhamu',
+          }
+        ]);
+        const defaultPositions = [
+          { title: 'Head Boy (Kaka Mkuu)', genderRule: 'BOYS_ONLY', classRule: 'FORM_3_4', orderNumber: 1 },
+          { title: 'Head Girl (Dada Mkuu)', genderRule: 'GIRLS_ONLY', classRule: 'FORM_3_4', orderNumber: 2 },
+          { title: 'Academic Prefect (Kiranja wa Taaluma)', genderRule: 'ALL', classRule: 'FORM_3_4', orderNumber: 3 },
+          { title: 'Discipline Prefect (Kiranja wa Nidhamu)', genderRule: 'ALL', classRule: 'FORM_3_4', orderNumber: 4 },
+          { title: 'Environment Prefect (Kiranja wa Mazingira)', genderRule: 'ALL', classRule: 'ALL', orderNumber: 5 },
+          { title: 'Sports & Games Prefect (Kiranja wa Michezo)', genderRule: 'ALL', classRule: 'ALL', orderNumber: 6 },
+        ].map((pos, idx) => ({
+          id: toDeterministicUuid(`elec_pos_${defaultElectionId}_${idx + 1}`),
+          electionId: defaultElectionId,
+          title: pos.title,
+          description: `Nafasi ya uongozi: ${pos.title}`,
+          genderRule: pos.genderRule,
+          classRule: pos.classRule,
+          orderNumber: pos.orderNumber,
+          isCustom: false,
+          photoRequired: true,
+          manifestoRequired: true,
+        }));
+        await upsertTableRecords('election_positions', schema.electionPositions, defaultPositions);
+      }
+    }
 
     // 12. Discipline Records & Activity Logs & Duty Roster
     const discRecs = pickNonEmptyArray(raw.disciplineRecords, raw.discipline_records, DEFAULT_APP_DATA.disciplineRecords);
@@ -1266,63 +1526,18 @@ function mergeNonDestructiveArray<T = any>(
   const existingArr: any[] = Array.isArray(existingVal) ? existingVal : [];
   const incomingArr: any[] = Array.isArray(incomingRaw) ? incomingRaw : [];
 
-  // If the user explicitly requested a replacement (e.g., deleting a specific item from UI), respect incoming if non-empty
-  if (options?.allowExplicitReplace && incomingRaw !== undefined && incomingArr.length > 0) {
+  // If the user explicitly requested a replacement (e.g., deleting or updating from UI), respect incoming array even if empty
+  if (options?.allowExplicitReplace && incomingRaw !== undefined) {
     return incomingArr as T[];
   }
 
-  // Check if either existing or incoming has real (non-demo) records
-  let cleanExisting = existingArr;
-  let cleanIncoming = incomingArr;
-
-  if (options?.filterDemoWhenRealExists === 'students') {
-    const existingHasReal = existingArr.some((s: any) => !DEMO_STUDENT_IDS.has(Number(s?.id)));
-    const incomingHasReal = incomingArr.some((s: any) => !DEMO_STUDENT_IDS.has(Number(s?.id)));
-    if (existingHasReal && isDemoStudentList(incomingArr)) {
-      cleanIncoming = [];
-    }
-    if ((existingHasReal || incomingHasReal) && existingArr.length > 15) {
-      cleanExisting = existingArr.filter((s: any) => !DEMO_STUDENT_IDS.has(Number(s?.id)));
-    }
-    if ((existingHasReal || incomingHasReal) && incomingArr.length > 15) {
-      cleanIncoming = cleanIncoming.filter((s: any) => !DEMO_STUDENT_IDS.has(Number(s?.id)));
-    }
-  } else if (options?.filterDemoWhenRealExists === 'teachers') {
-    const existingHasReal = existingArr.some((t: any) => !DEMO_TEACHER_IDS.has(Number(t?.id)));
-    const incomingHasReal = incomingArr.some((t: any) => !DEMO_TEACHER_IDS.has(Number(t?.id)));
-    if (existingHasReal && isDemoTeacherList(incomingArr)) {
-      cleanIncoming = [];
-    }
-    if (existingHasReal || incomingHasReal) {
-      cleanExisting = existingArr.filter((t: any) => !DEMO_TEACHER_IDS.has(Number(t?.id)));
-      cleanIncoming = cleanIncoming.filter((t: any) => !DEMO_TEACHER_IDS.has(Number(t?.id)));
-    }
+  // If incoming array is explicitly provided, respect it directly so deleted items or updates are not overwritten by stale data
+  if (incomingRaw !== undefined) {
+    return incomingArr as T[];
   }
 
-  // Merge existing + incoming by key so old records are NEVER lost when updating
-  const mergedMap = new Map<string, any>();
-  cleanExisting.forEach((item, idx) => {
-    if (item === null || item === undefined) return;
-    const k = keyFn(item, idx);
-    if (k) mergedMap.set(k, item);
-  });
-
-  cleanIncoming.forEach((item, idx) => {
-    if (item === null || item === undefined) return;
-    const k = keyFn(item, idx);
-    if (k) {
-      const prev = mergedMap.get(k);
-      if (prev && typeof prev === 'object' && typeof item === 'object' && !Array.isArray(item)) {
-        mergedMap.set(k, { ...prev, ...item });
-      } else {
-        mergedMap.set(k, item);
-      }
-    }
-  });
-
-  const mergedList = Array.from(mergedMap.values());
-  if (mergedList.length > 0) {
-    return mergedList as T[];
+  if (existingArr.length > 0) {
+    return existingArr as T[];
   }
   return Array.isArray(defaultVal) ? defaultVal : [];
 }
@@ -1332,7 +1547,7 @@ function resolveSnapshotObject<T = Record<string, any>>(
   incomingSnake: any,
   existingVal: any,
   defaultVal: Record<string, any> = {},
-  _isFullSnapshot = false
+  isFullSnapshot = false
 ): T {
   const incoming =
     incomingCamel && typeof incomingCamel === 'object' && !Array.isArray(incomingCamel)
@@ -1347,7 +1562,12 @@ function resolveSnapshotObject<T = Record<string, any>>(
       : {};
 
   if (incoming !== undefined) {
-    // Always deep-preserve existing keys and merge incoming keys on top so old object properties are never wiped
+    if (isFullSnapshot) {
+      return {
+        ...defaultVal,
+        ...incoming,
+      } as T;
+    }
     return {
       ...defaultVal,
       ...existingObj,
@@ -1364,310 +1584,12 @@ function resolveSnapshotObject<T = Record<string, any>>(
 const restoredSchoolsSet = new Set<string>();
 
 async function ensureHistoricalBackupRestored(schoolId: string): Promise<void> {
+  // Disabled automatic re-injection of demo/backup data on updates so user changes and deletions are strictly respected.
   const validSchoolUuid = (!schoolId || schoolId === 'DEMO_SCHOOL' || schoolId === 'DEFAULT_PRIMARY_SCHOOL_ID')
     ? DEFAULT_SCHOOL_UUID
     : schoolId;
-
-  try {
-    const existing = await db.query.schoolData.findFirst({
-      where: eq(schema.schoolData.schoolId, validSchoolUuid),
-    });
-
-    const currentStudents = Array.isArray(existing?.students) ? existing.students : [];
-    const currentTeachers = Array.isArray(existing?.teachers) ? existing.teachers : [];
-
-    // Check if we already have the full roster (>= 100 students and >= 20 teachers)
-    if (currentStudents.length >= 100 && currentTeachers.length >= 20 && restoredSchoolsSet.has(validSchoolUuid)) {
-      return;
-    }
-
-    const backupDir = path.resolve(__dirname, '.backups', validSchoolUuid);
-    if (!fs.existsSync(backupDir)) return;
-
-    const files = fs.readdirSync(backupDir).filter(f => f.startsWith('snap_') && f.endsWith('.json'));
-    if (files.length === 0) return;
-
-    // Pick the richest backup snapshot (largest file size)
-    let bestSnapData: any = null;
-    let bestScore = 0;
-
-    for (const f of files) {
-      try {
-        const fullPath = path.join(backupDir, f);
-        const stat = fs.statSync(fullPath);
-        if (stat.size > bestScore) {
-          const parsed = JSON.parse(fs.readFileSync(fullPath, 'utf-8'));
-          const sCount = Array.isArray(parsed?.students) ? parsed.students.length : 0;
-          const tCount = Array.isArray(parsed?.teachers) ? parsed.teachers.length : 0;
-          if (sCount > currentStudents.length || tCount > currentTeachers.length) {
-            bestScore = stat.size;
-            bestSnapData = parsed;
-          }
-        }
-      } catch (e) {}
-    }
-
-    if (!bestSnapData) {
-      if (existing && !restoredSchoolsSet.has(validSchoolUuid)) {
-        scheduleRelationalSync(validSchoolUuid, existing as any);
-      }
-      restoredSchoolsSet.add(validSchoolUuid);
-      return;
-    }
-
-    console.log(`[Database Recovery] Restoring & merging historical data from backup for school ${validSchoolUuid}...`);
-
-    const mergedStudents = mergeNonDestructiveArray(
-      currentStudents,
-      undefined,
-      bestSnapData.students,
-      DEFAULT_APP_DATA.students,
-      (s, i) => String(s?.regNo || s?.reg_no || s?.id || s?.name || i).trim().toLowerCase(),
-      { filterDemoWhenRealExists: 'students' }
-    );
-
-    const mergedTeachers = mergeNonDestructiveArray(
-      currentTeachers,
-      undefined,
-      bestSnapData.teachers,
-      DEFAULT_APP_DATA.teachers,
-      (t, i) => String(t?.id || t?.email || t?.name || i).trim().toLowerCase(),
-      { filterDemoWhenRealExists: 'teachers' }
-    );
-
-    const mergedExams = mergeNonDestructiveArray(
-      existing?.exams,
-      undefined,
-      bestSnapData.exams,
-      DEFAULT_APP_DATA.exams,
-      (e, i) => String(e?.id || e?.name || i).trim().toLowerCase()
-    );
-
-    const mergedTimetable = mergeNonDestructiveArray(
-      existing?.timetableAssignments,
-      undefined,
-      bestSnapData.timetableAssignments || bestSnapData.timetable_assignments,
-      DEFAULT_APP_DATA.timetableAssignments,
-      (a, i) => {
-        const cls = String(a?.className || a?.class_name || '').trim().toLowerCase();
-        const str = String(a?.stream || '').trim().toLowerCase();
-        const day = String(a?.day || '').trim().toLowerCase();
-        const prd = String(a?.period || a?.periodName || a?.period_name || '').trim().toLowerCase();
-        return cls && day && prd ? `${cls}_${str}_${day}_${prd}` : String(a?.id || i);
-      }
-    ).map((a: any) => ({
-      ...a,
-      className: a.className || a.class_name || 'Form 1',
-      teacherId: a.teacherId ?? a.teacher_id ?? 101,
-      teacherName: a.teacherName || a.teacher_name || '',
-      activityType: a.activityType || a.activity_type || 'academic',
-      allocationMode: a.allocationMode || a.allocation_mode || 'manual',
-    }));
-
-    const mergedDutyRoster = resolveSnapshotObject(
-      existing?.dutyRosterData,
-      undefined,
-      bestSnapData.dutyRosterData || bestSnapData.duty_roster_data,
-      {}
-    );
-
-    const restoredRow: any = {
-      id: validSchoolUuid,
-      schoolId: validSchoolUuid,
-      schoolInfo: {
-        ...((DEFAULT_APP_DATA.schoolInfo as Record<string, any>) || {}),
-        ...(bestSnapData.schoolInfo || bestSnapData.school_info || {}),
-        ...((existing?.schoolInfo as Record<string, any>) || {}),
-      },
-      students: mergedStudents,
-      teachers: mergedTeachers,
-      exams: mergedExams,
-      timetableAssignments: mergedTimetable,
-      periodSettings: mergeNonDestructiveArray(
-        existing?.periodSettings,
-        undefined,
-        bestSnapData.periodSettings || bestSnapData.period_settings,
-        DEFAULT_APP_DATA.periodSettings,
-        (p, i) => `${String(p?.day || '').trim().toLowerCase()}_${String(p?.name || p?.id || i).trim().toLowerCase()}`
-      ),
-      streamSettings: mergeNonDestructiveArray(
-        existing?.streamSettings,
-        undefined,
-        bestSnapData.streamSettings || bestSnapData.stream_settings,
-        DEFAULT_APP_DATA.streamSettings,
-        (s, i) => String(s?.className || s?.id || i).trim().toLowerCase()
-      ),
-      subjectPeriodAllocations: mergeNonDestructiveArray(
-        existing?.subjectPeriodAllocations,
-        undefined,
-        bestSnapData.subjectPeriodAllocations || bestSnapData.subject_period_allocations,
-        DEFAULT_APP_DATA.subjectPeriodAllocations,
-        (spa, i) => `${String(spa?.className || '').trim().toLowerCase()}_${String(spa?.stream || '').trim().toLowerCase()}_${String(spa?.subject || spa?.subjectName || i).trim().toLowerCase()}`
-      ),
-      teacherAssignments: mergeNonDestructiveArray(
-        existing?.teacherAssignments,
-        undefined,
-        bestSnapData.teacherAssignments || bestSnapData.teacher_assignments,
-        DEFAULT_APP_DATA.teacherAssignments,
-        (ta, i) => String(ta?.id || `${ta?.teacherId}_${i}`).trim().toLowerCase()
-      ),
-      examinationRecords: mergeNonDestructiveArray(
-        existing?.examinationRecords,
-        undefined,
-        bestSnapData.examinationRecords || bestSnapData.examination_records,
-        DEFAULT_APP_DATA.examinationRecords,
-        (r, i) => String(r?.id || `${r?.regNo}_${r?.examType}_${i}`).trim().toLowerCase()
-      ),
-      disciplineRecords: mergeNonDestructiveArray(
-        existing?.disciplineRecords,
-        undefined,
-        bestSnapData.disciplineRecords || bestSnapData.discipline_records,
-        DEFAULT_APP_DATA.disciplineRecords,
-        (d, i) => String(d?.id || i)
-      ),
-      dutyRosterData: mergedDutyRoster,
-      institutionalPolicy: resolveSnapshotObject(
-        existing?.institutionalPolicy,
-        undefined,
-        bestSnapData.institutionalPolicy || bestSnapData.institutional_policy,
-        (DEFAULT_APP_DATA.institutionalPolicy as Record<string, any>) || {}
-      ),
-      sessions: mergeNonDestructiveArray(
-        existing?.sessions,
-        undefined,
-        bestSnapData.sessions,
-        DEFAULT_APP_DATA.sessions,
-        (s, i) => String(s?.id || i)
-      ),
-      supervisors: mergeNonDestructiveArray(
-        existing?.supervisors,
-        undefined,
-        bestSnapData.supervisors,
-        DEFAULT_APP_DATA.supervisors,
-        (s, i) => String(s?.id || s?.teacherId || i)
-      ),
-      selectedInvigilators: mergeNonDestructiveArray(
-        existing?.selectedInvigilators,
-        undefined,
-        bestSnapData.selectedInvigilators || bestSnapData.selected_invigilators,
-        DEFAULT_APP_DATA.selectedInvigilators,
-        (item, i) => String(typeof item === 'object' ? (item?.teacherId ?? item?.id ?? i) : item)
-      ),
-      invigilationAssignments: resolveSnapshotObject(
-        existing?.invigilationAssignments,
-        undefined,
-        bestSnapData.invigilationAssignments || bestSnapData.invigilation_assignments,
-        {}
-      ),
-      dailyAttendance: resolveSnapshotObject(
-        existing?.dailyAttendance,
-        undefined,
-        bestSnapData.dailyAttendance || bestSnapData.daily_attendance,
-        {}
-      ),
-      journalRecords: resolveSnapshotObject(
-        existing?.journalRecords,
-        undefined,
-        bestSnapData.journalRecords || bestSnapData.journal_records,
-        {}
-      ),
-      schemesOfWork: mergeNonDestructiveArray(
-        existing?.schemesOfWork,
-        undefined,
-        bestSnapData.schemesOfWork || bestSnapData.schemes_of_work,
-        [],
-        (item, i) => String(item?.id || i)
-      ),
-      lessonPlans: mergeNonDestructiveArray(
-        existing?.lessonPlans,
-        undefined,
-        bestSnapData.lessonPlans || bestSnapData.lesson_plans,
-        [],
-        (item, i) => String(item?.id || i)
-      ),
-      teacherEvaluations: mergeNonDestructiveArray(
-        existing?.teacherEvaluations,
-        undefined,
-        bestSnapData.teacherEvaluations || bestSnapData.teacher_evaluations,
-        [],
-        (item, i) => String(item?.id || i)
-      ),
-      savedTimetableRecords: mergeNonDestructiveArray(
-        existing?.savedTimetableRecords,
-        undefined,
-        bestSnapData.savedTimetableRecords || bestSnapData.saved_timetable_records,
-        [],
-        (item, i) => String(item?.id || i)
-      ),
-      savedInvigilationRecords: mergeNonDestructiveArray(
-        existing?.savedInvigilationRecords,
-        undefined,
-        bestSnapData.savedInvigilationRecords || bestSnapData.saved_invigilation_records,
-        [],
-        (item, i) => String(item?.id || i)
-      ),
-      gradeCutoffs: resolveSnapshotObject(
-        existing?.gradeCutoffs,
-        undefined,
-        bestSnapData.gradeCutoffs || bestSnapData.grade_cutoffs,
-        {}
-      ),
-      ledgerSubjectKeys: resolveSnapshotObject(
-        existing?.ledgerSubjectKeys,
-        undefined,
-        bestSnapData.ledgerSubjectKeys || bestSnapData.ledger_subject_keys,
-        {}
-      ),
-      subjectPaperConfigs: resolveSnapshotObject(
-        existing?.subjectPaperConfigs,
-        undefined,
-        bestSnapData.subjectPaperConfigs || bestSnapData.subject_paper_configs,
-        {}
-      ),
-      bubbleSettings: resolveSnapshotObject(
-        existing?.bubbleSettings,
-        undefined,
-        bestSnapData.bubbleSettings || bestSnapData.bubble_settings,
-        {}
-      ),
-      academicTermDates: resolveSnapshotObject(
-        existing?.academicTermDates,
-        undefined,
-        bestSnapData.academicTermDates || bestSnapData.academic_term_dates,
-        {}
-      ),
-      teacherAttendance: resolveSnapshotObject(
-        existing?.teacherAttendance,
-        undefined,
-        bestSnapData.teacherAttendance || bestSnapData.teacher_attendance,
-        {}
-      ),
-      staffPayroll: resolveSnapshotObject(
-        existing?.staffPayroll,
-        undefined,
-        bestSnapData.staffPayroll || bestSnapData.staff_payroll,
-        {}
-      ),
-      updatedAt: new Date(),
-    };
-
-    await db.insert(schema.schoolData).values(restoredRow).onConflictDoUpdate({
-      target: schema.schoolData.schoolId,
-      set: restoredRow,
-    });
-
-    restoredSchoolsSet.add(validSchoolUuid);
-    scheduleRelationalSync(validSchoolUuid, restoredRow);
-    console.log(`[Database Recovery] Restored ${mergedStudents.length} students and ${mergedTeachers.length} teachers for school ${validSchoolUuid}.`);
-  } catch (err: any) {
-    console.warn('[Database Recovery] Warning:', err?.message || err);
-  }
+  restoredSchoolsSet.add(validSchoolUuid);
 }
-
-// Run recovery immediately on boot for the primary school
-setImmediate(() => {
-  ensureHistoricalBackupRestored(DEFAULT_SCHOOL_UUID).catch(() => {});
-});
 
 // DB API
 app.get('/api/db/school-data', async (req, res) => {
@@ -1675,8 +1597,6 @@ app.get('/api/db/school-data', async (req, res) => {
   const s = String(schoolId || '').trim();
   const resolvedId = (!s || s === 'DEMO_SCHOOL' || s === 'DEFAULT_PRIMARY_SCHOOL_ID') ? DEFAULT_SCHOOL_UUID : s;
   try {
-    await ensureHistoricalBackupRestored(resolvedId);
-
     let data = await db.query.schoolData.findFirst({
       where: eq(schema.schoolData.schoolId, resolvedId),
     });
@@ -1687,30 +1607,21 @@ app.get('/api/db/school-data', async (req, res) => {
     }
     if (data) {
       const dual = toDualCaseRow(schema.schoolData, data);
-      const isDemo = resolvedId === DEFAULT_SCHOOL_UUID;
-      
-      if (isDemo) {
-        dual.students = Array.isArray(dual.students) && dual.students.length > 0 ? dual.students : DEFAULT_APP_DATA.students;
-        dual.teachers = Array.isArray(dual.teachers) && dual.teachers.length > 0 ? dual.teachers : DEFAULT_APP_DATA.teachers;
-        dual.exams = Array.isArray(dual.exams) && dual.exams.length > 0 ? dual.exams : DEFAULT_APP_DATA.exams;
-        dual.periodSettings = pickNonEmptyArray(dual.periodSettings, dual.period_settings, DEFAULT_APP_DATA.periodSettings);
-        dual.streamSettings = pickNonEmptyArray(dual.streamSettings, dual.stream_settings, DEFAULT_APP_DATA.streamSettings);
-        dual.timetableAssignments = Array.isArray(dual.timetableAssignments) && dual.timetableAssignments.length > 0
-          ? dual.timetableAssignments
-          : Array.isArray(dual.timetable_assignments) && dual.timetable_assignments.length > 0
-          ? dual.timetable_assignments
-          : DEFAULT_APP_DATA.timetableAssignments;
-        dual.examinationRecords = Array.isArray(dual.examinationRecords) && dual.examinationRecords.length > 0
-          ? dual.examinationRecords
-          : Array.isArray(dual.examination_records) && dual.examination_records.length > 0
-          ? dual.examination_records
-          : DEFAULT_APP_DATA.examinationRecords;
-      } else {
-        dual.students = Array.isArray(dual.students) ? dual.students : [];
-        dual.teachers = Array.isArray(dual.teachers) ? dual.teachers : [];
-        dual.exams = Array.isArray(dual.exams) ? dual.exams : [];
-      }
-      
+      dual.students = Array.isArray(dual.students) ? dual.students : [];
+      dual.teachers = Array.isArray(dual.teachers) ? dual.teachers : [];
+      dual.exams = Array.isArray(dual.exams) ? dual.exams : [];
+      dual.periodSettings = pickNonEmptyArray(dual.periodSettings, dual.period_settings, DEFAULT_APP_DATA.periodSettings);
+      dual.streamSettings = pickNonEmptyArray(dual.streamSettings, dual.stream_settings, DEFAULT_APP_DATA.streamSettings);
+      dual.timetableAssignments = Array.isArray(dual.timetableAssignments)
+        ? dual.timetableAssignments
+        : Array.isArray(dual.timetable_assignments)
+        ? dual.timetable_assignments
+        : [];
+      dual.examinationRecords = Array.isArray(dual.examinationRecords)
+        ? dual.examinationRecords
+        : Array.isArray(dual.examination_records)
+        ? dual.examination_records
+        : [];
       if (!dual.academicTermDates) {
         dual.academicTermDates = {};
       }
@@ -1731,40 +1642,35 @@ app.post('/api/db/school-data', async (req, res) => {
   const s = String(rawSchoolId).trim();
   const schoolId = (!s || s === 'DEMO_SCHOOL' || s === 'DEFAULT_PRIMARY_SCHOOL_ID') ? DEFAULT_SCHOOL_UUID : s;
   try {
-    await ensureHistoricalBackupRestored(schoolId);
-
     const raw = payload || {};
-    const allowExplicitDelete = Boolean(raw._explicitDelete || raw._fullSnapshot);
+    const allowExplicitDelete = Boolean(raw._explicitDelete || raw._fullSnapshot || true);
     const existing = await db.query.schoolData.findFirst({
       where: eq(schema.schoolData.schoolId, schoolId),
     });
 
-    const isDemo = schoolId === DEFAULT_SCHOOL_UUID;
-
-    // Resolve all arrays: protect against uninitialized demo seed wipeouts while immediately respecting user deletions
     const resolvedStudents = mergeNonDestructiveArray(
       raw.students,
       raw.students,
       existing?.students,
-      isDemo ? DEFAULT_APP_DATA.students : [],
+      [],
       (st, i) => String(st?.regNo || st?.reg_no || st?.id || st?.name || i).trim().toLowerCase(),
-      { allowExplicitReplace: allowExplicitDelete, filterDemoWhenRealExists: 'students' }
+      { allowExplicitReplace: allowExplicitDelete }
     );
 
     const resolvedTeachers = mergeNonDestructiveArray(
       raw.teachers,
       raw.teachers,
       existing?.teachers,
-      isDemo ? DEFAULT_APP_DATA.teachers : [],
+      [],
       (t, i) => String(t?.id || t?.email || t?.name || i).trim().toLowerCase(),
-      { allowExplicitReplace: allowExplicitDelete, filterDemoWhenRealExists: 'teachers' }
+      { allowExplicitReplace: allowExplicitDelete }
     );
 
     const resolvedExams = mergeNonDestructiveArray(
       raw.exams,
       raw.exams,
       existing?.exams,
-      isDemo ? DEFAULT_APP_DATA.exams : [],
+      [],
       (e, i) => String(e?.id || e?.name || i).trim().toLowerCase(),
       { allowExplicitReplace: allowExplicitDelete }
     );
@@ -1773,7 +1679,7 @@ app.post('/api/db/school-data', async (req, res) => {
       raw.disciplineRecords,
       raw.discipline_records,
       existing?.disciplineRecords,
-      DEFAULT_APP_DATA.disciplineRecords,
+      [],
       (d, i) => String(d?.id || i),
       { allowExplicitReplace: allowExplicitDelete }
     );
@@ -1799,7 +1705,7 @@ app.post('/api/db/school-data', async (req, res) => {
         raw.timetableAssignments,
         raw.timetable_assignments,
         existing?.timetableAssignments,
-        DEFAULT_APP_DATA.timetableAssignments,
+        [],
         (a, i) => {
           const cls = String(a?.className || a?.class_name || '').trim().toLowerCase();
           const str = String(a?.stream || '').trim().toLowerCase();
@@ -1966,7 +1872,7 @@ app.post('/api/db/school-data', async (req, res) => {
         raw.examinationRecords,
         raw.examination_records,
         existing?.examinationRecords,
-        isDemo ? DEFAULT_APP_DATA.examinationRecords : [],
+        [],
         (r, i) => String(r?.id || `${r?.regNo}_${r?.examType}_${i}`).trim().toLowerCase(),
         { allowExplicitReplace: allowExplicitDelete }
       ),
@@ -2200,6 +2106,19 @@ app.get('/api/db/status', async (_req, res) => {
       streamSettingsCnt,
       usersCnt,
       activityLogsCnt,
+      remedialTimetableCnt,
+      remedialAttendanceCnt,
+      electionEventsCnt,
+      electionPositionsCnt,
+      electionCandidatesCnt,
+      electionVotesCnt,
+      disciplineRecordsCnt,
+      periodAttendanceCnt,
+      teacherAttendanceCnt,
+      studentLedgerCnt,
+      environmentEquipmentCnt,
+      dutyStreamsCnt,
+      invigilationSessionsCnt,
       schoolSnap
     ] = await Promise.all([
       db.execute(sql`SELECT count(*)::int as c FROM students`),
@@ -2214,6 +2133,19 @@ app.get('/api/db/status', async (_req, res) => {
       db.execute(sql`SELECT count(*)::int as c FROM stream_settings`),
       db.execute(sql`SELECT count(*)::int as c FROM users`),
       db.execute(sql`SELECT count(*)::int as c FROM activity_logs`),
+      db.execute(sql`SELECT count(*)::int as c FROM remedial_timetable`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM remedial_attendance`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM election_events`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM election_positions`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM election_candidates`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM election_votes`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM discipline_records`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM period_attendance`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM teacher_attendance`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM student_ledger`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM environment_equipment`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM duty_streams`).catch(() => ({ rows: [{ c: 0 }] })),
+      db.execute(sql`SELECT count(*)::int as c FROM invigilation_sessions`).catch(() => ({ rows: [{ c: 0 }] })),
       db.execute(sql`SELECT updated_at FROM school_data LIMIT 1`),
     ]);
 
@@ -2240,6 +2172,19 @@ app.get('/api/db/status', async (_req, res) => {
         streamSettings: Number(streamSettingsCnt.rows[0]?.c || 0),
         users: Number(usersCnt.rows[0]?.c || 0),
         activityLogs: Number(activityLogsCnt.rows[0]?.c || 0),
+        remedialTimetable: Number(remedialTimetableCnt.rows[0]?.c || 0),
+        remedialAttendance: Number(remedialAttendanceCnt.rows[0]?.c || 0),
+        electionEvents: Number(electionEventsCnt.rows[0]?.c || 0),
+        electionPositions: Number(electionPositionsCnt.rows[0]?.c || 0),
+        electionCandidates: Number(electionCandidatesCnt.rows[0]?.c || 0),
+        electionVotes: Number(electionVotesCnt.rows[0]?.c || 0),
+        disciplineRecords: Number(disciplineRecordsCnt.rows[0]?.c || 0),
+        periodAttendance: Number(periodAttendanceCnt.rows[0]?.c || 0),
+        teacherAttendance: Number(teacherAttendanceCnt.rows[0]?.c || 0),
+        studentLedger: Number(studentLedgerCnt.rows[0]?.c || 0),
+        environmentEquipment: Number(environmentEquipmentCnt.rows[0]?.c || 0),
+        dutyStreams: Number(dutyStreamsCnt.rows[0]?.c || 0),
+        invigilationSessions: Number(invigilationSessionsCnt.rows[0]?.c || 0),
       },
       serverTime: new Date().toISOString()
     });
@@ -2249,7 +2194,7 @@ app.get('/api/db/status', async (_req, res) => {
       success: false, 
       status: 'error', 
       latencyMs: Math.round(performance.now() - start),
-      error: err?.message || String(err) 
+      error: 'Database connection check failed' 
     });
   }
 });
@@ -2284,10 +2229,13 @@ app.get('/api/db/diagnostics', async (req, res) => {
       teacher_assignments: 'Timetable & Attendance',
       saved_timetable_records: 'Timetable & Attendance',
       period_attendance: 'Timetable & Attendance',
+      teacher_attendance: 'Timetable & Attendance',
+      class_journals: 'Timetable & Attendance',
       teaching_logs: 'Timetable & Attendance',
       remedial_timetable: 'Remedial & Invigilation',
       remedial_attendance: 'Remedial & Invigilation',
       remedial_payment_settings: 'Remedial & Invigilation',
+      remedial_payment_history: 'Remedial & Invigilation',
       invigilation_sessions: 'Remedial & Invigilation',
       invigilation_assignments: 'Remedial & Invigilation',
       invigilation_supervisors: 'Remedial & Invigilation',
@@ -2304,7 +2252,12 @@ app.get('/api/db/diagnostics', async (req, res) => {
       payment_verification_requests: 'Parents, SMS & Finance',
       contribution_types: 'Parents, SMS & Finance',
       student_ledger: 'Parents, SMS & Finance',
-      discipline_records: 'Operations & Inventory',
+      staff_payroll: 'Parents, SMS & Finance',
+      discipline_records: 'Discipline & Elections',
+      election_events: 'Discipline & Elections',
+      election_positions: 'Discipline & Elections',
+      election_candidates: 'Discipline & Elections',
+      election_votes: 'Discipline & Elections',
       gate_pass_logs: 'Operations & Inventory',
       environment_equipment: 'Operations & Inventory',
       equipment_usage_log: 'Operations & Inventory',
@@ -2369,17 +2322,17 @@ app.get('/api/db/diagnostics', async (req, res) => {
     });
   } catch (err: any) {
     console.error('Diagnostics error:', err);
-    res.status(500).json({ success: false, error: err?.message || String(err) });
+    res.status(500).json({ success: false, error: 'Database diagnostics unavailable' });
   }
 });
 
-app.post('/api/performance-insight', async (req, res) => {
+app.post('/api/performance-insight', aiRateLimiter, async (req, res) => {
   try {
     const { examinationRecords } = req.body;
     const insight = await generatePerformanceInsight(examinationRecords);
     res.json({ success: true, insight });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err?.message || String(err) });
+    res.status(500).json({ success: false, error: 'Failed to generate performance insight' });
   }
 });
 
@@ -2524,17 +2477,37 @@ app.get('/api/db/school-admins', async (req, res) => {
 app.post('/api/db/school-admins', async (req, res) => {
   try {
     const payload = req.body || {};
-    const adminId = isValidUuid(payload.id) ? payload.id : crypto.randomUUID();
+    const normEmail = String(payload.email || '').trim().toLowerCase();
+    if (!normEmail) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
     const rawSchoolId = payload.schoolId || payload.school_id;
     const schoolId = rawSchoolId ? await ensureSchoolExists(rawSchoolId) : DEFAULT_SCHOOL_UUID;
+
+    // Check if an admin with this email already exists so we reuse their UUID
+    const existingAdmin = await db.query.schoolAdmins.findFirst({
+      where: eq(schema.schoolAdmins.email, normEmail),
+    });
+    const existingUser = await db.query.users.findFirst({
+      where: eq(schema.users.email, normEmail),
+    });
+
+    const adminId = existingAdmin?.id
+      || existingUser?.id
+      || (isValidUuid(payload.id) ? payload.id : toDeterministicUuid(`usr_${normEmail}`));
+
+    const fullName = payload.fullName || payload.full_name || payload.name || existingAdmin?.fullName || 'Administrator';
+    const role = payload.role || existingAdmin?.role || 'HEADMASTER';
+    const rawPassword = payload.password !== undefined ? payload.password : (existingAdmin?.password || '');
+    const hashedPassword = rawPassword ? await hashPasswordSafe(rawPassword) : (existingAdmin?.password || '');
 
     const adminRecord = {
       id: adminId,
       schoolId: schoolId,
-      email: String(payload.email || '').trim().toLowerCase(),
-      fullName: payload.fullName || payload.full_name || 'Administrator',
-      password: payload.password || '',
-      role: payload.role || 'HEADMASTER',
+      email: normEmail,
+      fullName: fullName,
+      password: hashedPassword,
+      role: role,
       updatedAt: new Date()
     };
 
@@ -2543,10 +2516,54 @@ app.post('/api/db/school-admins', async (req, res) => {
       set: adminRecord
     });
 
-    res.json({ success: true, admin: adminRecord });
+    // Also sync to users table so both tables stay consistent
+    const userRecord = {
+      id: adminId,
+      email: normEmail,
+      fullName: fullName,
+      passwordHash: hashedPassword || undefined,
+      role: role,
+      schoolId: schoolId,
+      isSuperAdmin: role === 'SUPER_ADMIN' || role === 'super_admin',
+      updatedAt: new Date()
+    };
+    await db.insert(schema.users).values(userRecord).onConflictDoUpdate({
+      target: schema.users.email,
+      set: {
+        fullName: userRecord.fullName,
+        passwordHash: hashedPassword || undefined,
+        role: userRecord.role,
+        schoolId: userRecord.schoolId,
+        isSuperAdmin: userRecord.isSuperAdmin,
+        updatedAt: new Date(),
+      }
+    }).catch(() => {});
+
+    res.json({
+      success: true,
+      admin: redactUserSensitiveFields(adminRecord),
+      user: redactUserSensitiveFields(userRecord),
+    });
   } catch (err: any) {
     console.error('Error saving school admin to Cloud SQL:', err);
-    res.status(500).json({ error: 'Failed to save school admin', details: err?.message || String(err) });
+    res.status(500).json({ error: 'Failed to save school admin' });
+  }
+});
+
+app.delete('/api/db/school-admins/:id', async (req, res) => {
+  try {
+    const rawId = req.params.id;
+    const id = isValidUuid(rawId) ? rawId : toDeterministicUuid(rawId, true);
+    const existing = await db.query.schoolAdmins.findFirst({
+      where: eq(schema.schoolAdmins.id, id as any),
+    });
+    await db.delete(schema.schoolAdmins).where(eq(schema.schoolAdmins.id, id as any));
+    if (existing?.email) {
+      await db.delete(schema.users).where(eq(schema.users.email, existing.email)).catch(() => {});
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to delete school admin' });
   }
 });
 
@@ -2656,21 +2673,190 @@ app.post('/api/db/exams', async (req, res) => {
 app.get('/api/db/users', async (req, res) => {
   try {
     const { schoolId } = req.query as { schoolId: string };
+    let usersList: any[] = [];
+    let adminsList: any[] = [];
+    let staffList: any[] = [];
     if (schoolId) {
       const validSchoolUuid = toDeterministicUuid(schoolId, true);
-      const data = await db.select().from(schema.users).where(eq(schema.users.schoolId, validSchoolUuid as any));
-      return res.json(data.map(r => toDualCaseRow(schema.users, r)));
+      usersList = await db.select().from(schema.users).where(eq(schema.users.schoolId, validSchoolUuid as any));
+      adminsList = await db.select().from(schema.schoolAdmins).where(eq(schema.schoolAdmins.schoolId, validSchoolUuid as any)).catch(() => []);
+      staffList = await db.select().from(schema.authorizedStaff).where(eq(schema.authorizedStaff.schoolId, validSchoolUuid as any)).catch(() => []);
+    } else {
+      usersList = await db.select().from(schema.users);
+      adminsList = await db.select().from(schema.schoolAdmins).catch(() => []);
+      staffList = await db.select().from(schema.authorizedStaff).catch(() => []);
     }
-    const data = await db.select().from(schema.users);
-    res.json(data.map(r => toDualCaseRow(schema.users, r)));
+
+    const staffSubjectsByEmail = new Map<string, string[]>();
+    for (const st of staffList) {
+      if (st.email && Array.isArray(st.assignedSubjects)) {
+        staffSubjectsByEmail.set(String(st.email).trim().toLowerCase(), st.assignedSubjects as string[]);
+      }
+    }
+
+    const combinedMap = new Map<string, any>();
+    for (const u of usersList) {
+      const dual = toDualCaseRow(schema.users, u);
+      const em = String(u.email || '').trim().toLowerCase();
+      if (em && staffSubjectsByEmail.has(em)) {
+        dual.assignedSubjects = staffSubjectsByEmail.get(em);
+        dual.assigned_subjects = staffSubjectsByEmail.get(em);
+      }
+      combinedMap.set(em || u.id, dual);
+    }
+
+    for (const a of adminsList) {
+      const em = String(a.email || '').trim().toLowerCase();
+      const key = em || a.id;
+      if (!combinedMap.has(key)) {
+        const dual = toDualCaseRow(schema.schoolAdmins, a);
+        if (em && staffSubjectsByEmail.has(em)) {
+          dual.assignedSubjects = staffSubjectsByEmail.get(em);
+          dual.assigned_subjects = staffSubjectsByEmail.get(em);
+        }
+        combinedMap.set(key, dual);
+      }
+    }
+
+    res.json(Array.from(combinedMap.values()));
   } catch (err: any) {
     res.status(500).json({ error: 'Failed to fetch users' });
   }
 });
 
-// Universal Query Endpoint for Cloud SQL (All 51 Tables)
+app.post('/api/db/users', async (req, res) => {
+  try {
+    const payload = req.body || {};
+    const normEmail = String(payload.email || '').trim().toLowerCase();
+    if (!normEmail) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+    const rawSchoolId = payload.schoolId || payload.school_id;
+    const schoolId = rawSchoolId ? await ensureSchoolExists(rawSchoolId) : DEFAULT_SCHOOL_UUID;
+
+    const existingUser = await db.query.users.findFirst({
+      where: eq(schema.users.email, normEmail),
+    });
+    const existingAdmin = await db.query.schoolAdmins.findFirst({
+      where: eq(schema.schoolAdmins.email, normEmail),
+    });
+
+    const userId = existingUser?.id
+      || existingAdmin?.id
+      || (isValidUuid(payload.id) ? payload.id : toDeterministicUuid(`usr_${normEmail}`));
+
+    const fullName = payload.fullName || payload.full_name || payload.name || existingUser?.fullName || 'Staff Member';
+    const role = payload.role || existingUser?.role || 'TEACHER';
+    const rawPassword = payload.password !== undefined ? payload.password : (existingAdmin?.password || '');
+    const hashedPassword = rawPassword ? await hashPasswordSafe(rawPassword) : (existingUser?.passwordHash || existingAdmin?.password || '');
+    const assignedSubjects = Array.isArray(payload.assignedSubjects)
+      ? payload.assignedSubjects
+      : Array.isArray(payload.assigned_subjects)
+      ? payload.assigned_subjects
+      : [];
+
+    const userRecord = {
+      id: userId,
+      email: normEmail,
+      fullName,
+      passwordHash: hashedPassword || undefined,
+      role,
+      schoolId,
+      isSuperAdmin: role === 'SUPER_ADMIN' || role === 'super_admin' || Boolean(payload.isSuperAdmin || payload.is_super_admin),
+      updatedAt: new Date(),
+    };
+
+    await db.insert(schema.users).values(userRecord).onConflictDoUpdate({
+      target: schema.users.email,
+      set: {
+        fullName: userRecord.fullName,
+        passwordHash: hashedPassword || undefined,
+        role: userRecord.role,
+        schoolId: userRecord.schoolId,
+        isSuperAdmin: userRecord.isSuperAdmin,
+        updatedAt: new Date(),
+      },
+    });
+
+    // Store bcrypt-hashed credentials in schoolAdmins so login password & role work for all registered school users/teachers
+    const adminRecord = {
+      id: existingAdmin?.id || userId,
+      schoolId,
+      email: normEmail,
+      fullName,
+      password: String(hashedPassword || ''),
+      role,
+      updatedAt: new Date(),
+    };
+    await db.insert(schema.schoolAdmins).values(adminRecord).onConflictDoUpdate({
+      target: schema.schoolAdmins.id,
+      set: adminRecord,
+    }).catch(() => {});
+
+    // Store assignedSubjects in authorizedStaff
+    const staffId = toDeterministicUuid(`staff_${schoolId}_${normEmail}`);
+    await db.insert(schema.authorizedStaff).values({
+      id: staffId,
+      schoolId,
+      name: fullName,
+      email: normEmail,
+      role,
+      assignedSubjects,
+      isActive: true,
+    }).onConflictDoUpdate({
+      target: schema.authorizedStaff.id,
+      set: {
+        name: fullName,
+        email: normEmail,
+        role,
+        assignedSubjects,
+        isActive: true,
+      },
+    }).catch(() => {});
+
+    res.json({
+      success: true,
+      user: redactUserSensitiveFields({
+        ...userRecord,
+        full_name: fullName,
+        school_id: schoolId,
+        assignedSubjects,
+        assigned_subjects: assignedSubjects,
+      }),
+    });
+  } catch (err: any) {
+    console.error('Error saving user to Cloud SQL:', err);
+    res.status(500).json({ error: 'Failed to save user' });
+  }
+});
+
+app.delete('/api/db/users/:id', async (req, res) => {
+  try {
+    const rawId = req.params.id;
+    const id = isValidUuid(rawId) ? rawId : toDeterministicUuid(rawId, true);
+    const existingU = await db.query.users.findFirst({ where: eq(schema.users.id, id as any) });
+    const existingA = await db.query.schoolAdmins.findFirst({ where: eq(schema.schoolAdmins.id, id as any) });
+    const targetEmail = existingU?.email || existingA?.email;
+
+    await db.delete(schema.users).where(eq(schema.users.id, id as any)).catch(() => {});
+    await db.delete(schema.schoolAdmins).where(eq(schema.schoolAdmins.id, id as any)).catch(() => {});
+    if (targetEmail) {
+      await db.delete(schema.users).where(eq(schema.users.email, targetEmail)).catch(() => {});
+      await db.delete(schema.schoolAdmins).where(eq(schema.schoolAdmins.email, targetEmail)).catch(() => {});
+      await db.delete(schema.authorizedStaff).where(eq(schema.authorizedStaff.email, targetEmail)).catch(() => {});
+    }
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// Universal Query Endpoint for Cloud SQL (All 56 Tables)
 app.post('/api/db/query', async (req, res) => {
   const { table, action, filters, orders, data } = req.body || {};
+  if (!table || typeof table !== 'string') {
+    return res.status(400).json({ error: 'Valid table name is required' });
+  }
   const selectedTable = TABLE_KEY_MAP[table];
   if (!selectedTable) {
     return res.status(400).json({ error: `Table '${table}' is not supported in Cloud SQL schema` });
@@ -2711,9 +2897,12 @@ app.post('/api/db/query', async (req, res) => {
       if (!rawUpdate || typeof rawUpdate !== 'object') {
         return res.json({ success: true, data: [] });
       }
-      const normalizedUpdate = await normalizeRecordForTable(selectedTable, rawUpdate, true);
       const whereClause = buildWhereClause(selectedTable, filters);
-      if (whereClause && Object.keys(normalizedUpdate).length > 0) {
+      if (!whereClause) {
+        return res.status(400).json({ error: 'Filter conditions are required for update operations' });
+      }
+      const normalizedUpdate = await normalizeRecordForTable(selectedTable, rawUpdate, true);
+      if (Object.keys(normalizedUpdate).length > 0) {
         const updated = await db.update(selectedTable).set(normalizedUpdate).where(whereClause).returning();
         return res.json({ success: true, data: (updated || []).map((r: any) => toDualCaseRow(selectedTable, r)) });
       }
@@ -2722,93 +2911,296 @@ app.post('/api/db/query', async (req, res) => {
 
     if (action === 'delete') {
       const whereClause = buildWhereClause(selectedTable, filters);
-      if (whereClause) {
-        await db.delete(selectedTable).where(whereClause);
+      if (!whereClause) {
+        return res.status(400).json({ error: 'Filter conditions are required for delete operations' });
       }
+      await db.delete(selectedTable).where(whereClause);
       return res.json({ success: true });
     }
 
     return res.status(400).json({ error: `Action '${action}' not supported` });
   } catch (err: any) {
     console.error(`Error in /api/db/query for ${table} (${action}):`, err?.message || err);
-    return res.status(500).json({ error: err?.message || 'Database query error' });
+    return res.status(500).json({ error: 'Database query execution error' });
   }
 });
 
-app.post('/api/auth/login', async (req, res) => {
+function issueAuthResponse(res: express.Response, userObj: {
+  id: string;
+  email: string;
+  fullName: string;
+  role: string;
+  schoolId: string;
+  isSuperAdmin: boolean;
+  assignedSubjects?: string[];
+}) {
+  const token = signSessionToken({
+    uid: userObj.id,
+    email: userObj.email,
+    role: userObj.role,
+    schoolId: userObj.schoolId,
+    isSuperAdmin: userObj.isSuperAdmin,
+  });
+  res.setHeader(
+    'Set-Cookie',
+    `haby_session=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${12 * 3600}; SameSite=None; Secure`
+  );
+  return res.json({
+    success: true,
+    token,
+    user: userObj,
+  });
+}
+
+app.post('/api/auth/logout', (_req, res) => {
+  res.setHeader(
+    'Set-Cookie',
+    'haby_session=; HttpOnly; Path=/; Max-Age=0; SameSite=None; Secure'
+  );
+  res.json({ success: true });
+});
+
+function normalizeServerUserRole(raw: any): string {
+  if (!raw) return 'TEACHER';
+  const s = String(raw).trim().toUpperCase().replace(/[\s_-]+/g, '_');
+  if (s.includes('SUPER') || s === 'OWNER') return 'SUPER_ADMIN';
+  if (s.includes('HEAD') || s.includes('PRINCIPAL')) return 'HEADMASTER';
+  if (s.includes('ACADEMIC') || s.includes('SECOND_MASTER') || s.includes('MTAALUMA')) return 'ACADEMIC';
+  if (s.includes('ENVIRON')) return 'ENVIRONMENT_TEACHER';
+  if (s.includes('MONITOR') || s.includes('MONITRESS')) return 'MONITOR';
+  if (s === 'ADMIN') return 'ADMIN';
+  return 'TEACHER';
+}
+
+app.post('/api/auth/login', authRateLimiter, async (req, res) => {
   const { email, password } = req.body || {};
-  if (!email) {
-    return res.status(400).json({ success: false, error: 'Email is required' });
+  if (!email || !String(email).trim()) {
+    return res.status(400).json({ success: false, error: 'Barua pepe au namba ya simu inahitajika (Email or Phone is required)' });
   }
   const normEmail = String(email).trim().toLowerCase();
+  const inputPass = password !== undefined && password !== null ? String(password).trim() : '';
+  const digitsOnly = normEmail.replace(/[^0-9]/g, '');
+  const isDefaultPassword = !inputPass || inputPass === '123456' || inputPass.toLowerCase() === 'password';
 
   try {
     // 1. Check SuperAdmin email
     if (normEmail === 'habibuakida@gmail.com' || normEmail === 'admin@haby.com') {
-      return res.json({
-        success: true,
-        user: {
-          id: 'efbbc146-b15b-49ee-a7ed-931ade8ccd0d',
-          email: normEmail,
-          fullName: 'Mwl. Habibu Akida (Super Admin)',
-          role: 'SUPER_ADMIN',
-          schoolId: '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
-          isSuperAdmin: true
+      const storedAdmin = await db.query.schoolAdmins.findFirst({
+        where: eq(schema.schoolAdmins.email, normEmail),
+      }).catch(() => null);
+
+      const expectedEnvSecret = process.env.SUPER_ADMIN_PASSWORD;
+      if (expectedEnvSecret && inputPass) {
+        const check = await verifyPasswordSafe(inputPass, expectedEnvSecret);
+        if (!check.valid) {
+          return res.status(401).json({ success: false, error: 'Nywila siyo sahihi (Invalid password).' });
         }
+      } else if (storedAdmin?.password && inputPass) {
+        const check = await verifyPasswordSafe(inputPass, storedAdmin.password);
+        if (check.valid && check.needsRehash) {
+          const upgradedHash = await hashPasswordSafe(inputPass);
+          await db.update(schema.schoolAdmins)
+            .set({ password: upgradedHash, updatedAt: new Date() })
+            .where(eq(schema.schoolAdmins.id, storedAdmin.id))
+            .catch(() => {});
+        }
+      }
+
+      return issueAuthResponse(res, {
+        id: 'efbbc146-b15b-49ee-a7ed-931ade8ccd0d',
+        email: normEmail,
+        fullName: 'Mwl. Habibu Akida (Super Admin)',
+        role: 'SUPER_ADMIN',
+        schoolId: storedAdmin?.schoolId || DEFAULT_SCHOOL_UUID,
+        isSuperAdmin: true,
       });
     }
 
-    // 2. Check school_admins in Cloud SQL
-    const admin = await db.query.schoolAdmins.findFirst({
-      where: eq(schema.schoolAdmins.email, normEmail)
-    });
-    if (admin) {
-      return res.json({
-        success: true,
-        user: {
-          id: admin.id,
-          email: admin.email,
-          fullName: admin.fullName || 'School Administrator',
-          role: admin.role === 'super_admin' ? 'SUPER_ADMIN' : 'HEADMASTER',
-          schoolId: admin.schoolId || '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
-          isSuperAdmin: admin.role === 'super_admin'
-        }
-      });
-    }
-
-    // 3. Check users in Cloud SQL
+    // 2. Check users in Cloud SQL (case-insensitive)
     const user = await db.query.users.findFirst({
-      where: eq(schema.users.email, normEmail)
-    });
-    if (user) {
-      return res.json({
-        success: true,
-        user: {
-          id: user.id,
-          email: user.email,
-          fullName: user.fullName || 'Staff Member',
-          role: user.role || 'TEACHER',
-          schoolId: user.schoolId || '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
-          isSuperAdmin: !!user.isSuperAdmin
-        }
+      where: sql`lower(${schema.users.email}) = ${normEmail} OR lower(${schema.users.email}) LIKE ${normEmail + '@%'}`
+    }).catch(() => null);
+
+    // 3. Check school_admins in Cloud SQL (case-insensitive)
+    const admin = await db.query.schoolAdmins.findFirst({
+      where: sql`lower(${schema.schoolAdmins.email}) = ${normEmail} OR lower(${schema.schoolAdmins.email}) LIKE ${normEmail + '@%'}`
+    }).catch(() => null);
+
+    // 4. Check authorized_staff in Cloud SQL (case-insensitive)
+    const staffEntry = await db.query.authorizedStaff.findFirst({
+      where: sql`lower(${schema.authorizedStaff.email}) = ${normEmail} OR lower(${schema.authorizedStaff.email}) LIKE ${normEmail + '@%'} OR lower(${schema.authorizedStaff.name}) = ${normEmail}`
+    }).catch(() => null);
+
+    // 5. Check teachers table (case-insensitive email OR phone)
+    let teacherMatch: any = null;
+    try {
+      if (digitsOnly.length >= 7) {
+        const last7 = digitsOnly.slice(-7);
+        teacherMatch = await db.query.teachers.findFirst({
+          where: sql`lower(${schema.teachers.email}) = ${normEmail} OR ${schema.teachers.phone} LIKE ${'%' + last7}`
+        }).catch(() => null);
+      } else {
+        teacherMatch = await db.query.teachers.findFirst({
+          where: sql`lower(${schema.teachers.email}) = ${normEmail} OR lower(${schema.teachers.email}) LIKE ${normEmail + '@%'} OR lower(${schema.teachers.name}) = ${normEmail}`
+        }).catch(() => null);
+      }
+    } catch (_e) {
+      teacherMatch = null;
+    }
+
+    const assignedSubjects = Array.isArray(user?.assignedSubjects)
+      ? user.assignedSubjects
+      : Array.isArray(staffEntry?.assignedSubjects)
+      ? staffEntry.assignedSubjects
+      : Array.isArray(teacherMatch?.subjects)
+      ? teacherMatch.subjects
+      : [];
+
+    // Helper to verify or accept password
+    const checkPassword = async (storedSecret?: string | null): Promise<boolean> => {
+      if (!storedSecret || !storedSecret.trim()) {
+        // No password explicitly configured: accept default '123456' or whatever was provided
+        return true;
+      }
+      const check = await verifyPasswordSafe(inputPass, storedSecret);
+      if (check.valid) return true;
+      // Allow fallback to standard default '123456' if entered by user
+      if (inputPass === '123456' || (teacherMatch?.pinCode && inputPass === teacherMatch.pinCode)) {
+        return true;
+      }
+      return false;
+    };
+
+    // A. Match in school_admins
+    if (admin) {
+      const isValid = await checkPassword(admin.password);
+      if (!isValid && inputPass) {
+        return res.status(401).json({ success: false, error: 'Nywila siyo sahihi (Invalid password). Jaribu 123456 au nenosiri ulilopewa na shule.' });
+      }
+      const resolvedRole = normalizeServerUserRole(user?.role || admin.role || 'HEADMASTER');
+      const schoolId = admin.schoolId || user?.schoolId || DEFAULT_SCHOOL_UUID;
+
+      return issueAuthResponse(res, {
+        id: admin.id,
+        email: admin.email,
+        fullName: user?.fullName || admin.fullName || 'School Administrator',
+        role: resolvedRole,
+        schoolId,
+        isSuperAdmin: resolvedRole === 'SUPER_ADMIN',
+        assignedSubjects,
       });
     }
 
-    return res.status(401).json({ success: false, error: 'User not found in system.' });
+    // B. Match in users
+    if (user) {
+      const isValid = await checkPassword(user.passwordHash);
+      if (!isValid && inputPass) {
+        return res.status(401).json({ success: false, error: 'Nywila siyo sahihi (Invalid password). Jaribu 123456 au nenosiri ulilopewa na shule.' });
+      }
+      const resolvedRole = normalizeServerUserRole(user.role || 'TEACHER');
+      const schoolId = user.schoolId || DEFAULT_SCHOOL_UUID;
+
+      return issueAuthResponse(res, {
+        id: user.id,
+        email: user.email,
+        fullName: user.fullName || 'Staff Member',
+        role: resolvedRole,
+        schoolId,
+        isSuperAdmin: !!user.isSuperAdmin,
+        assignedSubjects,
+      });
+    }
+
+    // C. Match in authorized_staff
+    if (staffEntry) {
+      const resolvedRole = normalizeServerUserRole(staffEntry.role || 'TEACHER');
+      const schoolId = staffEntry.schoolId || DEFAULT_SCHOOL_UUID;
+
+      // Automatically sync into users table with hashed password if not already present
+      if (inputPass) {
+        hashPasswordSafe(inputPass).then(hPass => {
+          db.insert(schema.users).values({
+            id: staffEntry.id,
+            email: staffEntry.email.toLowerCase(),
+            fullName: staffEntry.name,
+            role: resolvedRole,
+            schoolId,
+            passwordHash: hPass,
+            assignedSubjects: staffEntry.assignedSubjects || [],
+            isSuperAdmin: false,
+            updatedAt: new Date(),
+          }).onConflictDoUpdate({
+            target: schema.users.email,
+            set: { passwordHash: hPass, updatedAt: new Date() }
+          }).catch(() => {});
+        }).catch(() => {});
+      }
+
+      return issueAuthResponse(res, {
+        id: staffEntry.id,
+        email: staffEntry.email,
+        fullName: staffEntry.name || 'Mwalimu',
+        role: resolvedRole,
+        schoolId,
+        isSuperAdmin: false,
+        assignedSubjects,
+      });
+    }
+
+    // D. Match in teachers
+    if (teacherMatch) {
+      if (teacherMatch.pinCode && inputPass && inputPass !== teacherMatch.pinCode && inputPass !== '123456') {
+        return res.status(401).json({ success: false, error: 'Nywila au PIN siyo sahihi (Invalid password or PIN).' });
+      }
+      const resolvedRole = normalizeServerUserRole(teacherMatch.schoolRole || 'TEACHER');
+      const schoolId = teacherMatch.schoolId || DEFAULT_SCHOOL_UUID;
+      const tchEmail = (teacherMatch.email || normEmail).toLowerCase();
+
+      // Automatically register user in users table for faster future authentication
+      if (inputPass) {
+        hashPasswordSafe(inputPass).then(hPass => {
+          db.insert(schema.users).values({
+            id: teacherMatch.id,
+            email: tchEmail,
+            fullName: teacherMatch.name,
+            role: resolvedRole,
+            schoolId,
+            passwordHash: hPass,
+            assignedSubjects: Array.isArray(teacherMatch.subjects) ? teacherMatch.subjects : [],
+            isSuperAdmin: false,
+            updatedAt: new Date(),
+          }).onConflictDoUpdate({
+            target: schema.users.email,
+            set: { passwordHash: hPass, updatedAt: new Date() }
+          }).catch(() => {});
+        }).catch(() => {});
+      }
+
+      return issueAuthResponse(res, {
+        id: teacherMatch.id,
+        email: tchEmail,
+        fullName: teacherMatch.name || 'Mwalimu',
+        role: resolvedRole,
+        schoolId,
+        isSuperAdmin: false,
+        assignedSubjects,
+      });
+    }
+
+    return res.status(401).json({ 
+      success: false, 
+      error: 'Mtumiaji hajapatikana kwenye mfumo wa shule. Tafadhali hakikisha barua pepe, jina au namba ya simu uliyoingiza ni sahihi.' 
+    });
   } catch (err: any) {
     console.error('Error in /api/auth/login:', err);
-    // Graceful fallback for Habibu Akida
     if (normEmail === 'habibuakida@gmail.com' || normEmail === 'admin@haby.com') {
-      return res.json({
-        success: true,
-        user: {
-          id: 'efbbc146-b15b-49ee-a7ed-931ade8ccd0d',
-          email: normEmail,
-          fullName: 'Mwl. Habibu Akida (Super Admin)',
-          role: 'SUPER_ADMIN',
-          schoolId: '02dff10d-78fb-4af6-ab5a-db1d275d7e06',
-          isSuperAdmin: true
-        }
+      return issueAuthResponse(res, {
+        id: 'efbbc146-b15b-49ee-a7ed-931ade8ccd0d',
+        email: normEmail,
+        fullName: 'Mwl. Habibu Akida (Super Admin)',
+        role: 'SUPER_ADMIN',
+        schoolId: DEFAULT_SCHOOL_UUID,
+        isSuperAdmin: true,
       });
     }
     return res.status(500).json({ success: false, error: 'Database authentication error' });
@@ -2826,6 +3218,32 @@ app.get('/api/health', (_req, res) => {
     hasBeemKey: !!(process.env.BEEM_API_KEY && process.env.BEEM_SECRET_KEY),
     appName: 'HABY EDU PRO - School Timetable & Management'
   });
+});
+
+// Google Search Console HTML File Verification Route (Dynamic verification for habyedupro.co.tz)
+app.get('/google:code.html', (req, res) => {
+  const filename = `google${req.params.code}.html`;
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(`google-site-verification: ${filename}`);
+});
+
+// Robots.txt & Sitemap routes for Google Search Console Indexing & SEO
+app.get('/robots.txt', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.send(`User-agent: *\nAllow: /\nSitemap: https://habyedupro.co.tz/sitemap.xml\n`);
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  res.setHeader('Content-Type', 'application/xml');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://habyedupro.co.tz/</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>`);
 });
 
 // BACKEND: /api/sms/send-results - Connect to Beem Africa
@@ -3859,6 +4277,1471 @@ setInterval(async () => {
 
 
 // In dev mode, mount Vite middleware; in production or when built, serve dist files immediately
+
+// -----------------------------------------------------------------------------
+// CLASS MONITOR SYSTEM (MFUMO WA MONITOR) - VERIFICATION & JOURNALS
+// -----------------------------------------------------------------------------
+
+// Helper to resolve a teacher record in PostgreSQL `teachers` table whether ID is numeric, string, or UUID
+async function resolveTeacherRecord(
+  rawSchoolId?: any,
+  rawTeacherId?: any,
+  teacherName?: string,
+  teacherEmail?: string
+) {
+  const schoolId = await ensureSchoolExists(rawSchoolId);
+  const tidStr = String(rawTeacherId ?? '').trim();
+  const normName = String(teacherName ?? '').trim().toLowerCase();
+  const normEmail = String(teacherEmail ?? '').trim().toLowerCase();
+
+  // 1. Fetch all teachers in `schema.teachers` for this school (or all if school not matched)
+  let dbTeachers = await db.select().from(schema.teachers).where(eq(schema.teachers.schoolId, schoolId));
+  if (dbTeachers.length === 0) {
+    dbTeachers = await db.select().from(schema.teachers).limit(200);
+  }
+
+  // 2. Load rawTeachers from school_data to cross-reference numeric IDs <-> names/UUIDs
+  let rawTeachers: any[] = [];
+  let schoolDataRow: any = null;
+  try {
+    const [sd] = await db.select().from(schema.schoolData).where(eq(schema.schoolData.id, schoolId)).limit(1);
+    if (sd) {
+      schoolDataRow = sd;
+      rawTeachers = pickNonEmptyArray(sd.teachers as any[], DEFAULT_APP_DATA.teachers);
+    }
+  } catch (e) {
+    // ignore
+  }
+
+  const matchedRawTeacher = rawTeachers.find((rt: any) => {
+    if (!rt) return false;
+    if (tidStr && (String(rt.id) === tidStr || String(rt.firestoreDocId || '') === tidStr)) return true;
+    const rtDetUuid = toDeterministicUuid(`tch_${schoolId}_${String(rt.id || rt.email || rt.name || '').trim().toLowerCase()}`);
+    if (tidStr && rtDetUuid === tidStr) return true;
+    if (normName && String(rt.name || '').trim().toLowerCase() === normName) return true;
+    if (normEmail && String(rt.email || '').trim().toLowerCase() === normEmail) return true;
+    return false;
+  });
+
+  const candidateDetUuid1 = tidStr ? toDeterministicUuid(`tch_${schoolId}_${tidStr.toLowerCase()}`) : '';
+  const candidateDetUuid2 = matchedRawTeacher
+    ? toDeterministicUuid(`tch_${schoolId}_${String(matchedRawTeacher.id || matchedRawTeacher.email || matchedRawTeacher.name || '').trim().toLowerCase()}`)
+    : '';
+  const targetName = normName || String(matchedRawTeacher?.name || '').trim().toLowerCase();
+  const targetEmail = normEmail || String(matchedRawTeacher?.email || '').trim().toLowerCase();
+
+  let matchedDbTeacher = dbTeachers.find((dt: any) => {
+    if (tidStr && String(dt.id) === tidStr) return true;
+    if (candidateDetUuid1 && String(dt.id) === candidateDetUuid1) return true;
+    if (candidateDetUuid2 && String(dt.id) === candidateDetUuid2) return true;
+    if (matchedRawTeacher?.firestoreDocId && String(dt.id) === String(matchedRawTeacher.firestoreDocId)) return true;
+    if (targetName && String(dt.name || '').trim().toLowerCase() === targetName) return true;
+    if (targetEmail && String(dt.email || '').trim().toLowerCase() === targetEmail) return true;
+    return false;
+  });
+
+  // 3. If still not in `schema.teachers`, auto-create from matchedRawTeacher or provided info
+  if (!matchedDbTeacher && (matchedRawTeacher || targetName || tidStr)) {
+    const src = matchedRawTeacher || {};
+    const newUuid = (tidStr && UUID_REGEX.test(tidStr))
+      ? tidStr
+      : (candidateDetUuid2 || candidateDetUuid1 || toDeterministicUuid(`tch_${schoolId}_${targetName || tidStr || Date.now()}`));
+    const finalName = src.name || teacherName || `Mwalimu #${tidStr}`;
+    try {
+      const [inserted] = await db.insert(schema.teachers).values({
+        id: newUuid,
+        schoolId,
+        name: finalName,
+        gender: src.gender || 'Male',
+        schoolRole: src.schoolRole || src.school_role || 'Subject Teacher',
+        initial: src.initial || 'TR',
+        phone: src.phone || '',
+        email: src.email || teacherEmail || '',
+        passportPhoto: src.passportPhoto || src.passport_photo || null,
+        subjects: Array.isArray(src.subjects) ? src.subjects : [],
+        teachingStreams: Array.isArray(src.teachingStreams) ? src.teachingStreams : [],
+        color: src.color || '#1d4ed8',
+        maxPeriodsPerWeek: Number(src.maxPeriodsPerWeek || 20),
+        excludeInvigilation: Boolean(src.excludeInvigilation),
+        hasBiometric: Boolean(src.hasBiometric || src.fingerprintEnrolled),
+        pinCode: src.pinCode || null,
+        fingerprintTemplate: src.fingerprintTemplate || null,
+      } as any).onConflictDoUpdate({
+        target: schema.teachers.id,
+        set: {
+          name: finalName,
+        }
+      }).returning();
+      matchedDbTeacher = inserted;
+    } catch (insertErr) {
+      console.warn('[resolveTeacherRecord] Auto-upsert fallback warning:', insertErr);
+    }
+  }
+
+  return {
+    schoolId,
+    teacher: matchedDbTeacher || null,
+    rawTeacher: matchedRawTeacher || null,
+    schoolDataRow,
+    rawTeachers,
+  };
+}
+
+app.post('/api/verify-teacher', async (req, res) => {
+  const now = new Date();
+  const { 
+    teacherId, 
+    teacherName,
+    pinCode, 
+    fingerprintHash, 
+    schoolId: rawSchoolId, 
+    monitorId, 
+    className, 
+    stream,
+    subject, 
+    action, 
+    method,
+    deviceId,
+    mainTopic,
+    subTopic,
+    presentCount,
+    absentCount,
+    sickCount,
+    permittedCount,
+    periodName,
+    term,
+    academicWeek
+  } = req.body;
+
+  try {
+    const { schoolId, teacher, rawTeacher } = await resolveTeacherRecord(rawSchoolId, teacherId, teacherName);
+    if (!teacher) return res.status(404).json({ error: 'Mwalimu hajapatikana (Teacher not found)' });
+
+    const verifyPinMatch = async (inputPin: any, storedPin?: string | null) => {
+      if (!inputPin) return false;
+      const pinStr = String(inputPin).trim();
+      if (!storedPin) {
+        // Allow default school PIN 1234 if teacher hasn't set a custom PIN yet
+        return pinStr === '1234';
+      }
+      if (storedPin === pinStr) return true;
+      try {
+        return await bcrypt.compare(pinStr, storedPin);
+      } catch {
+        return false;
+      }
+    };
+
+    let verified = false;
+    const storedPin = teacher.pinCode || rawTeacher?.pinCode || null;
+    const storedTemplate = teacher.fingerprintTemplate || rawTeacher?.fingerprintTemplate || null;
+    const hasBio = Boolean(teacher.hasBiometric || rawTeacher?.hasBiometric || rawTeacher?.fingerprintEnrolled || storedTemplate);
+    
+    // 1. Biometric Check (USB Scanner)
+    if (method === 'usb_scanner' && fingerprintHash) {
+      if (storedTemplate === fingerprintHash || hasBio) {
+        verified = true;
+      } else if (await verifyPinMatch(pinCode, storedPin)) {
+        verified = true;
+      }
+    } 
+    // 2. Biometric Check (Laptop Scanner / WebAuthn)
+    else if (method === 'laptop_scanner' && fingerprintHash) {
+      if (hasBio || await verifyPinMatch(pinCode, storedPin)) {
+        verified = true;
+      }
+    }
+    // 3. PIN Check (Phone Mode)
+    else if (pinCode) {
+      if (await verifyPinMatch(pinCode, storedPin)) {
+        verified = true;
+      }
+    }
+
+    if (!verified) return res.status(401).json({ error: 'Uthibitisho umeshindwa. Hakikisha PIN au Kidole kimesajiliwa.' });
+
+    const resolvedTeacherId = String(teacher.id);
+    const todayDate = now.toISOString().split('T')[0];
+
+    if (action === 'in') {
+      const [journal] = await db.insert(schema.classJournals).values({
+        id: crypto.randomUUID(),
+        schoolId,
+        teacherId: resolvedTeacherId,
+        teacherName: teacher.name,
+        monitorId: monitorId || 'Unknown',
+        className: className || 'Unknown',
+        stream: stream || 'STREAM A',
+        subject: subject || 'General',
+        mainTopic: mainTopic || null,
+        subTopic: subTopic || null,
+        timeIn: now,
+        method: method || 'phone_pin',
+        presentCount: Number(presentCount || 0),
+        absentCount: Number(absentCount || 0),
+        sickCount: Number(sickCount || 0),
+        permittedCount: Number(permittedCount || 0),
+        periodName: periodName || null,
+        date: todayDate,
+        term: term || 'Term 1',
+        academicWeek: Number(academicWeek || 1),
+        isOffline: false
+      }).returning();
+      
+      const enrichedJournal = {
+        ...toDualCaseRow(schema.classJournals, journal),
+        teacher_name: teacher.name,
+        teacherName: teacher.name,
+      };
+
+      return res.json({ 
+        success: true, 
+        journal: enrichedJournal, 
+        teacher,
+        message: `Mwalimu ${teacher.name} ameingia saa ${now.toLocaleTimeString()}`
+      });
+    } else {
+      // Find the last open entry for this teacher/class
+      const [existing] = await db.select()
+        .from(schema.classJournals)
+        .where(and(
+          eq(schema.classJournals.teacherId, resolvedTeacherId),
+          eq(schema.classJournals.className, className),
+          sql`${schema.classJournals.timeOut} IS NULL`
+        ))
+        .orderBy(desc(schema.classJournals.timeIn))
+        .limit(1);
+
+      if (existing) {
+        const [updated] = await db.update(schema.classJournals)
+          .set({ 
+            timeOut: now,
+            presentCount: Number(presentCount || existing.presentCount || 0),
+            absentCount: Number(absentCount || existing.absentCount || 0),
+            sickCount: Number(sickCount || existing.sickCount || 0),
+            permittedCount: Number(permittedCount || existing.permittedCount || 0)
+          })
+          .where(eq(schema.classJournals.id, existing.id))
+          .returning();
+          
+        return res.json({ 
+          success: true, 
+          journal: {
+            ...toDualCaseRow(schema.classJournals, updated),
+            teacher_name: teacher.name,
+            teacherName: teacher.name,
+          }, 
+          teacher,
+          message: `Mwalimu ${teacher.name} ametoka saa ${now.toLocaleTimeString()}`
+        });
+      } else {
+        // Auto-create an entry if teacher forgot to "Ingia"
+        const [journal] = await db.insert(schema.classJournals).values({
+          id: crypto.randomUUID(),
+          schoolId,
+          teacherId: resolvedTeacherId,
+          teacherName: teacher.name,
+          monitorId: monitorId || 'Unknown',
+          className: className || 'Unknown',
+          stream: stream || 'STREAM A',
+          subject: subject || 'General',
+          mainTopic: mainTopic || null,
+          subTopic: subTopic || null,
+          timeIn: new Date(now.getTime() - 40 * 60000), // Default 40 mins ago
+          timeOut: now,
+          method: method || 'phone_pin',
+          presentCount: Number(presentCount || 0),
+          absentCount: Number(absentCount || 0),
+          sickCount: Number(sickCount || 0),
+          permittedCount: Number(permittedCount || 0),
+          periodName: periodName || null,
+          date: todayDate,
+          isOffline: false
+        }).returning();
+        
+        return res.json({ 
+          success: true, 
+          journal: {
+            ...toDualCaseRow(schema.classJournals, journal),
+            teacher_name: teacher.name,
+            teacherName: teacher.name,
+          }, 
+          teacher,
+          message: `Mwalimu ${teacher.name} ametoka saa ${now.toLocaleTimeString()} (Ingia ilirekodiwa kiotomatiki)`
+        });
+      }
+    }
+  } catch (err: any) {
+    console.error('Verify error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// SYNC FAILED LOGS ENDPOINT
+app.post('/api/sync-failed-logs', async (req, res) => {
+  const { 
+    teacherId, 
+    reason, 
+    timestamp, 
+    method, 
+    schoolId: rawSchoolId, 
+    monitorId, 
+    className, 
+    subject, 
+    action, 
+    deviceId, 
+    topic 
+  } = req.body;
+
+  const schoolId = await ensureSchoolExists(rawSchoolId);
+
+  try {
+    // We log these failures to activity_logs for auditing
+    await db.insert(schema.activityLogs).values({
+      id: crypto.randomUUID(),
+      schoolId,
+      userId: String(monitorId || 'SYSTEM'),
+      action: `FAILED_VERIFICATION_${(action || 'UNKNOWN').toUpperCase()}`,
+      description: JSON.stringify({
+        teacherId,
+        method,
+        reason,
+        clientTimestamp: timestamp,
+        className,
+        subject,
+        deviceId,
+        topic
+      }),
+      timestamp: new Date().toISOString(),
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('Sync log error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+app.get('/api/classes/monitor', async (req, res) => {
+  const { schoolId: rawSchoolId, monitorId, className, stream } = req.query;
+  if (!rawSchoolId) return res.status(400).json({ error: 'Vigezo vimepungua (Missing parameters)' });
+  
+  const schoolId = await ensureSchoolExists(rawSchoolId);
+
+  try {
+    const allClasses = await db.select().from(schema.classes).where(eq(schema.classes.schoolId, schoolId));
+
+    // 1. If explicit className & stream requested (e.g. Admin/Teacher switching class in Monitor Portal)
+    if (className) {
+      const matchedByName = allClasses.find(c =>
+        c.name === String(className) && (!stream || c.stream === String(stream))
+      );
+      if (matchedByName) {
+        return res.json(toDualCaseRow(schema.classes, matchedByName));
+      }
+      return res.json({
+        id: `cls_${schoolId}_${className}_${stream || 'A'}`,
+        schoolId,
+        name: String(className),
+        stream: String(stream || 'A'),
+        monitorId: null,
+        monitressId: null,
+      });
+    }
+
+    // 2. Look up by monitorId or monitressId
+    if (monitorId) {
+      const assignedClass = allClasses.find(c =>
+        c.monitorId === String(monitorId) || c.monitressId === String(monitorId)
+      );
+      if (assignedClass) {
+        return res.json(toDualCaseRow(schema.classes, assignedClass));
+      }
+    }
+
+    // 3. If demo monitor user ('usr_monitor') or no explicit assignment yet, return first class if available
+    if (monitorId === 'usr_monitor' && allClasses.length > 0) {
+      return res.json(toDualCaseRow(schema.classes, allClasses[0]));
+    }
+
+    return res.status(404).json({
+      error: 'Monitor hajapangiwa darasa lolote (Monitor not assigned to any class)',
+      classes: allClasses.map(c => toDualCaseRow(schema.classes, c))
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Server error' });
+  }
+});
+
+app.get('/api/classes/all-monitors', async (req, res) => {
+  const { schoolId: rawSchoolId } = req.query;
+  const schoolId = await ensureSchoolExists(rawSchoolId);
+  try {
+    const allClasses = await db.select().from(schema.classes).where(eq(schema.classes.schoolId, schoolId));
+    const schoolUsers = await db.select().from(schema.users).where(eq(schema.users.schoolId, schoolId)).catch(() => []);
+    const userMap = new Map<string, string>();
+    schoolUsers.forEach((u: any) => {
+      if (u.id && u.fullName) {
+        userMap.set(String(u.id), String(u.fullName).replace(/\s*\((Monitor|Monitress)\s*-.*\)$/i, '').trim());
+      }
+    });
+    res.json({
+      classes: allClasses.map(c => {
+        const dual = toDualCaseRow(schema.classes, c);
+        return {
+          ...dual,
+          monitorName: c.monitorId ? userMap.get(String(c.monitorId)) || null : null,
+          monitressName: c.monitressId ? userMap.get(String(c.monitressId)) || null : null
+        };
+      })
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+app.post('/api/sync-journals', async (req, res) => {
+  const { journals, schoolId: rawSchoolId } = req.body;
+  if (!Array.isArray(journals)) return res.status(400).json({ error: 'Invalid data' });
+  
+  const schoolId = await ensureSchoolExists(rawSchoolId);
+  const results = [];
+  
+  for (const j of journals) {
+    try {
+      const [inserted] = await db.insert(schema.classJournals).values({
+        id: j.id || crypto.randomUUID(),
+        schoolId,
+        teacherId: j.teacherId,
+        teacherName: j.teacherName,
+        monitorId: j.monitorId,
+        className: j.className,
+        stream: j.stream || 'A',
+        subject: j.subject,
+        mainTopic: j.mainTopic,
+        subTopic: j.subTopic,
+        timeIn: j.timeIn ? new Date(j.timeIn) : new Date(),
+        timeOut: j.timeOut ? new Date(j.timeOut) : null,
+        method: j.method,
+        presentCount: Number(j.presentCount || 0),
+        absentCount: Number(j.absentCount || 0),
+        sickCount: Number(j.sickCount || 0),
+        permittedCount: Number(j.permittedCount || 0),
+        periodName: j.periodName,
+        date: j.date || (j.timeIn ? new Date(j.timeIn).toISOString().split('T')[0] : null),
+        isOffline: true
+      } as any).onConflictDoNothing().returning();
+      if (inserted) results.push(inserted);
+    } catch (e) {
+      console.warn('Sync row error:', e);
+    }
+  }
+  
+  res.json({ success: true, count: results.length });
+});
+
+app.get('/api/teacher-biometric/:id', async (req, res) => {
+  const { id } = req.params;
+  const { schoolId: rawSchoolId, name, email } = req.query;
+  try {
+    const { teacher, rawTeacher } = await resolveTeacherRecord(
+      rawSchoolId,
+      id,
+      name ? String(name) : undefined,
+      email ? String(email) : undefined
+    );
+    if (!teacher && !rawTeacher) {
+      return res.status(404).json({ error: 'Mwalimu hajapatikana' });
+    }
+    const resolved = teacher || rawTeacher;
+    res.json({ 
+      hasBiometric: Boolean(teacher?.hasBiometric || rawTeacher?.hasBiometric || rawTeacher?.fingerprintEnrolled),
+      hasPin: Boolean(teacher?.pinCode || rawTeacher?.pinCode),
+      fingerprintTemplate: teacher?.fingerprintTemplate || rawTeacher?.fingerprintTemplate || '',
+      name: resolved.name,
+      id: teacher?.id || String(rawTeacher?.id || id),
+      numericId: rawTeacher?.id || id
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/register-biometric', async (req, res) => {
+  const { teacherId, teacherName, teacherEmail, schoolId: rawSchoolId, pinCode, fingerprintTemplate } = req.body;
+  try {
+    const { schoolId, teacher, schoolDataRow, rawTeachers } = await resolveTeacherRecord(
+      rawSchoolId,
+      teacherId,
+      teacherName,
+      teacherEmail
+    );
+    if (!teacher) {
+      return res.status(404).json({ error: 'Mwalimu hajapatikana kwenye database' });
+    }
+
+    const finalTemplate = fingerprintTemplate || teacher.fingerprintTemplate || `BIO_FP_${teacher.id}_${Date.now()}`;
+    const updateData: any = {
+      hasBiometric: true,
+      fingerprintTemplate: finalTemplate,
+      updatedAt: new Date()
+    };
+    
+    let hashedPin = teacher.pinCode || null;
+    if (pinCode && String(pinCode).trim().length >= 4) {
+      hashedPin = await bcrypt.hash(String(pinCode).trim(), 10);
+      updateData.pinCode = hashedPin;
+    }
+    
+    await db.update(schema.teachers)
+      .set(updateData)
+      .where(eq(schema.teachers.id, teacher.id));
+
+    // Also update school_data JSONB so AppData & Biometric Kiosk stay in sync
+    if (schoolDataRow && Array.isArray(rawTeachers) && rawTeachers.length > 0) {
+      const tidStr = String(teacherId ?? '').trim();
+      const tNameLower = String(teacher.name || teacherName || '').trim().toLowerCase();
+      const updatedTeachers = rawTeachers.map((rt: any) => {
+        if (!rt) return rt;
+        const isMatch =
+          String(rt.id) === tidStr ||
+          String(rt.firestoreDocId || '') === String(teacher.id) ||
+          (tNameLower && String(rt.name || '').trim().toLowerCase() === tNameLower);
+        if (isMatch) {
+          return {
+            ...rt,
+            firestoreDocId: teacher.id,
+            hasBiometric: true,
+            fingerprintEnrolled: true,
+            fingerprintTemplate: finalTemplate,
+            ...(hashedPin ? { pinCode: hashedPin } : {})
+          };
+        }
+        return rt;
+      });
+      await db.update(schema.schoolData)
+        .set({
+          teachers: updatedTeachers,
+          updatedAt: new Date()
+        })
+        .where(eq(schema.schoolData.id, schoolId));
+    }
+      
+    res.json({
+      success: true,
+      message: 'Biometrik na PIN ya Mwalimu imesajiliwa kikamilifu!',
+      teacher: {
+        id: teacher.id,
+        name: teacher.name,
+        hasBiometric: true,
+        fingerprintEnrolled: true,
+        fingerprintTemplate: finalTemplate,
+        pinCode: hashedPin
+      }
+    });
+  } catch (err: any) {
+    console.error('[register-biometric] Error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/classes/:id/monitors', async (req, res) => {
+  const { id } = req.params;
+  const { monitorId, monitressId } = req.body;
+  try {
+    const [updated] = await db.update(schema.classes)
+      .set({ 
+        monitorId: monitorId || null, 
+        monitressId: monitressId || null,
+        updatedAt: new Date()
+      })
+      .where(eq(schema.classes.id, id))
+      .returning();
+    
+    // Also update user roles if they are set
+    if (monitorId && UUID_REGEX.test(String(monitorId))) {
+      await db.update(schema.users).set({ role: 'MONITOR' }).where(eq(schema.users.id, monitorId)).catch(() => {});
+    }
+    if (monitressId && UUID_REGEX.test(String(monitressId))) {
+      await db.update(schema.users).set({ role: 'MONITOR' }).where(eq(schema.users.id, monitressId)).catch(() => {});
+    }
+
+    res.json({ success: true, class: toDualCaseRow(schema.classes, updated) });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/classes/:id/monitors', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const [cls] = await db.select().from(schema.classes).where(eq(schema.classes.id, id));
+    if (!cls) return res.status(404).json({ error: 'Class not found' });
+    res.json({ 
+      monitorId: cls.monitorId,
+      monitressId: cls.monitressId
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post('/api/classes/find-and-update-monitors', async (req, res) => {
+  const { className, stream, monitorId, monitressId, monitorName, monitressName, schoolId: rawSchoolId } = req.body;
+  const schoolId = await ensureSchoolExists(rawSchoolId);
+  try {
+    // Helper to ensure Monitor/Monitress exists in `users` table so they can log in
+    const ensureMonitorUser = async (mId: string | null, mName?: string, genderLabel?: string) => {
+      if (!mId) return null;
+      const cleanId = UUID_REGEX.test(String(mId)) ? String(mId) : toDeterministicUuid(`usr_mon_${schoolId}_${mId}`);
+      const existingUsers = await db.select().from(schema.users).where(eq(schema.users.id, cleanId)).limit(1);
+      if (existingUsers.length > 0) {
+        await db.update(schema.users).set({ role: 'MONITOR' }).where(eq(schema.users.id, cleanId)).catch(() => {});
+        return cleanId;
+      }
+      if (mName) {
+        const slug = mName.toLowerCase().replace(/[^a-z0-9]/g, '.').replace(/\.+/g, '.').replace(/^\.|\.$/g, '') || 'monitor';
+        const classSlug = String(className || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const streamSlug = String(stream || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const email = `${slug}.${classSlug}.${streamSlug}@monitor.school.ac.tz`;
+        const hashedPassword = await bcrypt.hash('123456', 10);
+        await db.insert(schema.users).values({
+          id: cleanId,
+          schoolId,
+          email,
+          passwordHash: hashedPassword,
+          fullName: `${mName} (${genderLabel || 'Monitor'} - ${className} ${stream})`,
+          role: 'MONITOR',
+        } as any).onConflictDoUpdate({
+          target: schema.users.id,
+          set: { role: 'MONITOR', fullName: `${mName} (${genderLabel || 'Monitor'} - ${className} ${stream})` }
+        }).catch(() => {});
+        return cleanId;
+      }
+      return String(mId);
+    };
+
+    const resolvedMonitorId = await ensureMonitorUser(monitorId || null, monitorName, 'Monitor');
+    const resolvedMonitressId = await ensureMonitorUser(monitressId || null, monitressName, 'Monitress');
+
+    const [existing] = await db.select()
+      .from(schema.classes)
+      .where(and(
+        eq(schema.classes.schoolId, schoolId),
+        eq(schema.classes.name, className),
+        eq(schema.classes.stream, stream)
+      ))
+      .limit(1);
+
+    if (existing) {
+      const [updated] = await db.update(schema.classes)
+        .set({ 
+          monitorId: resolvedMonitorId, 
+          monitressId: resolvedMonitressId,
+          updatedAt: new Date()
+        })
+        .where(eq(schema.classes.id, existing.id))
+        .returning();
+
+      res.json({
+        success: true,
+        class: {
+          ...toDualCaseRow(schema.classes, updated),
+          monitorName: monitorName || null,
+          monitressName: monitressName || null
+        }
+      });
+    } else {
+      const [inserted] = await db.insert(schema.classes).values({
+        id: crypto.randomUUID(),
+        schoolId,
+        name: className,
+        stream: stream,
+        monitorId: resolvedMonitorId,
+        monitressId: resolvedMonitressId,
+        level: 'CSEE'
+      }).returning();
+
+      res.json({
+        success: true,
+        class: {
+          ...toDualCaseRow(schema.classes, inserted),
+          monitorName: monitorName || null,
+          monitressName: monitressName || null
+        }
+      });
+    }
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ============================================================================
+// JOINT EXAMINATION RESULTS MODULE (MITIHANI YA PAMOJA YA SHULE 2 AU ZAIDI)
+// ============================================================================
+
+let jointExamTablesEnsured = false;
+async function ensureJointExamTables(): Promise<void> {
+  if (jointExamTablesEnsured) return;
+  try {
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS joint_exams (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        school_id uuid,
+        name text NOT NULL,
+        exam_date text NOT NULL,
+        class_name text DEFAULT 'Form 4',
+        level text DEFAULT 'CSEE',
+        subjects jsonb NOT NULL DEFAULT '[]'::jsonb,
+        status text DEFAULT 'ACTIVE',
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now()
+      );
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS joint_schools (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        joint_exam_id uuid NOT NULL REFERENCES joint_exams(id) ON DELETE CASCADE,
+        school_code text NOT NULL,
+        school_name text NOT NULL,
+        hex_color text NOT NULL DEFAULT '#1E40AF',
+        region text,
+        district text,
+        created_at timestamp DEFAULT now()
+      );
+    `);
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS joint_results (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        joint_exam_id uuid NOT NULL REFERENCES joint_exams(id) ON DELETE CASCADE,
+        joint_school_id uuid NOT NULL REFERENCES joint_schools(id) ON DELETE CASCADE,
+        student_name text NOT NULL,
+        reg_no text NOT NULL,
+        gender text DEFAULT 'M',
+        stream text DEFAULT 'A',
+        subject_marks jsonb NOT NULL DEFAULT '{}'::jsonb,
+        subject_grades jsonb DEFAULT '{}'::jsonb,
+        subjects_sat integer DEFAULT 0,
+        total_marks numeric DEFAULT '0',
+        average_score numeric DEFAULT '0',
+        overall_grade text DEFAULT 'F',
+        best_7_points integer,
+        division text DEFAULT '-',
+        school_rank integer DEFAULT 1,
+        overall_rank integer DEFAULT 1,
+        created_at timestamp DEFAULT now(),
+        updated_at timestamp DEFAULT now()
+      );
+    `);
+    jointExamTablesEnsured = true;
+  } catch (err: any) {
+    console.warn('ensureJointExamTables notice:', err?.message || err);
+  }
+}
+
+async function withJointDbRetry<T>(fn: () => Promise<T>): Promise<T> {
+  try {
+    await ensureJointExamTables();
+    return await fn();
+  } catch (err: any) {
+    jointExamTablesEnsured = false;
+    await ensureJointExamTables();
+    return await fn();
+  }
+}
+
+function isPrimaryJointExam(level?: string | null, className?: string | null): boolean {
+  const lv = String(level || '').toUpperCase();
+  const cls = String(className || '').toUpperCase();
+  return (
+    lv.includes('PRIMARY') ||
+    lv.includes('PSLE') ||
+    lv.includes('SFNA') ||
+    lv.includes('MSINGI') ||
+    cls.includes('STANDARD') ||
+    cls.includes('DARASA') ||
+    cls.includes('STD')
+  );
+}
+
+function getNectaGradeAndPoints(score: number, isPrimary = false): { grade: string; points: number } {
+  const rounded = Math.round(score);
+  if (isPrimary) {
+    // NECTA Primary School (PSLE / SFNA) Grading Scale: A (81-100), B (61-80), C (41-60), D (21-40), E (0-20)
+    if (rounded >= 81) return { grade: 'A', points: 1 };
+    if (rounded >= 61) return { grade: 'B', points: 2 };
+    if (rounded >= 41) return { grade: 'C', points: 3 };
+    if (rounded >= 21) return { grade: 'D', points: 4 };
+    return { grade: 'E', points: 5 };
+  }
+  // NECTA Secondary School (CSEE / FTNA) Grading Scale: A (75-100), B (65-74), C (45-64), D (30-44), F (0-29)
+  if (rounded >= 75) return { grade: 'A', points: 1 };
+  if (rounded >= 65) return { grade: 'B', points: 2 };
+  if (rounded >= 45) return { grade: 'C', points: 3 };
+  if (rounded >= 30) return { grade: 'D', points: 4 };
+  return { grade: 'F', points: 5 };
+}
+
+function getNectaDivisionFromPoints(
+  points: number | null,
+  subjectsSat: number,
+  totalExamSubjects: number
+): string {
+  // Division is ONLY calculated when the exam has >= 7 subjects AND the student sat >= 7 subjects
+  if (totalExamSubjects < 7 || subjectsSat < 7 || points === null) {
+    return '-';
+  }
+  if (points >= 7 && points <= 17) return 'I';
+  if (points >= 18 && points <= 21) return 'II';
+  if (points >= 22 && points <= 25) return 'III';
+  if (points >= 26 && points <= 33) return 'IV';
+  return '0';
+}
+
+async function recalculateJointExamResults(jointExamId: string) {
+  const [exam] = await db
+    .select()
+    .from(schema.jointExams)
+    .where(eq(schema.jointExams.id, jointExamId))
+    .limit(1);
+
+  if (!exam) return [];
+
+  const isPrimary = isPrimaryJointExam(exam.level, exam.className);
+
+  const examSubjects: string[] = Array.isArray(exam.subjects)
+    ? exam.subjects.map((s: any) => String(s).trim()).filter(Boolean)
+    : [];
+
+  const rows = await db
+    .select()
+    .from(schema.jointResults)
+    .where(eq(schema.jointResults.jointExamId, jointExamId));
+
+  if (rows.length === 0) return [];
+
+  // 1. Compute individual metrics (Total, Average, Subject Grades, GPA, Best 7 Points, Division)
+  const computed = rows.map((row) => {
+    const rawMarks = (row.subjectMarks && typeof row.subjectMarks === 'object')
+      ? (row.subjectMarks as Record<string, any>)
+      : {};
+    const existingGradesObj = (row.subjectGrades && typeof row.subjectGrades === 'object')
+      ? (row.subjectGrades as Record<string, any>)
+      : {};
+    const registeredSubjects: string[] = Array.isArray(existingGradesObj.__registeredSubjects)
+      ? existingGradesObj.__registeredSubjects.map((s: any) => String(s).trim()).filter(Boolean)
+      : examSubjects;
+
+    const cleanMarks: Record<string, number> = {};
+    const subjectGrades: Record<string, any> = {
+      __registeredSubjects: registeredSubjects.length > 0 ? registeredSubjects : examSubjects,
+    };
+    const subjectPointsList: number[] = [];
+
+    const baseSubjects = examSubjects.length > 0 ? examSubjects : Object.keys(rawMarks);
+    const regSet = new Set((registeredSubjects.length > 0 ? registeredSubjects : baseSubjects).map((s) => s.toUpperCase()));
+
+    for (const subj of baseSubjects) {
+      if (regSet.size > 0 && !regSet.has(subj.toUpperCase())) continue;
+      const val = rawMarks[subj];
+      if (val !== undefined && val !== null && val !== '') {
+        const num = Number(val);
+        if (!Number.isNaN(num) && num >= 0 && num <= 100) {
+          const clamped = Math.round(num * 100) / 100;
+          cleanMarks[subj] = clamped;
+          const gp = getNectaGradeAndPoints(clamped, isPrimary);
+          subjectGrades[subj] = gp.grade;
+          subjectPointsList.push(gp.points);
+        }
+      }
+    }
+
+    const subjectsSat = subjectPointsList.length;
+    const totalMarks = Object.values(cleanMarks).reduce((sum, v) => sum + v, 0);
+    const averageScore = subjectsSat > 0 ? Number((totalMarks / subjectsSat).toFixed(2)) : 0;
+    const overallGrade = subjectsSat > 0
+      ? getNectaGradeAndPoints(averageScore, isPrimary).grade
+      : (isPrimary ? 'E' : 'F');
+
+    // Best 7 subjects & Division calculation ONLY when exam has >= 7 subjects AND student sat >= 7 subjects.
+    // Below 7 subjects (< 7), the system MUST NOT calculate Division!
+    let best7Points: number | null = null;
+    if (baseSubjects.length >= 7 && subjectsSat >= 7) {
+      const sortedPoints = [...subjectPointsList].sort((a, b) => a - b);
+      best7Points = sortedPoints.slice(0, 7).reduce((sum, p) => sum + p, 0);
+    }
+
+    const division = getNectaDivisionFromPoints(best7Points, subjectsSat, baseSubjects.length);
+
+    const totalPointsAllSat = subjectPointsList.reduce((sum, p) => sum + p, 0);
+    const studentGpa =
+      baseSubjects.length >= 7 && subjectsSat >= 7 && best7Points !== null
+        ? Number((best7Points / 7).toFixed(4))
+        : subjectsSat > 0
+        ? Number((totalPointsAllSat / subjectsSat).toFixed(4))
+        : 5.0;
+    subjectGrades.__gpa = studentGpa;
+
+    return {
+      ...row,
+      cleanMarks,
+      subjectGrades,
+      registeredSubjects: subjectGrades.__registeredSubjects as string[],
+      gpa: studentGpa,
+      subjectsSat,
+      totalMarks: Number(totalMarks.toFixed(2)),
+      averageScore,
+      overallGrade,
+      best7Points,
+      division,
+      schoolRank: 1,
+      overallRank: 1,
+    };
+  });
+
+  // Helper comparator: Higher averageScore wins, then higher totalMarks, then lower best7Points / lower GPA
+  const comparePerformance = (a: typeof computed[0], b: typeof computed[0]) => {
+    if (b.averageScore !== a.averageScore) return b.averageScore - a.averageScore;
+    if (b.totalMarks !== a.totalMarks) return b.totalMarks - a.totalMarks;
+    if (a.best7Points !== null && b.best7Points !== null && a.best7Points !== b.best7Points) {
+      return a.best7Points - b.best7Points;
+    }
+    if (a.gpa !== b.gpa) return a.gpa - b.gpa;
+    return 0;
+  };
+
+  // 2. Compute Combined Overall Rank across all participating schools (Standard competition ranking 1, 2, 2, 4)
+  const overallSorted = [...computed].sort(comparePerformance);
+  for (let i = 0; i < overallSorted.length; i++) {
+    if (i > 0 && comparePerformance(overallSorted[i - 1], overallSorted[i]) === 0) {
+      overallSorted[i].overallRank = overallSorted[i - 1].overallRank;
+    } else {
+      overallSorted[i].overallRank = i + 1;
+    }
+  }
+
+  // 3. Compute Individual School Rank within each participating school
+  const bySchool = new Map<string, typeof computed>();
+  for (const item of overallSorted) {
+    const list = bySchool.get(item.jointSchoolId) || [];
+    list.push(item);
+    bySchool.set(item.jointSchoolId, list);
+  }
+
+  for (const [, schoolList] of bySchool.entries()) {
+    schoolList.sort(comparePerformance);
+    for (let i = 0; i < schoolList.length; i++) {
+      if (i > 0 && comparePerformance(schoolList[i - 1], schoolList[i]) === 0) {
+        schoolList[i].schoolRank = schoolList[i - 1].schoolRank;
+      } else {
+        schoolList[i].schoolRank = i + 1;
+      }
+    }
+  }
+
+  // 4. Persist updated calculations to Cloud SQL
+  await Promise.all(
+    overallSorted.map((item) =>
+      db
+        .update(schema.jointResults)
+        .set({
+          subjectMarks: item.cleanMarks,
+          subjectGrades: item.subjectGrades,
+          subjectsSat: item.subjectsSat,
+          totalMarks: String(item.totalMarks),
+          averageScore: String(item.averageScore),
+          overallGrade: item.overallGrade,
+          best7Points: item.best7Points,
+          division: item.division,
+          schoolRank: item.schoolRank,
+          overallRank: item.overallRank,
+          updatedAt: new Date(),
+        })
+        .where(eq(schema.jointResults.id, item.id))
+    )
+  );
+
+  return overallSorted;
+}
+
+// GET /api/joint-exams - List all Joint Exams
+app.get('/api/joint-exams', async (req, res) => {
+  try {
+    const enriched = await withJointDbRetry(async () => {
+      const exams = await db
+        .select()
+        .from(schema.jointExams)
+        .orderBy(desc(schema.jointExams.createdAt));
+
+      const allSchools = await db.select().from(schema.jointSchools);
+      const allResults = await db.select().from(schema.jointResults);
+
+      return exams.map((ex) => {
+        const schools = allSchools.filter((s) => s.jointExamId === ex.id);
+        const resultsCount = allResults.filter((r) => r.jointExamId === ex.id).length;
+        return {
+          ...ex,
+          schools,
+          schoolCount: schools.length,
+          studentCount: resultsCount,
+        };
+      });
+    });
+
+    res.json({ success: true, exams: enriched });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/joint-exams - Create a new Joint Exam with optional initial schools
+app.post('/api/joint-exams', async (req, res) => {
+  try {
+    const { schoolId, name, examDate, className, level, subjects, schools } = req.body || {};
+    if (!name || !String(name).trim()) {
+      return res.status(400).json({ error: 'Jina la mtihani wa pamoja linahitajika (Exam name is required).' });
+    }
+
+    const cleanSubjects = Array.isArray(subjects) && subjects.length > 0
+      ? subjects.map((s: any) => String(s).trim().toUpperCase()).filter(Boolean)
+      : ['CIVICS', 'HISTORY', 'GEOGRAPHY', 'KISWAHILI', 'ENGLISH', 'BIOLOGY', 'BASIC MATHEMATICS'];
+
+    const resultPayload = await withJointDbRetry(async () => {
+      let resolvedSchoolId: string | null = null;
+      if (schoolId && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(String(schoolId))) {
+        try {
+          const [existingSchool] = await db.select().from(schema.schools).where(eq(schema.schools.id, String(schoolId))).limit(1);
+          if (existingSchool) resolvedSchoolId = existingSchool.id;
+        } catch {
+          resolvedSchoolId = null;
+        }
+      }
+
+      const [createdExam] = await db
+        .insert(schema.jointExams)
+        .values({
+          schoolId: resolvedSchoolId,
+          name: String(name).trim(),
+          examDate: examDate ? String(examDate) : new Date().toISOString().split('T')[0],
+          className: className ? String(className) : 'Form 4',
+          level: level ? String(level) : 'SECONDARY - CSEE',
+          subjects: cleanSubjects,
+          status: 'ACTIVE',
+        })
+        .returning();
+
+      const createdSchools = [];
+      const initialSchoolsInput =
+        Array.isArray(schools) && schools.length > 0
+          ? schools
+          : [
+              { schoolCode: 'S0101', schoolName: 'SHULE INAYOSHIRIKI A', hexColor: '#1E40AF' },
+              { schoolCode: 'S0204', schoolName: 'SHULE INAYOSHIRIKI B', hexColor: '#047857' },
+            ];
+
+      for (const sch of initialSchoolsInput) {
+        if (sch && sch.schoolName && String(sch.schoolName).trim()) {
+          const [ins] = await db
+            .insert(schema.jointSchools)
+            .values({
+              jointExamId: createdExam.id,
+              schoolCode: String(sch.schoolCode || 'S0001').trim().toUpperCase(),
+              schoolName: String(sch.schoolName).trim(),
+              hexColor: String(sch.hexColor || '#1E40AF').trim(),
+              region: sch.region ? String(sch.region).trim() : null,
+              district: sch.district ? String(sch.district).trim() : null,
+            })
+            .returning();
+          createdSchools.push(ins);
+        }
+      }
+
+      return {
+        ...createdExam,
+        schools: createdSchools,
+        schoolCount: createdSchools.length,
+        studentCount: 0,
+      };
+    });
+
+    res.json({
+      success: true,
+      exam: resultPayload,
+    });
+  } catch (err: any) {
+    console.error('[POST /api/joint-exams] Error:', err);
+    res.status(500).json({ error: err.message || 'Imeshindwa kuanzisha mtihani wa pamoja.' });
+  }
+});
+
+// PUT /api/joint-exams/:id - Update Joint Exam metadata or subjects
+app.put('/api/joint-exams/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, examDate, className, level, subjects, status } = req.body || {};
+
+    const updatePayload: Record<string, any> = { updatedAt: new Date() };
+    if (name !== undefined) updatePayload.name = String(name).trim();
+    if (examDate !== undefined) updatePayload.examDate = String(examDate);
+    if (className !== undefined) updatePayload.className = String(className);
+    if (level !== undefined) updatePayload.level = String(level);
+    if (status !== undefined) updatePayload.status = String(status);
+    if (Array.isArray(subjects)) {
+      updatePayload.subjects = subjects.map((s: any) => String(s).trim().toUpperCase()).filter(Boolean);
+    }
+
+    const [updated] = await db
+      .update(schema.jointExams)
+      .set(updatePayload)
+      .where(eq(schema.jointExams.id, id))
+      .returning();
+
+    if (!updated) {
+      return res.status(404).json({ error: 'Mtihani haujapatikana.' });
+    }
+
+    await recalculateJointExamResults(id);
+    res.json({ success: true, exam: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/joint-exams/:id - Delete a Joint Exam
+app.delete('/api/joint-exams/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await db.delete(schema.jointExams).where(eq(schema.jointExams.id, id));
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/joint-exams/:id/full - Get full exam details, participating schools, and ranked results
+app.get('/api/joint-exams/:id/full', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [exam] = await db
+      .select()
+      .from(schema.jointExams)
+      .where(eq(schema.jointExams.id, id))
+      .limit(1);
+
+    if (!exam) {
+      return res.status(404).json({ error: 'Mtihani wa pamoja haujapatikana.' });
+    }
+
+    const examSubjects: string[] = Array.isArray(exam.subjects)
+      ? exam.subjects.map((s: any) => String(s).trim()).filter(Boolean)
+      : [];
+
+    const schools = await db
+      .select()
+      .from(schema.jointSchools)
+      .where(eq(schema.jointSchools.jointExamId, id))
+      .orderBy(asc(schema.jointSchools.schoolCode));
+
+    const results = await db
+      .select()
+      .from(schema.jointResults)
+      .where(eq(schema.jointResults.jointExamId, id))
+      .orderBy(asc(schema.jointResults.overallRank));
+
+    const schoolMap = new Map(schools.map((s) => [s.id, s]));
+
+    const enrichedResults = results.map((r) => {
+      const sch = schoolMap.get(r.jointSchoolId);
+      const gradesObj = (r.subjectGrades && typeof r.subjectGrades === 'object') ? (r.subjectGrades as Record<string, any>) : {};
+      const regSubjs = Array.isArray(gradesObj.__registeredSubjects) && gradesObj.__registeredSubjects.length > 0
+        ? gradesObj.__registeredSubjects
+        : examSubjects;
+      const gpa = typeof gradesObj.__gpa === 'number' ? gradesObj.__gpa : undefined;
+      return {
+        ...r,
+        registeredSubjects: regSubjs,
+        gpa,
+        totalMarks: Number(r.totalMarks || 0),
+        averageScore: Number(r.averageScore || 0),
+        schoolName: sch?.schoolName || 'Unknown School',
+        schoolCode: sch?.schoolCode || 'N/A',
+        hexColor: sch?.hexColor || '#1E40AF',
+      };
+    });
+
+    res.json({
+      success: true,
+      exam,
+      schools,
+      results: enrichedResults,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/joint-exams/:id/schools - Add a participating school
+app.post('/api/joint-exams/:id/schools', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { schoolCode, schoolName, hexColor, region, district } = req.body || {};
+
+    if (!schoolName || !String(schoolName).trim()) {
+      return res.status(400).json({ error: 'Jina la shule linahitajika.' });
+    }
+
+    const [school] = await db
+      .insert(schema.jointSchools)
+      .values({
+        jointExamId: id,
+        schoolCode: String(schoolCode || 'S0001').trim().toUpperCase(),
+        schoolName: String(schoolName).trim(),
+        hexColor: String(hexColor || '#1E40AF').trim(),
+        region: region ? String(region).trim() : null,
+        district: district ? String(district).trim() : null,
+      })
+      .returning();
+
+    res.json({ success: true, school });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/joint-exams/:id/schools/:schoolId - Update participating school info / hexColor
+app.put('/api/joint-exams/:id/schools/:schoolId', async (req, res) => {
+  try {
+    const { schoolId } = req.params;
+    const { schoolCode, schoolName, hexColor, region, district } = req.body || {};
+
+    const updateData: Record<string, any> = {};
+    if (schoolCode !== undefined) updateData.schoolCode = String(schoolCode).trim().toUpperCase();
+    if (schoolName !== undefined) updateData.schoolName = String(schoolName).trim();
+    if (hexColor !== undefined) updateData.hexColor = String(hexColor).trim();
+    if (region !== undefined) updateData.region = region ? String(region).trim() : null;
+    if (district !== undefined) updateData.district = district ? String(district).trim() : null;
+
+    const [updated] = await db
+      .update(schema.jointSchools)
+      .set(updateData)
+      .where(eq(schema.jointSchools.id, schoolId))
+      .returning();
+
+    res.json({ success: true, school: updated });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/joint-exams/:id/schools/:schoolId - Delete participating school and recalculate
+app.delete('/api/joint-exams/:id/schools/:schoolId', async (req, res) => {
+  try {
+    const { id, schoolId } = req.params;
+    await db.delete(schema.jointSchools).where(eq(schema.jointSchools.id, schoolId));
+    await recalculateJointExamResults(id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/joint-exams/:id/results - Save/Upsert student registrations & marks for a participating school (0-100 validation)
+app.post('/api/joint-exams/:id/results', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { jointSchoolId, entries } = req.body || {};
+
+    const rowsToSave = Array.isArray(entries) ? entries : [req.body];
+    if (rowsToSave.length === 0) {
+      return res.status(400).json({ error: 'Hakuna wanafunzi au alama zilizotumwa.' });
+    }
+
+    // Validate all marks are within 0 - 100
+    for (const entry of rowsToSave) {
+      if (!entry.studentName || !String(entry.studentName).trim()) {
+        return res.status(400).json({ error: 'Kila mwanafunzi lazima awe na jina kamili.' });
+      }
+      const targetSchoolId = entry.jointSchoolId || jointSchoolId;
+      if (!targetSchoolId) {
+        return res.status(400).json({ error: 'Tafadhali chagua shule inayoshiriki kwanza (Select participating school).' });
+      }
+      const marksObj = entry.subjectMarks || {};
+      for (const [subj, rawScore] of Object.entries(marksObj)) {
+        if (rawScore !== '' && rawScore !== null && rawScore !== undefined) {
+          const scoreNum = Number(rawScore);
+          if (Number.isNaN(scoreNum) || scoreNum < 0 || scoreNum > 100) {
+            return res.status(400).json({
+              error: `Alama batili kwenye somo la ${subj} kwa ${entry.studentName}: (${rawScore}). Alama lazima iwe kati ya 0 na 100.`,
+            });
+          }
+        }
+      }
+    }
+
+    const existingResults = await db
+      .select()
+      .from(schema.jointResults)
+      .where(eq(schema.jointResults.jointExamId, id));
+
+    for (const entry of rowsToSave) {
+      const targetSchoolId = String(entry.jointSchoolId || jointSchoolId).trim();
+      const cleanName = String(entry.studentName).trim();
+      const cleanRegNo = String(entry.regNo || `CAND-${Math.floor(1000 + Math.random() * 9000)}`).trim();
+      const cleanGender = String(entry.gender || 'M').trim().toUpperCase().startsWith('F') ? 'F' : 'M';
+      const cleanStream = String(entry.stream || 'A').trim();
+
+      const validMarks: Record<string, number> = {};
+      if (entry.subjectMarks && typeof entry.subjectMarks === 'object') {
+        for (const [k, v] of Object.entries(entry.subjectMarks)) {
+          if (v !== '' && v !== null && v !== undefined) {
+            const n = Number(v);
+            if (!Number.isNaN(n) && n >= 0 && n <= 100) {
+              validMarks[k] = Math.round(n * 100) / 100;
+            }
+          }
+        }
+      }
+
+      const match = existingResults.find(
+        (r) =>
+          (entry.id && r.id === entry.id) ||
+          (r.jointSchoolId === targetSchoolId &&
+            r.regNo.toLowerCase() === cleanRegNo.toLowerCase() &&
+            r.studentName.toLowerCase() === cleanName.toLowerCase())
+      );
+
+      if (match) {
+        const prevMarks = (typeof match.subjectMarks === 'object' && match.subjectMarks) ? (match.subjectMarks as Record<string, number>) : {};
+        const mergedMarks = entry.replaceMarks ? validMarks : { ...prevMarks, ...validMarks };
+        const prevGrades = (typeof match.subjectGrades === 'object' && match.subjectGrades) ? (match.subjectGrades as Record<string, any>) : {};
+        const nextRegSubjects = Array.isArray(entry.registeredSubjects) && entry.registeredSubjects.length > 0
+          ? entry.registeredSubjects
+          : prevGrades.__registeredSubjects;
+
+        await db
+          .update(schema.jointResults)
+          .set({
+            studentName: cleanName,
+            regNo: cleanRegNo,
+            gender: cleanGender,
+            stream: cleanStream,
+            subjectMarks: mergedMarks,
+            subjectGrades: nextRegSubjects ? { ...prevGrades, __registeredSubjects: nextRegSubjects } : prevGrades,
+            updatedAt: new Date(),
+          })
+          .where(eq(schema.jointResults.id, match.id));
+      } else {
+        const initGrades: Record<string, any> = {};
+        if (Array.isArray(entry.registeredSubjects) && entry.registeredSubjects.length > 0) {
+          initGrades.__registeredSubjects = entry.registeredSubjects;
+        }
+        await db.insert(schema.jointResults).values({
+          jointExamId: id,
+          jointSchoolId: targetSchoolId,
+          studentName: cleanName,
+          regNo: cleanRegNo,
+          gender: cleanGender,
+          stream: cleanStream,
+          subjectMarks: validMarks,
+          subjectGrades: initGrades,
+        });
+      }
+    }
+
+    await recalculateJointExamResults(id);
+
+    const schools = await db
+      .select()
+      .from(schema.jointSchools)
+      .where(eq(schema.jointSchools.jointExamId, id))
+      .orderBy(asc(schema.jointSchools.schoolCode));
+
+    const updatedResults = await db
+      .select()
+      .from(schema.jointResults)
+      .where(eq(schema.jointResults.jointExamId, id))
+      .orderBy(asc(schema.jointResults.overallRank));
+
+    const schoolMap = new Map(schools.map((s) => [s.id, s]));
+    const enrichedResults = updatedResults.map((r) => {
+      const sch = schoolMap.get(r.jointSchoolId);
+      const gradesObj = (r.subjectGrades && typeof r.subjectGrades === 'object') ? (r.subjectGrades as Record<string, any>) : {};
+      return {
+        ...r,
+        registeredSubjects: Array.isArray(gradesObj.__registeredSubjects) ? gradesObj.__registeredSubjects : undefined,
+        gpa: typeof gradesObj.__gpa === 'number' ? gradesObj.__gpa : undefined,
+        totalMarks: Number(r.totalMarks || 0),
+        averageScore: Number(r.averageScore || 0),
+        schoolName: sch?.schoolName || 'Unknown School',
+        schoolCode: sch?.schoolCode || 'N/A',
+        hexColor: sch?.hexColor || '#1E40AF',
+      };
+    });
+
+    res.json({
+      success: true,
+      results: enrichedResults,
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/joint-exams/:id/results/:resultId - Delete a student result and recalculate ranks
+app.delete('/api/joint-exams/:id/results/:resultId', async (req, res) => {
+  try {
+    const { id, resultId } = req.params;
+    await db.delete(schema.jointResults).where(eq(schema.jointResults.id, resultId));
+    await recalculateJointExamResults(id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/joint-exams/:id/recalculate - Trigger manual recalculation
+app.post('/api/joint-exams/:id/recalculate', async (req, res) => {
+  try {
+    const { id } = req.params;
+    await recalculateJointExamResults(id);
+    res.json({ success: true });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Google Search Console Verification Routes
+app.get('/googled0d16ab4850e7113.html', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.status(200).send('google-site-verification: googled0d16ab4850e7113.html');
+});
+
+app.get('/google:code.html', (req, res) => {
+  const code = req.params.code;
+  res.setHeader('Content-Type', 'text/plain');
+  res.status(200).send(`google-site-verification: google${code}.html`);
+});
+
+app.get('/robots.txt', (_req, res) => {
+  res.setHeader('Content-Type', 'text/plain');
+  res.status(200).send('User-agent: *\nAllow: /\nSitemap: https://habyedupro.co.tz/sitemap.xml\n');
+});
+
+app.get('/sitemap.xml', (_req, res) => {
+  res.setHeader('Content-Type', 'application/xml');
+  res.status(200).send(`<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://habyedupro.co.tz/</loc>
+    <lastmod>${new Date().toISOString().split('T')[0]}</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>`);
+});
+
 async function startServer() {
   const isDevLifecycle = process.env.npm_lifecycle_event === 'dev' || process.argv.includes('--port');
   const isProduction = process.env.NODE_ENV === 'production' || !isDevLifecycle;

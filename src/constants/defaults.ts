@@ -109,7 +109,7 @@ export const NURSERY_SUBJECTS = NURSERY_SUBJECTS_LIST;
 export const LOWER_PRIMARY_SUBJECTS = LOWER_PRIMARY_SUBJECTS_LIST;
 export const UPPER_PRIMARY_SUBJECTS = UPPER_PRIMARY_SUBJECTS_LIST;
 export const PRIMARY_SUBJECTS = PRIMARY_SUBJECTS_LIST;
-import { SubjectRegistry } from './SubjectRegistry';
+import { SubjectRegistry } from './SubjectRegistry.ts';
 
 export const SECONDARY_SUBJECTS = SubjectRegistry.getAllNames();
 
@@ -399,38 +399,258 @@ export const TANZANIAN_TEMPLATE_STREAM_SETTINGS = [
 
 export const INITIAL_STREAM_SETTINGS: any[] = TANZANIAN_TEMPLATE_STREAM_SETTINGS;
 
-export const TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS = [
-  // Form 1 STREAM A
-  { id: 201, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 1 (08:00-08:40)', teacherId: 101, subject: 'Mathematics' },
-  { id: 202, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 2 (08:40-09:20)', teacherId: 102, subject: 'English Language' },
-  { id: 203, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 3 (09:40-10:20)', teacherId: 103, subject: 'Biology' },
-  { id: 204, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 4 (10:20-11:00)', teacherId: 104, subject: 'Geography' },
-  { id: 205, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 5 (11:20-12:00)', teacherId: 105, subject: 'Kiswahili' },
-  { id: 206, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 6 (12:00-12:40)', teacherId: 106, subject: 'Computer Studies' },
-  { id: 207, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 7 (14:00-14:40)', teacherId: 101, subject: 'Library & Private Study', activityType: 'library' as const },
+export const TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS: any[] = [
+  // ================= Form 1 STREAM A =================
+  // Monday
+  { id: 201, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 202, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 203, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 204, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 205, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 206, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 106, teacherName: 'Faraja Lyimo', subject: 'Computer Studies' },
+  { id: 207, className: 'Form 1', stream: 'STREAM A', day: 'Monday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Library & Private Study', activityType: 'library' as const },
+  // Tuesday
+  { id: 230, className: 'Form 1', stream: 'STREAM A', day: 'Tuesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 231, className: 'Form 1', stream: 'STREAM A', day: 'Tuesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 232, className: 'Form 1', stream: 'STREAM A', day: 'Tuesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 233, className: 'Form 1', stream: 'STREAM A', day: 'Tuesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 234, className: 'Form 1', stream: 'STREAM A', day: 'Tuesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 235, className: 'Form 1', stream: 'STREAM A', day: 'Tuesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 236, className: 'Form 1', stream: 'STREAM A', day: 'Tuesday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  // Wednesday
+  { id: 237, className: 'Form 1', stream: 'STREAM A', day: 'Wednesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 238, className: 'Form 1', stream: 'STREAM A', day: 'Wednesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 239, className: 'Form 1', stream: 'STREAM A', day: 'Wednesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 240, className: 'Form 1', stream: 'STREAM A', day: 'Wednesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 241, className: 'Form 1', stream: 'STREAM A', day: 'Wednesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 242, className: 'Form 1', stream: 'STREAM A', day: 'Wednesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 211, className: 'Form 1', stream: 'STREAM A', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', periodName: 'Period 7', teacherId: 108, teacherName: 'Hamisi Juma', subject: 'Sports and Games', activityType: 'sports' as const },
+  // Thursday
+  { id: 243, className: 'Form 1', stream: 'STREAM A', day: 'Thursday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 244, className: 'Form 1', stream: 'STREAM A', day: 'Thursday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 245, className: 'Form 1', stream: 'STREAM A', day: 'Thursday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 246, className: 'Form 1', stream: 'STREAM A', day: 'Thursday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 247, className: 'Form 1', stream: 'STREAM A', day: 'Thursday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 248, className: 'Form 1', stream: 'STREAM A', day: 'Thursday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 106, teacherName: 'Faraja Lyimo', subject: 'Computer Studies' },
+  { id: 249, className: 'Form 1', stream: 'STREAM A', day: 'Thursday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  // Friday
+  { id: 250, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 251, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 252, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 253, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 213, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Religion', activityType: 'religion' as const, room: 'Chapel / Mosque / Hall' },
+  { id: 222, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Weekly Test', activityType: 'weekly_test' as const, room: 'Exam Hall / Class 1A', customNote: 'Weekly evaluation test' },
+  { id: 219, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 7 (14:00-15:00)', periodName: 'Period 7', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Environmental Day', activityType: 'environmental' as const, room: 'School Grounds' },
 
-  // Form 1 STREAM B
-  { id: 208, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 1 (08:00-08:40)', teacherId: 102, subject: 'English Language' },
-  { id: 209, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 2 (08:40-09:20)', teacherId: 101, subject: 'Mathematics' },
-  { id: 210, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 3 (09:40-10:20)', teacherId: 105, subject: 'Kiswahili' },
-  
-  // Wednesday Extra-curricular (Sports & Games)
-  { id: 211, className: 'Form 1', stream: 'STREAM A', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', teacherId: 108, subject: 'Sports and Games', activityType: 'sports' as const },
-  { id: 212, className: 'Form 1', stream: 'STREAM B', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', teacherId: 108, subject: 'Sports and Games', activityType: 'sports' as const },
+  // ================= Form 1 STREAM B =================
+  // Monday
+  { id: 208, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 209, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 210, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 254, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 255, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 256, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 106, teacherName: 'Faraja Lyimo', subject: 'Computer Studies' },
+  { id: 257, className: 'Form 1', stream: 'STREAM B', day: 'Monday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  // Tuesday
+  { id: 258, className: 'Form 1', stream: 'STREAM B', day: 'Tuesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 259, className: 'Form 1', stream: 'STREAM B', day: 'Tuesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 260, className: 'Form 1', stream: 'STREAM B', day: 'Tuesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 261, className: 'Form 1', stream: 'STREAM B', day: 'Tuesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 262, className: 'Form 1', stream: 'STREAM B', day: 'Tuesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 263, className: 'Form 1', stream: 'STREAM B', day: 'Tuesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 264, className: 'Form 1', stream: 'STREAM B', day: 'Tuesday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Library & Private Study', activityType: 'library' as const },
+  // Wednesday
+  { id: 265, className: 'Form 1', stream: 'STREAM B', day: 'Wednesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 266, className: 'Form 1', stream: 'STREAM B', day: 'Wednesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 267, className: 'Form 1', stream: 'STREAM B', day: 'Wednesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 268, className: 'Form 1', stream: 'STREAM B', day: 'Wednesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 269, className: 'Form 1', stream: 'STREAM B', day: 'Wednesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 270, className: 'Form 1', stream: 'STREAM B', day: 'Wednesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 212, className: 'Form 1', stream: 'STREAM B', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', periodName: 'Period 7', teacherId: 108, teacherName: 'Hamisi Juma', subject: 'Sports and Games', activityType: 'sports' as const },
+  // Thursday
+  { id: 271, className: 'Form 1', stream: 'STREAM B', day: 'Thursday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 272, className: 'Form 1', stream: 'STREAM B', day: 'Thursday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 273, className: 'Form 1', stream: 'STREAM B', day: 'Thursday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 274, className: 'Form 1', stream: 'STREAM B', day: 'Thursday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 275, className: 'Form 1', stream: 'STREAM B', day: 'Thursday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 276, className: 'Form 1', stream: 'STREAM B', day: 'Thursday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 106, teacherName: 'Faraja Lyimo', subject: 'Computer Studies' },
+  { id: 277, className: 'Form 1', stream: 'STREAM B', day: 'Thursday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  // Friday
+  { id: 278, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 279, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Mathematics' },
+  { id: 280, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 281, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 214, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Religion', activityType: 'religion' as const, room: 'Chapel / Mosque / Hall' },
+  { id: 282, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Weekly Test', activityType: 'weekly_test' as const, room: 'Class 1B' },
+  { id: 220, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 7 (14:00-15:00)', periodName: 'Period 7', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'Debates', activityType: 'debates' as const, room: 'Main Hall' },
 
-  // Friday Extra-curricular (Religion, Environmental Day & Debates)
-  { id: 213, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 5 (11:20-12:00)', subject: 'Religion', activityType: 'religion' as const, room: 'Chapel / Mosque / Hall' },
-  { id: 214, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 5 (11:20-12:00)', subject: 'Religion', activityType: 'religion' as const, room: 'Chapel / Mosque / Hall' },
-  { id: 219, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 7 (14:00-15:00)', teacherId: 104, subject: 'Environmental Day', activityType: 'environmental' as const, room: 'School Grounds' },
-  { id: 220, className: 'Form 1', stream: 'STREAM B', day: 'Friday', period: 'Period 7 (14:00-15:00)', teacherId: 102, subject: 'Debates', activityType: 'debates' as const, room: 'Main Hall' },
+  // ================= Form 2 STREAM A =================
+  // Monday
+  { id: 215, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 216, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 283, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 284, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 285, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 286, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 287, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  // Tuesday
+  { id: 288, className: 'Form 2', stream: 'STREAM A', day: 'Tuesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 289, className: 'Form 2', stream: 'STREAM A', day: 'Tuesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 290, className: 'Form 2', stream: 'STREAM A', day: 'Tuesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 291, className: 'Form 2', stream: 'STREAM A', day: 'Tuesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 292, className: 'Form 2', stream: 'STREAM A', day: 'Tuesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 293, className: 'Form 2', stream: 'STREAM A', day: 'Tuesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 294, className: 'Form 2', stream: 'STREAM A', day: 'Tuesday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  // Wednesday
+  { id: 295, className: 'Form 2', stream: 'STREAM A', day: 'Wednesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 296, className: 'Form 2', stream: 'STREAM A', day: 'Wednesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 297, className: 'Form 2', stream: 'STREAM A', day: 'Wednesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 298, className: 'Form 2', stream: 'STREAM A', day: 'Wednesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 299, className: 'Form 2', stream: 'STREAM A', day: 'Wednesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 300, className: 'Form 2', stream: 'STREAM A', day: 'Wednesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 106, teacherName: 'Faraja Lyimo', subject: 'Computer Studies' },
+  { id: 217, className: 'Form 2', stream: 'STREAM A', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', periodName: 'Period 7', teacherId: 108, teacherName: 'Hamisi Juma', subject: 'Sports and Games', activityType: 'sports' as const },
+  // Thursday
+  { id: 301, className: 'Form 2', stream: 'STREAM A', day: 'Thursday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 302, className: 'Form 2', stream: 'STREAM A', day: 'Thursday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 303, className: 'Form 2', stream: 'STREAM A', day: 'Thursday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 304, className: 'Form 2', stream: 'STREAM A', day: 'Thursday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 305, className: 'Form 2', stream: 'STREAM A', day: 'Thursday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 306, className: 'Form 2', stream: 'STREAM A', day: 'Thursday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 307, className: 'Form 2', stream: 'STREAM A', day: 'Thursday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  // Friday
+  { id: 308, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 309, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 310, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 311, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 221, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Religion', activityType: 'religion' as const, room: 'School Hall' },
+  { id: 312, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Weekly Test', activityType: 'weekly_test' as const, room: 'Class 2A' },
+  { id: 218, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 7 (14:00-15:00)', periodName: 'Period 7', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Environmental Day', activityType: 'environmental' as const },
 
-  // Form 2 STREAM A
-  { id: 215, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 1 (08:00-08:40)', teacherId: 103, subject: 'Chemistry' },
-  { id: 216, className: 'Form 2', stream: 'STREAM A', day: 'Monday', period: 'Period 2 (08:40-09:20)', teacherId: 104, subject: 'History' },
-  { id: 217, className: 'Form 2', stream: 'STREAM A', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', teacherId: 108, subject: 'Sports and Games', activityType: 'sports' as const },
-  { id: 218, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 7 (14:00-15:00)', teacherId: 104, subject: 'Environmental Day', activityType: 'environmental' as const },
-  { id: 221, className: 'Form 2', stream: 'STREAM A', day: 'Friday', period: 'Period 5 (11:20-12:00)', subject: 'Religion', activityType: 'religion' as const, room: 'School Hall' },
-  { id: 222, className: 'Form 1', stream: 'STREAM A', day: 'Friday', period: 'Period 6 (12:00-12:40)', teacherId: 101, subject: 'Weekly Test', activityType: 'weekly_test' as const, room: 'Exam Hall / Class 1A', customNote: 'Weekly evaluation test' }
+  // ================= Form 2 STREAM B =================
+  // Monday
+  { id: 313, className: 'Form 2', stream: 'STREAM B', day: 'Monday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 314, className: 'Form 2', stream: 'STREAM B', day: 'Monday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 315, className: 'Form 2', stream: 'STREAM B', day: 'Monday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 316, className: 'Form 2', stream: 'STREAM B', day: 'Monday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 317, className: 'Form 2', stream: 'STREAM B', day: 'Monday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 318, className: 'Form 2', stream: 'STREAM B', day: 'Monday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 319, className: 'Form 2', stream: 'STREAM B', day: 'Monday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  // Tuesday
+  { id: 320, className: 'Form 2', stream: 'STREAM B', day: 'Tuesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 321, className: 'Form 2', stream: 'STREAM B', day: 'Tuesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 322, className: 'Form 2', stream: 'STREAM B', day: 'Tuesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 323, className: 'Form 2', stream: 'STREAM B', day: 'Tuesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 324, className: 'Form 2', stream: 'STREAM B', day: 'Tuesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 325, className: 'Form 2', stream: 'STREAM B', day: 'Tuesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 326, className: 'Form 2', stream: 'STREAM B', day: 'Tuesday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 106, teacherName: 'Faraja Lyimo', subject: 'Computer Studies' },
+  // Wednesday
+  { id: 327, className: 'Form 2', stream: 'STREAM B', day: 'Wednesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 328, className: 'Form 2', stream: 'STREAM B', day: 'Wednesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 329, className: 'Form 2', stream: 'STREAM B', day: 'Wednesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 330, className: 'Form 2', stream: 'STREAM B', day: 'Wednesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 331, className: 'Form 2', stream: 'STREAM B', day: 'Wednesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 332, className: 'Form 2', stream: 'STREAM B', day: 'Wednesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 333, className: 'Form 2', stream: 'STREAM B', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', periodName: 'Period 7', teacherId: 108, teacherName: 'Hamisi Juma', subject: 'Sports and Games', activityType: 'sports' as const },
+  // Thursday
+  { id: 334, className: 'Form 2', stream: 'STREAM B', day: 'Thursday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 335, className: 'Form 2', stream: 'STREAM B', day: 'Thursday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 336, className: 'Form 2', stream: 'STREAM B', day: 'Thursday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 337, className: 'Form 2', stream: 'STREAM B', day: 'Thursday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 338, className: 'Form 2', stream: 'STREAM B', day: 'Thursday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 339, className: 'Form 2', stream: 'STREAM B', day: 'Thursday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 340, className: 'Form 2', stream: 'STREAM B', day: 'Thursday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Library & Private Study', activityType: 'library' as const },
+  // Friday
+  { id: 341, className: 'Form 2', stream: 'STREAM B', day: 'Friday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 342, className: 'Form 2', stream: 'STREAM B', day: 'Friday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 343, className: 'Form 2', stream: 'STREAM B', day: 'Friday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 344, className: 'Form 2', stream: 'STREAM B', day: 'Friday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 345, className: 'Form 2', stream: 'STREAM B', day: 'Friday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Religion', activityType: 'religion' as const, room: 'School Hall' },
+  { id: 346, className: 'Form 2', stream: 'STREAM B', day: 'Friday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Weekly Test', activityType: 'weekly_test' as const, room: 'Class 2B' },
+  { id: 347, className: 'Form 2', stream: 'STREAM B', day: 'Friday', period: 'Period 7 (14:00-15:00)', periodName: 'Period 7', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'Debates', activityType: 'debates' as const, room: 'Main Hall' },
+
+  // ================= Form 3 STREAM A =================
+  // Monday
+  { id: 350, className: 'Form 3', stream: 'STREAM A', day: 'Monday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 351, className: 'Form 3', stream: 'STREAM A', day: 'Monday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 352, className: 'Form 3', stream: 'STREAM A', day: 'Monday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 353, className: 'Form 3', stream: 'STREAM A', day: 'Monday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 354, className: 'Form 3', stream: 'STREAM A', day: 'Monday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 355, className: 'Form 3', stream: 'STREAM A', day: 'Monday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 356, className: 'Form 3', stream: 'STREAM A', day: 'Monday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  // Tuesday
+  { id: 357, className: 'Form 3', stream: 'STREAM A', day: 'Tuesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 358, className: 'Form 3', stream: 'STREAM A', day: 'Tuesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 359, className: 'Form 3', stream: 'STREAM A', day: 'Tuesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 360, className: 'Form 3', stream: 'STREAM A', day: 'Tuesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 361, className: 'Form 3', stream: 'STREAM A', day: 'Tuesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 362, className: 'Form 3', stream: 'STREAM A', day: 'Tuesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 363, className: 'Form 3', stream: 'STREAM A', day: 'Tuesday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  // Wednesday
+  { id: 364, className: 'Form 3', stream: 'STREAM A', day: 'Wednesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 365, className: 'Form 3', stream: 'STREAM A', day: 'Wednesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 366, className: 'Form 3', stream: 'STREAM A', day: 'Wednesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 367, className: 'Form 3', stream: 'STREAM A', day: 'Wednesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 368, className: 'Form 3', stream: 'STREAM A', day: 'Wednesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 369, className: 'Form 3', stream: 'STREAM A', day: 'Wednesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 106, teacherName: 'Faraja Lyimo', subject: 'Computer Studies' },
+  { id: 370, className: 'Form 3', stream: 'STREAM A', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', periodName: 'Period 7', teacherId: 108, teacherName: 'Hamisi Juma', subject: 'Sports and Games', activityType: 'sports' as const },
+  // Thursday
+  { id: 371, className: 'Form 3', stream: 'STREAM A', day: 'Thursday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 372, className: 'Form 3', stream: 'STREAM A', day: 'Thursday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 373, className: 'Form 3', stream: 'STREAM A', day: 'Thursday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 374, className: 'Form 3', stream: 'STREAM A', day: 'Thursday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 375, className: 'Form 3', stream: 'STREAM A', day: 'Thursday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 376, className: 'Form 3', stream: 'STREAM A', day: 'Thursday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 377, className: 'Form 3', stream: 'STREAM A', day: 'Thursday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  // Friday
+  { id: 378, className: 'Form 3', stream: 'STREAM A', day: 'Friday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 379, className: 'Form 3', stream: 'STREAM A', day: 'Friday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 380, className: 'Form 3', stream: 'STREAM A', day: 'Friday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 381, className: 'Form 3', stream: 'STREAM A', day: 'Friday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 382, className: 'Form 3', stream: 'STREAM A', day: 'Friday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Religion', activityType: 'religion' as const, room: 'School Hall' },
+  { id: 383, className: 'Form 3', stream: 'STREAM A', day: 'Friday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Weekly Test', activityType: 'weekly_test' as const, room: 'Class 3A' },
+  { id: 384, className: 'Form 3', stream: 'STREAM A', day: 'Friday', period: 'Period 7 (14:00-15:00)', periodName: 'Period 7', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Environmental Day', activityType: 'environmental' as const },
+
+  // ================= Form 4 STREAM A =================
+  // Monday
+  { id: 401, className: 'Form 4', stream: 'STREAM A', day: 'Monday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 402, className: 'Form 4', stream: 'STREAM A', day: 'Monday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 403, className: 'Form 4', stream: 'STREAM A', day: 'Monday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 404, className: 'Form 4', stream: 'STREAM A', day: 'Monday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 405, className: 'Form 4', stream: 'STREAM A', day: 'Monday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 406, className: 'Form 4', stream: 'STREAM A', day: 'Monday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 407, className: 'Form 4', stream: 'STREAM A', day: 'Monday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  // Tuesday
+  { id: 408, className: 'Form 4', stream: 'STREAM A', day: 'Tuesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 409, className: 'Form 4', stream: 'STREAM A', day: 'Tuesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 410, className: 'Form 4', stream: 'STREAM A', day: 'Tuesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 411, className: 'Form 4', stream: 'STREAM A', day: 'Tuesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 412, className: 'Form 4', stream: 'STREAM A', day: 'Tuesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 413, className: 'Form 4', stream: 'STREAM A', day: 'Tuesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 414, className: 'Form 4', stream: 'STREAM A', day: 'Tuesday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  // Wednesday
+  { id: 415, className: 'Form 4', stream: 'STREAM A', day: 'Wednesday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 416, className: 'Form 4', stream: 'STREAM A', day: 'Wednesday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 417, className: 'Form 4', stream: 'STREAM A', day: 'Wednesday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 418, className: 'Form 4', stream: 'STREAM A', day: 'Wednesday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Geography' },
+  { id: 419, className: 'Form 4', stream: 'STREAM A', day: 'Wednesday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 420, className: 'Form 4', stream: 'STREAM A', day: 'Wednesday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 106, teacherName: 'Faraja Lyimo', subject: 'Computer Studies' },
+  { id: 421, className: 'Form 4', stream: 'STREAM A', day: 'Wednesday', period: 'Period 7 (14:00-15:30)', periodName: 'Period 7', teacherId: 108, teacherName: 'Hamisi Juma', subject: 'Sports and Games', activityType: 'sports' as const },
+  // Thursday
+  { id: 422, className: 'Form 4', stream: 'STREAM A', day: 'Thursday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Physics' },
+  { id: 423, className: 'Form 4', stream: 'STREAM A', day: 'Thursday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Biology' },
+  { id: 424, className: 'Form 4', stream: 'STREAM A', day: 'Thursday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 425, className: 'Form 4', stream: 'STREAM A', day: 'Thursday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 426, className: 'Form 4', stream: 'STREAM A', day: 'Thursday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'History' },
+  { id: 427, className: 'Form 4', stream: 'STREAM A', day: 'Thursday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Civics' },
+  { id: 428, className: 'Form 4', stream: 'STREAM A', day: 'Thursday', period: 'Period 7 (14:00-14:40)', periodName: 'Period 7', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  // Friday
+  { id: 429, className: 'Form 4', stream: 'STREAM A', day: 'Friday', period: 'Period 1 (08:00-08:40)', periodName: 'Period 1', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Basic Mathematics' },
+  { id: 430, className: 'Form 4', stream: 'STREAM A', day: 'Friday', period: 'Period 2 (08:40-09:20)', periodName: 'Period 2', teacherId: 102, teacherName: 'Baraka Mgimwa', subject: 'English Language' },
+  { id: 431, className: 'Form 4', stream: 'STREAM A', day: 'Friday', period: 'Period 3 (09:40-10:20)', periodName: 'Period 3', teacherId: 103, teacherName: 'Catherine Shirima', subject: 'Chemistry' },
+  { id: 432, className: 'Form 4', stream: 'STREAM A', day: 'Friday', period: 'Period 4 (10:20-11:00)', periodName: 'Period 4', teacherId: 105, teacherName: 'Emmanuel Tarimo', subject: 'Kiswahili' },
+  { id: 433, className: 'Form 4', stream: 'STREAM A', day: 'Friday', period: 'Period 5 (11:20-12:00)', periodName: 'Period 5', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'Religion', activityType: 'religion' as const, room: 'School Hall' },
+  { id: 434, className: 'Form 4', stream: 'STREAM A', day: 'Friday', period: 'Period 6 (12:00-12:40)', periodName: 'Period 6', teacherId: 101, teacherName: 'Adelmarcy Mallya', subject: 'National Mock Prep / Test', activityType: 'weekly_test' as const, room: 'Class 4A' },
+  { id: 435, className: 'Form 4', stream: 'STREAM A', day: 'Friday', period: 'Period 7 (14:00-15:00)', periodName: 'Period 7', teacherId: 104, teacherName: 'David Mwakipesile', subject: 'Environmental Day', activityType: 'environmental' as const }
 ];
 
 export const INITIAL_TIMETABLE_ASSIGNMENTS: any[] = TANZANIAN_TEMPLATE_TIMETABLE_ASSIGNMENTS;

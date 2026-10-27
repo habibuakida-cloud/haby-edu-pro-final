@@ -44,9 +44,9 @@ import {
   MessageCircle
 } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
+import QRCode from 'qrcode';
 import { Html5Qrcode } from 'html5-qrcode';
 import { useReactToPrint } from 'react-to-print';
-import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { supabase } from '../lib/dbClient';
 
@@ -1941,6 +1941,223 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     }, 120);
   };
 
+  // Export Printable Desk QR Slips / Candidate Number Labels to A4 Portrait PDF (Canvas + jsPDF, zero html2canvas)
+  const handleExportDeskSlipsPDF = async () => {
+    setIsExportingPDF(true);
+    setPdfProgressText('Inaandaa PDF ya Vibandiko vya Namba...');
+    setErrorMessage(null);
+    try {
+      const targetRooms = deskSlipsScope === 'all' ? computedRooms : [activeComputedRoom];
+      const allSlips = [];
+      targetRooms.forEach((rm, rIdx) => {
+        if (!rm) return;
+        const actualIdx = rm.roomIdx ?? (deskSlipsScope === 'all' ? rIdx : activeRoomIndex);
+        const roomNumber = actualIdx + 1;
+        const roomOrdinalLabel = `Room ${roomNumber} out of ${rooms.length}`;
+        (rm.grid || []).forEach((rowArr, row) => {
+          rowArr.forEach((seat, col) => {
+            if (seat && !seat.isDeleted && seat.seatNo) {
+              allSlips.push({
+                seatNo: String(seat.seatNo).trim(),
+                stepOrder: seat.stepOrder,
+                row,
+                col,
+                roomIdx: actualIdx,
+                roomNumber,
+                roomName: rm.name || `ROOM ${format2Digits(roomNumber)}`,
+                roomOrdinalLabel,
+                key: `${actualIdx}-${row}-${col}`
+              });
+            }
+          });
+        });
+      });
+
+      if (allSlips.length === 0) {
+        setErrorMessage('Hakuna namba za watahiniwa za ku-export kwenye chumba hiki.');
+        setIsExportingPDF(false);
+        setPdfProgressText(null);
+        return;
+      }
+
+      const slipsPerPage = 12; // 2 columns x 6 rows per A4 page
+      const totalPages = Math.ceil(allSlips.length / slipsPerPage);
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
+
+      const pageW = 794;
+      const pageH = 1123;
+      const scale = 2.6;
+
+      for (let p = 0; p < totalPages; p++) {
+        setPdfProgressText(`Inatengeneza PDF ya Namba ukurasa ${p + 1}/${totalPages}...`);
+        await new Promise((r) => setTimeout(r, 15));
+        if (p > 0) pdf.addPage('a4', 'portrait');
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(pageW * scale);
+        canvas.height = Math.round(pageH * scale);
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, pageW, pageH);
+
+        const padX = 24;
+        const contentW = pageW - padX * 2;
+
+        // Page Header
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '900 12px Inter, Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+          `${String(schoolName || '').toUpperCase()} — ${examType} DESK NUMBER SLIPS (${subject})`,
+          padX,
+          24
+        );
+        ctx.fillStyle = '#64748b';
+        ctx.font = '800 10px Inter, Arial, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(`Page ${p + 1} of ${totalPages} (Total: ${allSlips.length} Slips)`, pageW - padX, 24);
+
+        ctx.strokeStyle = '#1e293b';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(padX, 34);
+        ctx.lineTo(pageW - padX, 34);
+        ctx.stroke();
+
+        const gridTop = 44;
+        const gridBottom = pageH - 20;
+        const availH = gridBottom - gridTop;
+        const cols = 2;
+        const rows = 6;
+        const colGap = 14;
+        const rowGap = 12;
+        const cellW = (contentW - colGap) / cols;
+        const cellH = (availH - rowGap * (rows - 1)) / rows;
+
+        const pageSlips = allSlips.slice(p * slipsPerPage, (p + 1) * slipsPerPage);
+        pageSlips.forEach((st, idx) => {
+          const c = idx % cols;
+          const r = Math.floor(idx / cols);
+          const x = padX + c * (cellW + colGap);
+          const y = gridTop + r * (cellH + rowGap);
+
+          // Dashed cutting box
+          ctx.save();
+          ctx.setLineDash([5, 4]);
+          drawCanvasRoundRect(ctx, x, y, cellW, cellH, 8, '#ffffff', '#475569', 1.5);
+          ctx.restore();
+
+          // Top school/exam strip
+          drawCanvasRoundRect(ctx, x + 4, y + 4, cellW - 8, 26, 5, '#eff6ff', '#bfdbfe', 1);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#475569';
+          ctx.font = '900 8.5px Inter, Arial, sans-serif';
+          ctx.fillText(String(schoolName || '').toUpperCase().slice(0, 42), x + cellW / 2, y + 12);
+          ctx.fillStyle = '#1e3a8a';
+          ctx.font = '900 9.5px Inter, Arial, sans-serif';
+          ctx.fillText(`${examType} — ${subject} (${codeNo})`.slice(0, 42), x + cellW / 2, y + 23);
+
+          // Candidate Number & Room details on left
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#64748b';
+          ctx.font = '800 8.5px Inter, Arial, sans-serif';
+          ctx.fillText('CANDIDATE NO:', x + 12, y + 44);
+
+          ctx.fillStyle = '#0f172a';
+          ctx.font = '900 22px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+          ctx.fillText(st.seatNo, x + 12, y + 66);
+
+          ctx.fillStyle = '#1e293b';
+          ctx.font = '800 9.5px Inter, Arial, sans-serif';
+          ctx.fillText(`${st.roomOrdinalLabel} (${st.roomName})`, x + 12, y + 86);
+
+          ctx.fillStyle = '#4338ca';
+          ctx.font = '800 9px Inter, Arial, sans-serif';
+          ctx.fillText(
+            `Row ${st.row + 1}, Col ${st.col + 1}${st.stepOrder ? ` · Desk #${st.stepOrder}` : ''}`,
+            x + 12,
+            y + 100
+          );
+
+          // QR Code on right
+          const qrSize = 68;
+          const qrX = x + cellW - qrSize - 12;
+          const qrY = y + 36;
+          try {
+            const qrPayload = JSON.stringify({
+              app: 'HABY_EXAM',
+              seat: st.seatNo,
+              room: st.roomNumber,
+              name: st.roomName,
+              pos: `R${st.row + 1}C${st.col + 1}`,
+              key: st.key,
+              code: codeNo || ''
+            });
+            const qr = QRCode.create(qrPayload, { errorCorrectionLevel: 'L' });
+            const mSize = qr.modules.size;
+            const modPx = (qrSize - 6) / mSize;
+            drawCanvasRoundRect(ctx, qrX, qrY, qrSize, qrSize, 4, '#ffffff', '#cbd5e1', 1);
+            ctx.fillStyle = '#0f172a';
+            for (let mr = 0; mr < mSize; mr++) {
+              for (let mc = 0; mc < mSize; mc++) {
+                if (qr.modules.get(mr, mc)) {
+                  ctx.fillRect(
+                    qrX + 3 + mc * modPx,
+                    qrY + 3 + mr * modPx,
+                    Math.ceil(modPx * 10) / 10,
+                    Math.ceil(modPx * 10) / 10
+                  );
+                }
+              }
+            }
+          } catch (_qrErr) {}
+
+          // Footer line
+          const footY = y + cellH - 14;
+          ctx.strokeStyle = '#e2e8f0';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(x + 10, footY - 8);
+          ctx.lineTo(x + cellW - 10, footY - 8);
+          ctx.stroke();
+
+          ctx.textAlign = 'left';
+          ctx.fillStyle = '#64748b';
+          ctx.font = '700 8px Inter, Arial, sans-serif';
+          ctx.fillText(`Date: ${examDate}`, x + 12, footY);
+          ctx.textAlign = 'right';
+          ctx.fillText('Candidate Sign: ________________', x + cellW - 12, footY);
+        });
+
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        pdf.addImage(imgData, 'PNG', 3, 3, 204, 291, undefined, 'FAST');
+      }
+
+      const fileName =
+        deskSlipsScope === 'all'
+          ? `DESK_SLIPS_${examType}_ALL_${rooms.length}_ROOMS.pdf`
+          : `DESK_SLIPS_${examType}_${(activeComputedRoom?.name || 'ROOM').replace(/\s+/g, '_')}.pdf`;
+      pdf.save(fileName);
+      setSavedSuccessMsg(`PDF ya Vibandiko vya Namba (${fileName}) imepakuliwa kikamilifu!`);
+      setTimeout(() => setSavedSuccessMsg(null), 3500);
+    } catch (err) {
+      console.error('Export Desk Slips PDF error:', err);
+      setErrorMessage('Hitilafu imetokea wakati wa kutengeneza PDF ya vibandiko.');
+      setTimeout(() => setErrorMessage(null), 4000);
+    } finally {
+      setIsExportingPDF(false);
+      setPdfProgressText(null);
+    }
+  };
+
   const handlePrintCurrentRoom = () => {
     setPrintScope('current');
     setTimeout(() => {
@@ -1971,27 +2188,493 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     }, 100);
   };
 
-  // Helper to prepare cloned DOM for high-res print-grade capture (hides .no-print & shows unclipped print spans)
-  const prepareClonedPageForExport = (clonedDoc) => {
-    clonedDoc.querySelectorAll('.no-print').forEach(el => {
-      el.style.display = 'none';
-    });
-    clonedDoc.querySelectorAll('.desk-seat-number-print').forEach(el => {
-      el.style.display = 'flex';
-      el.style.alignItems = 'center';
-      el.style.justifyContent = 'center';
-    });
-    clonedDoc.querySelectorAll('.desk-slot-deleted').forEach(el => {
-      el.style.visibility = 'hidden';
-    });
+  // Helper: Draw rounded rectangle on HTML5 2D Canvas without browser-specific dependencies
+  const drawCanvasRoundRect = (ctx, x, y, w, h, r, fillColor, strokeColor, lineWidth = 1) => {
+    const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    if (fillColor) {
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+    }
+    if (strokeColor) {
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+    }
   };
 
-  // Export as high-resolution A4 Portrait PDF (supports current room or all visible rooms)
-  const handleExportPDF = async () => {
+  // Deterministic 300-DPI A4 Portrait Canvas Renderer for any Examination Room
+  // Immune to Tailwind CSS v4 oklch() color function errors in html2canvas
+  const renderRoomSittingPlanToCanvas = (rm, actualRoomIdx = 0, totalRoomsCount = 1, scale = 3) => {
+    const pageW = 794; // A4 Portrait logical width at 96 DPI
+    const pageH = 1123; // A4 Portrait logical height at 96 DPI
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(pageW * scale);
+    canvas.height = Math.round(pageH * scale);
+
+    const ctx = canvas.getContext('2d');
+    ctx.scale(scale, scale);
+
+    const padX = 24;
+    const contentW = pageW - padX * 2;
+    const roomNumber = (actualRoomIdx ?? 0) + 1;
+    const roomOrdinalLabel = `Room ${roomNumber} out of ${totalRoomsCount}`;
+    const roomAttendance = getRoomAttendanceSummary(rm, actualRoomIdx);
+
+    const bgFill = theme.planBgInline || '#f0f6fc';
+    const borderCol = theme.outerBorderInline || '#1e3a8a';
+    const boxHeaderCol = theme.boxHeaderBgInline || '#1e40af';
+    const boxBorderCol = theme.boxBorderInline || '#3b82f6';
+
+    // 1. Page Base & Outer Official Frame
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, pageW, pageH);
+    drawCanvasRoundRect(ctx, 8, 8, pageW - 16, pageH - 16, 4, bgFill, borderCol, 3);
+
+    // 2. Slim National Tanzania Flag Ribbon (Green, Gold, Black, Gold, Blue)
+    const ribY = 15;
+    const ribH = 6;
+    ctx.fillStyle = '#1eb53a';
+    ctx.fillRect(padX, ribY, contentW * 0.32, ribH);
+    ctx.fillStyle = '#fcd116';
+    ctx.fillRect(padX + contentW * 0.32, ribY, contentW * 0.02, ribH);
+    ctx.fillStyle = '#000000';
+    ctx.fillRect(padX + contentW * 0.34, ribY, contentW * 0.32, ribH);
+    ctx.fillStyle = '#fcd116';
+    ctx.fillRect(padX + contentW * 0.66, ribY, contentW * 0.02, ribH);
+    ctx.fillStyle = '#00a3dd';
+    ctx.fillRect(padX + contentW * 0.68, ribY, contentW * 0.32, ribH);
+
+    // 3. Official Document Header
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = '#334155';
+    ctx.font = '800 10.5px Inter, Arial, sans-serif';
+    ctx.fillText('THE UNITED REPUBLIC OF TANZANIA', pageW / 2, 34);
+
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 15.5px Inter, Arial, sans-serif';
+    ctx.fillText('NATIONAL EXAMINATIONS COUNCIL OF TANZANIA (NECTA)', pageW / 2, 52);
+
+    const badgeText = `${examType} EXAMINATION SITTING PLAN — ${roomOrdinalLabel.toUpperCase()} — ${new Date().getFullYear()}`;
+    ctx.font = '900 10.5px Inter, Arial, sans-serif';
+    const badgeW = Math.min(contentW - 95, Math.max(360, ctx.measureText(badgeText).width + 32));
+    const badgeX = (pageW - (badgeW + 84)) / 2;
+    drawCanvasRoundRect(ctx, badgeX, 64, badgeW, 20, 4, borderCol, null);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(badgeText, badgeX + badgeW / 2, 74);
+
+    // PORTRAIT A4 Tag
+    const a4TagX = badgeX + badgeW + 6;
+    drawCanvasRoundRect(ctx, a4TagX, 64, 78, 20, 4, '#ffffff', '#cbd5e1', 1);
+    ctx.fillStyle = '#1e293b';
+    ctx.font = '900 9.5px Inter, Arial, sans-serif';
+    ctx.fillText('PORTRAIT A4', a4TagX + 39, 74);
+
+    ctx.strokeStyle = borderCol;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(padX, 90);
+    ctx.lineTo(pageW - padX, 90);
+    ctx.stroke();
+
+    // 4. Official 2-Column Metadata Bar
+    ctx.textAlign = 'left';
+    ctx.font = '700 10.5px Inter, Arial, sans-serif';
+    ctx.fillStyle = '#475569';
+    ctx.fillText('SCHOOL:', padX, 105);
+    ctx.fillText('SUBJECT:', padX, 123);
+    ctx.fillText('ROOM NO:', padX, 141);
+
+    ctx.font = '900 11px Inter, Arial, sans-serif';
+    ctx.fillStyle = '#0f172a';
+    ctx.fillText(String(schoolName || '').toUpperCase().slice(0, 38), padX + 86, 105);
+    ctx.fillText(`${subject || ''} (${codeNo || ''})`.slice(0, 38), padX + 86, 123);
+
+    // Room Ordinal Badge + Room Name
+    const roomOrdW = Math.max(106, ctx.measureText(roomOrdinalLabel).width + 16);
+    drawCanvasRoundRect(ctx, padX + 86, 131, roomOrdW, 18, 4, '#2563eb', null);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 9.5px Inter, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(roomOrdinalLabel, padX + 86 + roomOrdW / 2, 140);
+
+    const rmNameText = String(rm?.name || `ROOM ${roomNumber}`).toUpperCase();
+    const rmNameW = Math.max(70, ctx.measureText(rmNameText).width + 16);
+    drawCanvasRoundRect(ctx, padX + 86 + roomOrdW + 6, 131, rmNameW, 18, 4, '#eff6ff', '#93c5fd', 1);
+    ctx.fillStyle = '#1e3a8a';
+    ctx.fillText(rmNameText, padX + 86 + roomOrdW + 6 + rmNameW / 2, 140);
+
+    // Right Column Metadata
+    const rightColX = pageW / 2 + 12;
+    ctx.textAlign = 'left';
+    ctx.font = '700 10.5px Inter, Arial, sans-serif';
+    ctx.fillStyle = '#475569';
+    ctx.fillText('DAY & DATE:', rightColX, 105);
+    ctx.fillText('CANDIDATES:', rightColX, 123);
+    ctx.fillText('DOOR ENTRANCE:', rightColX, 141);
+
+    ctx.font = '900 11px Inter, Arial, sans-serif';
+    ctx.fillStyle = '#0f172a';
+    ctx.fillText(`${day || ''}, ${examDate || ''}`, rightColX + 102, 105);
+    ctx.fillText(
+      `${rm.totalSeats} Candidates (${rm.startSeatFormatted} — ${rm.endSeatFormatted})`,
+      rightColX + 102,
+      123
+    );
+    ctx.fillText(
+      `${rm.doorEntrance} (${rm.fillPattern === 'snake' ? 'Snake Pattern' : 'Straight'})`,
+      rightColX + 102,
+      141
+    );
+
+    ctx.strokeStyle = borderCol;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(padX, 155);
+    ctx.lineTo(pageW - padX, 155);
+    ctx.stroke();
+
+    // 5. Room Attendance Summary Bar (Waliofanya ✓ vs Wasiofanya ✗)
+    const sumY = 161;
+    const sumH = 26;
+    drawCanvasRoundRect(ctx, padX, sumY, contentW, sumH, 6, '#ffffff', '#cbd5e1', 1.5);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 9.5px Inter, Arial, sans-serif';
+    ctx.fillText(
+      `MUHTASARI WA CHUMBA (${roomOrdinalLabel.toUpperCase()} · ${rm?.name || ''}):`,
+      padX + 10,
+      sumY + sumH / 2
+    );
+
+    // Attendance Pills on the Right
+    const pillH = 18;
+    const pillY = sumY + (sumH - pillH) / 2;
+    let curRightX = pageW - padX - 8;
+
+    // Total Pill
+    const totTxt = `Jumla: ${roomAttendance.total}`;
+    const totW = 78;
+    curRightX -= totW;
+    drawCanvasRoundRect(ctx, curRightX, pillY, totW, pillH, 4, '#f1f5f9', '#cbd5e1', 1);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#1e293b';
+    ctx.font = '900 9.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+    ctx.fillText(totTxt, curRightX + totW / 2, pillY + pillH / 2);
+
+    // Absent Pill
+    const absTxt = `Wasiofanya (✗): ${roomAttendance.absent}`;
+    const absW = 118;
+    curRightX -= absW + 6;
+    drawCanvasRoundRect(ctx, curRightX, pillY, absW, pillH, 4, '#fff1f2', '#fda4af', 1);
+    ctx.fillStyle = '#9f1239';
+    ctx.fillText(absTxt, curRightX + absW / 2, pillY + pillH / 2);
+
+    // Present Pill
+    const presTxt = `Waliofanya (✓): ${roomAttendance.present}`;
+    const presW = 118;
+    curRightX -= presW + 6;
+    drawCanvasRoundRect(ctx, curRightX, pillY, presW, pillH, 4, '#ecfdf5', '#6ee7b7', 1);
+    ctx.fillStyle = '#065f46';
+    ctx.fillText(presTxt, curRightX + presW / 2, pillY + pillH / 2);
+
+    // 6. Chalkboard Banner & Entrance Door Indicator
+    const chalkY = 193;
+    const chalkH = 23;
+    drawCanvasRoundRect(ctx, padX, chalkY, contentW, chalkH, 5, borderCol, null);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = '900 10.5px Inter, Arial, sans-serif';
+    ctx.fillText(
+      `FRONT OF ROOM — ${roomOrdinalLabel.toUpperCase()} (${rm?.name || ''}) — CHALKBOARD & INVIGILATOR DESK`,
+      pageW / 2,
+      chalkY + chalkH / 2
+    );
+
+    const isLeftDoor = rm.doorEntrance === 'Left Side';
+    const doorW = 245;
+    const doorH = 20;
+    const doorY = 221;
+    const doorX = isLeftDoor ? padX : pageW - padX - doorW;
+    const doorLabel = isLeftDoor
+      ? `ENTRANCE DOOR → (START: ${rm.startSeatFormatted})`
+      : `(START: ${rm.startSeatFormatted}) ← ENTRANCE DOOR`;
+    drawCanvasRoundRect(ctx, doorX, doorY, doorW, doorH, 4, '#dbeafe', boxBorderCol, 1.5);
+    ctx.fillStyle = borderCol;
+    ctx.font = '900 9.5px Inter, Arial, sans-serif';
+    ctx.fillText(doorLabel, doorX + doorW / 2, doorY + doorH / 2);
+
+    // 7. Candidate Desks Grid
+    const numCols = Math.max(1, rm.numColumns || 4);
+    const maxRows = Math.max(1, rm.maxRows || 6);
+    const gridTopY = 247;
+    const gridBottomY = pageH - 122;
+    const availableGridH = gridBottomY - gridTopY;
+    const colHeaderH = 22;
+    const colGap = numCols >= 6 ? 7 : 10;
+    const colW = (contentW - colGap * (numCols - 1)) / numCols;
+    const rowGap = maxRows >= 8 ? 5 : 7;
+    const deskH = Math.min(74, Math.max(30, (availableGridH - colHeaderH - 8 - rowGap * (maxRows - 1)) / maxRows));
+
+    for (let c = 0; c < numCols; c++) {
+      const colX = padX + c * (colW + colGap);
+      const colDir = rm.colDirections?.[c] || 'down';
+      const dirLabel = colDir === 'up' ? '↑ (Chini-Juu)' : '↓ (Juu-Chini)';
+
+      // Column Header
+      drawCanvasRoundRect(ctx, colX, gridTopY, colW, colHeaderH, 4, borderCol, null);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffffff';
+      ctx.font = '900 9.5px Inter, Arial, sans-serif';
+      ctx.fillText(`COLUMN ${c + 1} ${dirLabel}`, colX + colW / 2, gridTopY + colHeaderH / 2);
+
+      // Column Desks
+      for (let r = 0; r < maxRows; r++) {
+        const seat = rm.grid?.[r]?.[c];
+        if (!seat || seat.isDeleted) continue;
+
+        const deskY = gridTopY + colHeaderH + 6 + r * (deskH + rowGap);
+        const stripH = Math.min(15, Math.max(11, deskH * 0.25));
+        const deskKey = `${actualRoomIdx}-${r}-${c}`;
+        const attendanceStatus = attendanceState[deskKey];
+        const isPresent = attendanceStatus === 'PRESENT';
+        const isAbsent = attendanceStatus === 'ABSENT';
+
+        const cardBg = isAbsent ? '#fff1f2' : isPresent ? '#f0fdf4' : '#ffffff';
+        const cardBorder = isAbsent ? '#e11d48' : isPresent ? '#10b981' : boxBorderCol;
+        const stripBg = isAbsent ? '#be123c' : isPresent ? '#047857' : boxHeaderCol;
+
+        // Desk Outer Card
+        drawCanvasRoundRect(ctx, colX, deskY, colW, deskH, 5, cardBg, cardBorder, 2);
+
+        // Desk Top Strip
+        drawCanvasRoundRect(ctx, colX + 2, deskY + 2, colW - 4, stripH, 3, stripBg, null);
+
+        // R#C# Label on Left
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '900 8px Inter, Arial, sans-serif';
+        ctx.fillText(`R${r + 1}C${c + 1}`, colX + 6, deskY + 2 + stripH / 2);
+
+        // Attendance Stamp / Tick Box on Right of Top Strip
+        if (isPresent) {
+          const stW = 36;
+          const stH = stripH - 3;
+          drawCanvasRoundRect(ctx, colX + colW - stW - 4, deskY + 3.5, stW, stH, 2, '#ffffff', '#059669', 0.8);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#065f46';
+          ctx.font = '900 6.5px Inter, Arial, sans-serif';
+          ctx.fillText('✓ DONE', colX + colW - stW / 2 - 4, deskY + 3.5 + stH / 2);
+        } else if (isAbsent) {
+          const stW = 42;
+          const stH = stripH - 3;
+          drawCanvasRoundRect(ctx, colX + colW - stW - 4, deskY + 3.5, stW, stH, 2, '#ffffff', '#e11d48', 0.8);
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#9f1239';
+          ctx.font = '900 6.5px Inter, Arial, sans-serif';
+          ctx.fillText('✗ ABSENT', colX + colW - stW / 2 - 4, deskY + 3.5 + stH / 2);
+        } else {
+          const cbSize = Math.min(9, stripH - 3);
+          drawCanvasRoundRect(
+            ctx,
+            colX + colW - cbSize - 5,
+            deskY + 2 + (stripH - cbSize) / 2,
+            cbSize,
+            cbSize,
+            1.5,
+            '#ffffff',
+            '#cbd5e1',
+            1
+          );
+        }
+
+        // Desk Middle Content: QR Code (if enabled) + Candidate Number
+        const bodyTopY = deskY + stripH + 2;
+        const bodyBottomY = deskY + deskH - 10;
+        const bodyCenterY = (bodyTopY + bodyBottomY) / 2;
+        let textCenterX = colX + colW / 2;
+
+        if (showDeskQRCodes && seat.seatNo) {
+          const qrSize = Math.min(28, Math.max(16, bodyBottomY - bodyTopY - 2));
+          const qrX = colX + 5;
+          const qrY = bodyCenterY - qrSize / 2;
+          try {
+            const qrPayload = JSON.stringify({
+              app: 'HABY_EXAM',
+              seat: String(seat.seatNo || '').trim(),
+              room: roomNumber,
+              name: rm.name || `ROOM ${roomNumber}`,
+              pos: `R${r + 1}C${c + 1}`,
+              key: deskKey,
+              code: codeNo || ''
+            });
+            const qr = QRCode.create(qrPayload, { errorCorrectionLevel: 'L' });
+            const mSize = qr.modules.size;
+            const modPx = (qrSize - 3) / mSize;
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(qrX, qrY, qrSize, qrSize);
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 0.7;
+            ctx.strokeRect(qrX, qrY, qrSize, qrSize);
+            ctx.fillStyle = '#0f172a';
+            for (let mr = 0; mr < mSize; mr++) {
+              for (let mc = 0; mc < mSize; mc++) {
+                if (qr.modules.get(mr, mc)) {
+                  ctx.fillRect(
+                    qrX + 1.5 + mc * modPx,
+                    qrY + 1.5 + mr * modPx,
+                    Math.ceil(modPx * 10) / 10,
+                    Math.ceil(modPx * 10) / 10
+                  );
+                }
+              }
+            }
+            textCenterX = qrX + qrSize + (colX + colW - (qrX + qrSize)) / 2;
+          } catch (qrErr) {
+            // Fallback if QR matrix skipped
+          }
+        }
+
+        const seatText = String(seat.seatNo || '----');
+        const numFontSize =
+          seatText.length >= 10
+            ? 10.5
+            : seatText.length >= 7
+            ? 12.5
+            : maxRows <= 6 && !showDeskQRCodes
+            ? 16.5
+            : 14;
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#0f172a';
+        ctx.font = `900 ${numFontSize}px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+        ctx.fillText(seatText, textCenterX, bodyCenterY + 1);
+
+        // Desk Bottom Sub-tag
+        ctx.fillStyle = isAbsent ? '#be123c' : isPresent ? '#047857' : boxHeaderCol;
+        ctx.font = '900 7.2px Inter, Arial, sans-serif';
+        ctx.fillText(
+          seat.seatNo ? `SEAT #${seat.stepOrder || ''}` : 'EMPTY DESK',
+          colX + colW / 2,
+          deskY + deskH - 5
+        );
+      }
+    }
+
+    // 8. Rear of Examination Room & Official Signatures Footer
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(padX, pageH - 116);
+    ctx.lineTo(pageW - padX, pageH - 116);
+    ctx.stroke();
+
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#64748b';
+    ctx.font = '800 9.5px Inter, Arial, sans-serif';
+    ctx.fillText(
+      `— REAR / BACK OF EXAMINATION ROOM (${roomOrdinalLabel.toUpperCase()}) —`,
+      pageW / 2,
+      pageH - 105
+    );
+
+    ctx.strokeStyle = borderCol;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(padX, pageH - 95);
+    ctx.lineTo(pageW - padX, pageH - 95);
+    ctx.stroke();
+
+    // Invigilator & Supervisor Signatures
+    ctx.textAlign = 'left';
+    ctx.fillStyle = '#334155';
+    ctx.font = '800 9.5px Inter, Arial, sans-serif';
+    ctx.fillText('INVIGILATOR NAME:', padX, pageH - 76);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 10px Inter, Arial, sans-serif';
+    ctx.fillText(String(academicMaster || ''), padX + 108, pageH - 77);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padX + 105, pageH - 72);
+    ctx.lineTo(pageW / 2 - 14, pageH - 72);
+    ctx.stroke();
+
+    ctx.fillStyle = '#334155';
+    ctx.font = '800 9.5px Inter, Arial, sans-serif';
+    ctx.fillText(`SIGNATURE: ___________________   DATE: ${examDate || ''}`, padX, pageH - 56);
+
+    ctx.fillText('SUPERVISOR NAME:', rightColX, pageH - 76);
+    ctx.fillStyle = '#0f172a';
+    ctx.font = '900 10px Inter, Arial, sans-serif';
+    ctx.fillText(String(supervisor || ''), rightColX + 110, pageH - 77);
+    ctx.beginPath();
+    ctx.moveTo(rightColX + 106, pageH - 72);
+    ctx.lineTo(pageW - padX, pageH - 72);
+    ctx.stroke();
+
+    ctx.fillStyle = '#334155';
+    ctx.font = '800 9.5px Inter, Arial, sans-serif';
+    ctx.fillText(`SIGNATURE: ___________________   DATE: ${examDate || ''}`, rightColX, pageH - 56);
+
+    // Bottom Notice & Official Stamp Box
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'italic 8.5px Inter, Arial, sans-serif';
+    ctx.fillText(
+      '* Sitting plan must be posted outside examination room 30 minutes prior to exam start.',
+      padX,
+      pageH - 36
+    );
+    ctx.fillText(
+      '* Every candidate must occupy the seat bearing their candidate number.',
+      padX,
+      pageH - 24
+    );
+
+    const stampW = 142;
+    const stampH = 32;
+    const stampX = pageW - padX - stampW;
+    const stampY = pageH - 46;
+    ctx.save();
+    ctx.setLineDash([4, 3]);
+    drawCanvasRoundRect(ctx, stampX, stampY, stampW, stampH, 4, '#ffffff', '#475569', 1.2);
+    ctx.restore();
+    ctx.textAlign = 'center';
+    ctx.fillStyle = '#334155';
+    ctx.font = '900 8.5px Inter, Arial, sans-serif';
+    ctx.fillText('SCHOOL OFFICIAL STAMP', stampX + stampW / 2, stampY + 12);
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '700 7.5px Inter, Arial, sans-serif';
+    ctx.fillText('(Official Seal)', stampX + stampW / 2, stampY + 23);
+
+    return canvas;
+  };
+
+  // Export as high-resolution A4 Portrait PDF (supports current room or all rooms)
+  const handleExportPDF = async (scopeOverride) => {
     setIsExportingPDF(true);
     setPdfProgressText('Inaandaa ukurasa wa PDF...');
     setErrorMessage(null);
     try {
+      const targetRooms =
+        scopeOverride === 'all'
+          ? computedRooms
+          : scopeOverride === 'current'
+          ? [activeComputedRoom]
+          : printScope === 'all'
+          ? computedRooms
+          : [activeComputedRoom];
+
       const pdf = new jsPDF({
         orientation: 'portrait',
         unit: 'mm',
@@ -2000,43 +2683,41 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
       });
       const pageWidthMm = 210;
       const pageHeightMm = 297;
-      const marginMm = 6;
+      const marginMm = 4;
       const printableW = pageWidthMm - marginMm * 2;
       const printableH = pageHeightMm - marginMm * 2;
 
-      const pagesCount = roomsToRender.length;
+      const pagesCount = targetRooms.length;
       for (let i = 0; i < pagesCount; i++) {
+        const rm = targetRooms[i];
+        if (!rm) continue;
+        const actualIdx = rm.roomIdx ?? (pagesCount > 1 ? i : activeRoomIndex);
         setPdfProgressText(
           pagesCount > 1
-            ? `Processing room ${i + 1} of ${pagesCount}...`
-            : 'Processing room image...'
+            ? `Inatengeneza PDF chumba ${i + 1} kati ya ${pagesCount}...`
+            : 'Inatengeneza ukurasa wa PDF...'
         );
-        const targetElement = document.getElementById(`room-portrait-page-${i}`);
-        if (!targetElement) continue;
+        // Yield briefly to allow UI progress text to update
+        await new Promise((resolve) => setTimeout(resolve, 15));
+
         if (i > 0) pdf.addPage('a4', 'portrait');
 
-        const canvas = await html2canvas(targetElement, {
-          scale: 3,
-          useCORS: true,
-          backgroundColor: theme.planBgInline || '#ffffff',
-          onclone: prepareClonedPageForExport
-        });
-
+        const canvas = renderRoomSittingPlanToCanvas(rm, actualIdx, rooms.length, 3);
         const imgData = canvas.toDataURL('image/png', 1.0);
         pdf.addImage(imgData, 'PNG', marginMm, marginMm, printableW, printableH, undefined, 'FAST');
       }
 
-      setPdfProgressText('Finalizing and downloading...');
+      setPdfProgressText('Inapakua PDF...');
       const fileName =
         pagesCount > 1
           ? `SITTING_PLAN_${examType}_ALL_${pagesCount}_ROOMS.pdf`
-          : `SITTING_PLAN_${examType}_${(currentRoom?.name || 'ROOM').replace(/\s+/g, '_')}.pdf`;
+          : `SITTING_PLAN_${examType}_${(targetRooms[0]?.name || currentRoom?.name || 'ROOM').replace(/\s+/g, '_')}.pdf`;
       pdf.save(fileName);
-      setSavedSuccessMsg(`High-resolution PDF (${fileName}) downloaded successfully for printing!`);
+      setSavedSuccessMsg(`PDF yenye ubora wa juu (${fileName}) imepakuliwa kikamilifu!`);
       setTimeout(() => setSavedSuccessMsg(null), 3500);
     } catch (err) {
       console.error('Export PDF error:', err);
-      setErrorMessage('Error generating PDF. Please try again.');
+      setErrorMessage('Hitilafu imetokea wakati wa kutengeneza PDF. Tafadhali jaribu tena.');
       setTimeout(() => setErrorMessage(null), 4000);
     } finally {
       setIsExportingPDF(false);
@@ -2230,28 +2911,28 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
     }
   };
 
-  // Export as high-resolution PNG image
+  // Export as high-resolution PNG image (direct 300-DPI Canvas rendering, zero html2canvas errors)
   const handleExportImage = async () => {
-    const targetElement = document.getElementById(`room-portrait-page-${activeRoomIndex}`) || document.getElementById('room-portrait-page-0');
-    if (!targetElement) return;
+    if (!activeComputedRoom) return;
     setIsExportingImage(true);
     setErrorMessage(null);
     try {
-      const canvas = await html2canvas(targetElement, {
-        scale: 3,
-        useCORS: true,
-        backgroundColor: theme.planBgInline,
-        onclone: prepareClonedPageForExport
-      });
+      await new Promise((resolve) => setTimeout(resolve, 15));
+      const actualIdx = activeComputedRoom.roomIdx ?? activeRoomIndex;
+      const canvas = renderRoomSittingPlanToCanvas(activeComputedRoom, actualIdx, rooms.length, 3);
+      const dataUrl = canvas.toDataURL('image/png', 1.0);
+      const fileName = `SITTING_PLAN_${examType}_${(activeComputedRoom?.name || currentRoom?.name || 'ROOM').replace(/\s+/g, '_')}.png`;
       const link = document.createElement('a');
-      link.download = `SITTING_PLAN_${examType}_${(currentRoom?.name || 'ROOM').replace(/\s+/g, '_')}.png`;
-      link.href = canvas.toDataURL('image/png');
+      link.download = fileName;
+      link.href = dataUrl;
+      document.body.appendChild(link);
       link.click();
-      setSavedSuccessMsg('High-resolution PNG image downloaded successfully!');
-      setTimeout(() => setSavedSuccessMsg(null), 3000);
+      document.body.removeChild(link);
+      setSavedSuccessMsg(`Picha ya PNG yenye ubora wa juu (${fileName}) imepakuliwa kikamilifu!`);
+      setTimeout(() => setSavedSuccessMsg(null), 3500);
     } catch (err) {
       console.error('Export image error:', err);
-      setErrorMessage('Error exporting image. Please try again or use Print.');
+      setErrorMessage('Hitilafu wakati wa kupakua picha ya PNG. Tafadhali jaribu tena.');
       setTimeout(() => setErrorMessage(null), 4000);
     } finally {
       setIsExportingImage(false);
@@ -2521,20 +3202,33 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
             {/* Export High-Resolution PDF for Printing */}
             <button
               type="button"
-              onClick={handleExportPDF}
+              onClick={() => handleExportPDF(rooms.length > 1 && printScope === 'all' ? 'all' : 'current')}
               disabled={isExportingPDF}
               className="px-3.5 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95"
-              title="Download seating plan as High-Resolution PDF for printing"
+              title="Pakua chumba hiki kama PDF yenye ubora wa juu (High-Resolution A4 Portrait PDF)"
             >
               <FileText className="w-4 h-4" />
               <span>{isExportingPDF ? (pdfProgressText || 'Generating PDF...') : 'Export High-Res PDF'}</span>
             </button>
 
+            {rooms.length > 1 && (
+              <button
+                type="button"
+                onClick={() => handleExportPDF('all')}
+                disabled={isExportingPDF}
+                className="px-3.5 py-2 bg-rose-800 hover:bg-rose-900 disabled:opacity-50 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95"
+                title="Pakua vyumba vyote kwenye faili moja la PDF (kila chumba ukurasa 1 wa A4 Portrait)"
+              >
+                <FileText className="w-4 h-4" />
+                <span>Export All {rooms.length} Rooms PDF</span>
+              </button>
+            )}
+
             {/* Send via WhatsApp Button */}
             <button
               type="button"
               onClick={() => {
-                handleExportPDF();
+                handleExportPDF(rooms.length > 1 ? 'all' : 'current');
                 setShowWhatsAppModal(true);
               }}
               className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95"
@@ -4357,6 +5051,15 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
               <div className="flex items-center gap-2">
                 <button
                   type="button"
+                  onClick={handleExportDeskSlipsPDF}
+                  disabled={isExportingPDF}
+                  className="px-3.5 py-1.5 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-lg text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>{isExportingPDF ? (pdfProgressText || 'Inaandaa PDF...') : 'Export PDF (Vibandiko vya Namba)'}</span>
+                </button>
+                <button
+                  type="button"
                   onClick={handlePrintDeskSlips}
                   className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition active:scale-95"
                 >
@@ -4516,6 +5219,15 @@ export default function SittingPlan({ schoolId = 'DEMO_SCHOOL', schoolInfo = {},
                 className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-lg cursor-pointer"
               >
                 Funga
+              </button>
+              <button
+                type="button"
+                onClick={handleExportDeskSlipsPDF}
+                disabled={isExportingPDF}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white rounded-lg text-xs font-black flex items-center gap-1.5 cursor-pointer shadow-sm transition"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>{isExportingPDF ? 'Inaandaa PDF...' : 'Export PDF (Vibandiko Vyote)'}</span>
               </button>
               <button
                 type="button"

@@ -6,8 +6,27 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 256;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/school_admins/$(request.auth.uid)) ||
+        request.auth.token.email == 'habibuakida@gmail.com'
+      );
     }
 
     // Connection testing doc
@@ -17,178 +36,117 @@ service cloud.firestore {
 
     // Users and School Admins collections
     match /users/{userId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(userId);
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin() || request.auth.uid == userId;
     }
 
     match /school_admins/{adminId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(adminId);
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin();
     }
 
     // Students collection
     match /students/{studentId} {
-      allow read: if true;
-      allow create, update: if isValidId(studentId)
-        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 250
-        && request.resource.data.schoolId is string && request.resource.data.schoolId.size() <= 128;
-      allow delete: if isValidId(studentId);
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && isValidId(studentId)
+        && incoming().name is string && incoming().name.size() > 0 && incoming().name.size() <= 250
+        && incoming().schoolId is string && incoming().schoolId.size() <= 128;
+      allow delete: if isAdmin();
     }
 
     // Teachers collection
     match /teachers/{teacherId} {
-      allow read: if true;
-      allow create, update: if isValidId(teacherId)
-        && request.resource.data.name is string && request.resource.data.name.size() > 0 && request.resource.data.name.size() <= 250
-        && request.resource.data.schoolId is string && request.resource.data.schoolId.size() <= 128;
-      allow delete: if isValidId(teacherId);
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(teacherId);
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          !incoming().diff(existing()).affectedKeys().hasAny(['pinCode', 'fingerprintTemplate'])
+        )
+      );
+      allow delete: if isAdmin();
+    }
+
+    // Class Journals
+    match /class_journals/{journalId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && isValidId(journalId)
+        && incoming().teacherId is string
+        && incoming().monitorId == request.auth.uid
+        && incoming().verificationMethod in ['usb_scanner', 'phone_pin'];
+      allow update: if isSignedIn() && (
+        isAdmin() || (
+          incoming().monitorId == request.auth.uid &&
+          incoming().diff(existing()).affectedKeys().hasOnly(['timeOut', 'updatedAt', 'isOffline', 'syncedAt'])
+        )
+      );
+      allow delete: if isAdmin();
     }
 
     // Schools collection
     match /schools/{schoolId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(schoolId);
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
-    // Daily Attendance & Period Attendance collections
+    // Daily & Period Attendance
     match /daily_attendance/{attendanceId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(attendanceId);
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
     match /period_attendance/{attendanceId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(attendanceId);
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
-    // School Data snapshot collection
-    match /school_data/{schoolId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(schoolId);
+    match /teacher_attendance/{attendanceId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn();
+      allow delete: if isAdmin();
     }
 
-    // Academic & Operations collections
-    match /timetables/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /timetable_assignments/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /teaching_logs/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /laboratory_apparatus/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /exams/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /exam_records/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /exam_results/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /classes/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /parents/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    // Environment & Agricultural Equipment collections
-    match /environment_equipment/{equipmentId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(equipmentId);
-    }
-
-    match /equipment_usage_log/{logId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(logId);
-    }
-
-    match /environment_orders/{orderId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(orderId);
-    }
-
-    match /school_purchased_equipment/{purchaseId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(purchaseId);
-    }
-
-    // Teacher Duty Roster (Mfumo wa Zamu ya Walimu) & Discipline Records
-    match /duty_roster/{schoolId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(schoolId);
-    }
-
-    match /discipline_records/{recordId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(recordId);
-    }
-
-    // Finance, SMS & Resources collections
-    match /sms_logs/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /sms_wallet/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /ream_paper_records/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /remedial_timetable/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /remedial_attendance/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /fee_structures/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /student_invoices/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /fee_payments/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
-
-    match /activity_logs/{docId} {
-      allow read: if true;
-      allow create, update, delete: if isValidId(docId);
-    }
+    // Core & Module Collections
+    match /school_data/{schoolId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /timetables/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /timetable_assignments/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /teaching_logs/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /laboratory_apparatus/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /exams/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /exam_records/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /exam_results/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /classes/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /parents/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /environment_equipment/{equipmentId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /equipment_usage_log/{logId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /environment_orders/{orderId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /school_purchased_equipment/{purchaseId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /duty_roster/{schoolId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /discipline_records/{recordId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /sms_logs/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /sms_wallet/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /ream_paper_records/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /remedial_timetable/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /remedial_attendance/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /remedial_payment_settings/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /remedial_payment_history/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /remedial_time_slots/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /election_events/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /election_positions/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /election_candidates/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /election_votes/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /student_ledger/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /contribution_types/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /staff_payroll/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /sitting_plans/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /gate_pass_logs/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /past_papers/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /curriculum_standards/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /fee_structures/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /student_invoices/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /fee_payments/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
+    match /activity_logs/{docId} { allow read: if isSignedIn(); allow write: if isSignedIn(); }
   }
 }

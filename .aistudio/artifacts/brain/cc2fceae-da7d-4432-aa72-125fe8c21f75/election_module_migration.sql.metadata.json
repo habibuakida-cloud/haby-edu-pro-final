@@ -1,0 +1,5 @@
+{
+  "summary":  "SQL migration script for the Student Government Election System Module for HABY EDU PRO (PostgreSQL / Supabase). Includes tables for election_events, election_positions, election_candidates, and election_votes with constraints and indexes.",
+  "updatedAt":  "2026-10-25T07:26:22.557701892Z",
+  "userFacing":  true
+}

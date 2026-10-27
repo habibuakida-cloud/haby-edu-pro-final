@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Layers, 
   Plus, 
@@ -10,9 +10,12 @@ import {
   Sparkles, 
   Edit3,
   AlertCircle,
-  Users
+  Users,
+  ShieldCheck,
+  UserCheck
 } from 'lucide-react';
-import { EducationLevel, StreamSetting, Student } from '../../types';
+import { EducationLevel, StreamSetting, Student, UserAccount } from '../../types';
+import { MonitorRegistrationModal } from './MonitorRegistrationModal';
 import { inferEducationLevel, normalizeStreamName, getNextLogicalStream } from '../../utils/classStreamUtils';
 import { TANZANIAN_TEMPLATE_STREAM_SETTINGS } from '../../constants/defaults';
 
@@ -22,6 +25,8 @@ interface ClassStreamManagerModalProps {
   streamSettings: StreamSetting[];
   onUpdateStreamSettings: (settings: StreamSetting[]) => void;
   students?: Student[];
+  users?: UserAccount[];
+  schoolId?: string;
 }
 
 export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = ({
@@ -29,7 +34,9 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
   onClose,
   streamSettings,
   onUpdateStreamSettings,
-  students = []
+  students = [],
+  users = [],
+  schoolId
 }) => {
   const [selectedClassToEdit, setSelectedClassToEdit] = useState<string | null>(null);
   
@@ -42,6 +49,54 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
   const [newStreamForClass, setNewStreamForClass] = useState('');
   const [successToast, setSuccessToast] = useState<string | null>(null);
   const [errorToast, setErrorToast] = useState<string | null>(null);
+
+  // Monitor Registration States
+  const [activeMonitorReg, setActiveMonitorReg] = useState<{ className: string; stream: string } | null>(null);
+  const [classMonitors, setClassMonitors] = useState<
+    Record<string, { monitorId?: string | null; monitressId?: string | null; monitorName?: string | null; monitressName?: string | null }>
+  >({});
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const storageKey = `haby_class_monitors_${schoolId || ''}`;
+    let localMap: Record<string, any> = {};
+    try {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) localMap = JSON.parse(saved);
+    } catch {}
+
+    const merged: Record<string, { monitorId?: string | null; monitressId?: string | null; monitorName?: string | null; monitressName?: string | null }> = {};
+    Object.entries(localMap).forEach(([k, v]: [string, any]) => {
+      const normKey = k.replace('__', '_');
+      merged[normKey] = v;
+    });
+    setClassMonitors(merged);
+
+    if (schoolId) {
+      fetch(`/api/classes/all-monitors?schoolId=${encodeURIComponent(schoolId)}`)
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (data && Array.isArray(data.classes)) {
+            const fromDb: typeof merged = { ...merged };
+            data.classes.forEach((c: any) => {
+              const cName = c.name || c.className;
+              const st = c.stream || 'STREAM A';
+              if (cName) {
+                const k = `${cName}_${st}`;
+                fromDb[k] = {
+                  monitorId: c.monitorId ?? fromDb[k]?.monitorId ?? null,
+                  monitressId: c.monitressId ?? fromDb[k]?.monitressId ?? null,
+                  monitorName: c.monitorName ?? fromDb[k]?.monitorName ?? null,
+                  monitressName: c.monitressName ?? fromDb[k]?.monitressName ?? null
+                };
+              }
+            });
+            setClassMonitors(fromDb);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [isOpen, schoolId]);
 
   if (!isOpen) return null;
 
@@ -164,6 +219,53 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
 
     onUpdateStreamSettings(updated);
     showSuccess(`✓ Mkondo mpya wa "${nextStream}" umeongezwa kwenye ${className}!`);
+  };
+
+  const handleSaveMonitors = async (
+    monitorId: string | null,
+    monitressId: string | null,
+    monitorName?: string | null,
+    monitressName?: string | null
+  ) => {
+    if (!activeMonitorReg) return;
+    const { className, stream } = activeMonitorReg;
+
+    setClassMonitors(prev => ({
+      ...prev,
+      [`${className}_${stream}`]: { monitorId, monitressId, monitorName: monitorName || null, monitressName: monitressName || null }
+    }));
+
+    try {
+      const storageKey = `haby_class_monitors_${schoolId || ''}`;
+      const existing = JSON.parse(localStorage.getItem(storageKey) || '{}');
+      existing[`${className}__${stream}`] = {
+        monitorId,
+        monitressId,
+        monitorName: monitorName || null,
+        monitressName: monitressName || null
+      };
+      localStorage.setItem(storageKey, JSON.stringify(existing));
+    } catch {}
+
+    showSuccess(`✓ Monitor & Monitress wa ${className} ${stream} wamesajiliwa kikamilifu!`);
+
+    try {
+      await fetch(`/api/classes/find-and-update-monitors`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          className,
+          stream,
+          monitorId,
+          monitressId,
+          monitorName,
+          monitressName,
+          schoolId
+        })
+      });
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleDeleteStream = (className: string, streamName: string) => {
@@ -461,6 +563,16 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
                               <span className="text-[10px] font-black text-slate-500 bg-white px-1.5 py-0.2 rounded border border-slate-200">
                                 {streamStudentsCount}
                               </span>
+                              
+                              <button
+                                type="button"
+                                onClick={() => setActiveMonitorReg({ className: setting.className, stream: st })}
+                                className="p-1 rounded bg-white border border-slate-200 text-blue-600 hover:bg-blue-50 transition-colors"
+                                title="Sajili Monitor/Monitress"
+                              >
+                                <UserCheck className="w-3 h-3" />
+                              </button>
+
                               <button
                                 type="button"
                                 onClick={() => handleDeleteStream(setting.className, st)}
@@ -469,6 +581,7 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
                               >
                                 <X className="w-3 h-3" />
                               </button>
+
                             </span>
                           );
                         })}
@@ -524,6 +637,25 @@ export const ClassStreamManagerModal: React.FC<ClassStreamManagerModalProps> = (
         </div>
 
       </div>
+
+      {/* Monitor Registration Modal */}
+      {activeMonitorReg && (
+        <MonitorRegistrationModal
+          isOpen={!!activeMonitorReg}
+          onClose={() => setActiveMonitorReg(null)}
+          className={activeMonitorReg.className}
+          stream={activeMonitorReg.stream}
+          schoolId={schoolId || ''}
+          users={users || []}
+          students={students || []}
+          initialMonitorId={classMonitors[`${activeMonitorReg.className}_${activeMonitorReg.stream}`]?.monitorId}
+          initialMonitressId={classMonitors[`${activeMonitorReg.className}_${activeMonitorReg.stream}`]?.monitressId}
+          initialMonitorName={classMonitors[`${activeMonitorReg.className}_${activeMonitorReg.stream}`]?.monitorName}
+          initialMonitressName={classMonitors[`${activeMonitorReg.className}_${activeMonitorReg.stream}`]?.monitressName}
+          onSave={handleSaveMonitors}
+        />
+      )}
     </div>
   );
 };
+

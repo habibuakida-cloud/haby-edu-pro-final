@@ -46,18 +46,32 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
   teachers = [],
   schemesOfWork = [],
   onSaveSchemeOfWork,
-  onNavigateToLessonPlan
+  onNavigateToLessonPlan,
+  academicTermDates
 }) => {
   // Generation & Selection State
   const [selectedSubject, setSelectedSubject] = useState<string>('Physics');
   const [selectedClass, setSelectedClass] = useState<string>('Form 3');
   const [selectedStream, setSelectedStream] = useState<string>('All Streams');
   const [curriculumType, setCurriculumType] = useState<CurriculumType>('NEW_CBC_2023');
-  const [selectedTerm, setSelectedTerm] = useState<'Term 1' | 'Term 2' | 'Full Year'>('Term 1');
+  const [selectedTerm, setSelectedTerm] = useState<'Term 1' | 'Term 2' | 'Full Year'>('Full Year');
   const [academicYear, setAcademicYear] = useState<string>('2026');
   const [periodsPerWeek, setPeriodsPerWeek] = useState<number>(4);
   const [topics, setTopics] = useState<string>('');
   const [language, setLanguage] = useState<'Kiswahili' | 'English'>('English');
+  const [showTermDatesEditor, setShowTermDatesEditor] = useState<boolean>(false);
+
+  // Editable Term Dates synced with school's configured Mihula
+  const [localTermDates, setLocalTermDates] = useState<AcademicTermDates>(() => ({
+    yearOpeningDate: academicTermDates?.yearOpeningDate || '2026-01-12',
+    midTerm1BreakStart: academicTermDates?.midTerm1BreakStart || '2026-03-27',
+    midTerm1BreakEnd: academicTermDates?.midTerm1BreakEnd || '2026-04-13',
+    terminalBreakStart: academicTermDates?.terminalBreakStart || '2026-06-05',
+    terminalBreakEnd: academicTermDates?.terminalBreakEnd || '2026-07-06',
+    midTerm2BreakStart: academicTermDates?.midTerm2BreakStart || '2026-08-28',
+    midTerm2BreakEnd: academicTermDates?.midTerm2BreakEnd || '2026-09-14',
+    annualBreakStart: academicTermDates?.annualBreakStart || '2026-11-27'
+  }));
 
   // Active sub-tab: 'scheme' vs 'logbook'
   const [activeTab, setActiveTab] = useState<'scheme' | 'logbook'>('scheme');
@@ -70,10 +84,12 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
       'All Streams',
       'NEW_CBC_2023',
       '2026',
-      'Term 1',
+      'Full Year',
       currentUser?.fullName || 'Academic Master',
       schoolInfo.schoolNumber || 'DEMO_SCHOOL',
-      4
+      4,
+      'English',
+      academicTermDates
     );
   });
 
@@ -86,8 +102,9 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
     setTimeout(() => setToastMessage(null), 3500);
   };
 
-  // Generate a brand new Scheme of Work based on form controls
+  // Generate a brand new Scheme of Work based on form controls + Mihula + Vipindi kwa Wiki
   const handleGenerate = () => {
+    const parsedTopics = topics.split(',').map(t => t.trim()).filter(Boolean);
     const generated = generateAutoSchemeOfWork(
       selectedSubject,
       selectedClass,
@@ -98,19 +115,26 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
       currentUser?.fullName || 'Teacher',
       schoolInfo.schoolNumber || 'DEMO_SCHOOL',
       periodsPerWeek,
-      language
+      language,
+      localTermDates,
+      parsedTopics.length > 0 ? parsedTopics : undefined
     );
     setCurrentScheme(generated);
-    showToast(`📋 Imefungua Azimio Halisi la TET kwa ${selectedSubject} (${selectedClass} - ${selectedTerm})!`);
+    showToast(`📋 Imepanga Azimio la Kazi (${selectedSubject} - ${selectedClass}) kwa kufuata Mihula (${selectedTerm}) na Vipindi ${periodsPerWeek} kwa Wiki!`);
   };
 
-  // AI-Powered Smart Scheme Generation
+  // AI-Powered Smart Scheme Generation with fast timeout & automatic fallback
   const handleAIGenerate = async () => {
     setIsGeneratingAI(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 6000);
+    const parsedTopics = topics.split(',').map(t => t.trim()).filter(Boolean);
+
     try {
       const res = await fetch('/api/ai/generate-scheme', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           subject: selectedSubject,
           className: selectedClass,
@@ -121,20 +145,42 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           teacherName: currentUser?.fullName || 'Teacher',
           schoolName: schoolInfo.name || 'HABY EDU PRO',
           periodsPerWeek,
-          topics: topics.split(',').map(t => t.trim()).filter(Boolean),
-          language
+          topics: parsedTopics,
+          language,
+          academicTermDates: localTermDates
         })
       });
+      clearTimeout(timeoutId);
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
 
       const json = await res.json();
-      if (json.success && json.data) {
+      if (json.success && json.data && Array.isArray(json.data.items) && json.data.items.length > 0) {
         const aiData = json.data;
+        // Also generate template dates from localTermDates so dates always match configured Mihula
+        const fallbackTemplate = generateAutoSchemeOfWork(
+          selectedSubject,
+          selectedClass,
+          selectedStream,
+          curriculumType,
+          academicYear,
+          selectedTerm,
+          currentUser?.fullName || 'Teacher',
+          schoolInfo.schoolNumber || 'DEMO_SCHOOL',
+          periodsPerWeek,
+          language,
+          localTermDates,
+          parsedTopics.length > 0 ? parsedTopics : undefined
+        );
+
         const items: SchemeOfWorkItem[] = (aiData.items || []).map((item: any, idx: number) => ({
           id: `scheme_item_ai_${idx}_${Date.now()}`,
           weekNumber: item.weekNumber || idx + 1,
-          datesOrMonth: item.datesOrMonth || `Week ${idx + 1}`,
-          mainTopicOrCompetence: item.mainTopicOrCompetence || 'Main Topic',
-          subTopicOrSpecificCompetence: item.subTopicOrSpecificCompetence || 'Subtopic',
+          datesOrMonth: fallbackTemplate.items[idx]?.datesOrMonth || item.datesOrMonth || `Week ${idx + 1}`,
+          mainTopicOrCompetence: item.mainTopicOrCompetence || fallbackTemplate.items[idx]?.mainTopicOrCompetence || 'Main Topic',
+          subTopicOrSpecificCompetence: item.subTopicOrSpecificCompetence || fallbackTemplate.items[idx]?.subTopicOrSpecificCompetence || 'Subtopic',
           learningActivitiesOrObjectives: item.learningActivitiesOrObjectives || 'Activities',
           teachingActivities: item.teachingActivities || 'Teaching activities',
           teachingMaterials: item.teachingMaterials || 'Materials',
@@ -147,7 +193,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
         const logBookEntries: TeachingLogBookEntry[] = (aiData.logBookEntries || []).map((log: any, idx: number) => ({
           id: `log_entry_ai_${idx}_${Date.now()}`,
           schemeItemId: items[idx]?.id || `scheme_item_ai_${idx}`,
-          date: log.date || `2026-0${Math.min(1 + Math.floor(idx / 4), 4)}-${String(12 + (idx % 4) * 7).padStart(2, '0')}`,
+          date: log.date || `2026-0${Math.min(1 + Math.floor(idx / 4), 9)}-${String(12 + (idx % 4) * 5).padStart(2, '0')}`,
           className: selectedClass,
           stream: selectedStream || 'Stream A',
           periodTime: log.periodTime || (language === 'Kiswahili' ? 'Kipindi cha 2 & 3 (08:40 - 10:00)' : 'Period 2 & 3 (08:40 - 10:00)'),
@@ -179,13 +225,12 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           updatedAt: new Date().toISOString()
         });
 
-        showToast(`✨ Gemini AI: Imekamilisha Azimio Halisi na Kumbukumbu za Kufundisha kwa ${selectedSubject}!`);
+        showToast(`✨ AI Generator: Imekamilisha Azimio la Kazi la ${selectedSubject} (${selectedTerm} • Vipindi ${periodsPerWeek}/Wiki) kwa kufuata Mihula!`);
       } else {
-        // Fallback to local authentic generator
         handleGenerate();
       }
     } catch (err) {
-      console.warn('AI Generation offline or key missing, falling back to local generator:', err);
+      clearTimeout(timeoutId);
       handleGenerate();
     } finally {
       setIsGeneratingAI(false);
@@ -396,7 +441,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           </div>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-8 gap-3">
           {/* Syllabus Selector */}
           <div className="col-span-2">
             <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Mtaala wa TET / Syllabus (Auto-fill)</label>
@@ -419,11 +464,12 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
                     currentUser?.fullName || 'Teacher',
                     schoolInfo.schoolNumber || 'DEMO_SCHOOL',
                     periodsPerWeek,
-                    targetLang
+                    targetLang,
+                    localTermDates
                   );
                   setCurrentScheme(generated);
                   setTopics(generated.items.map(it => it.mainTopicOrCompetence).slice(0, 4).join(', '));
-                  showToast(`📋 Imepakia Mtaala Rasmi wa TET kwa ${sub} (${selectedClass})!`);
+                  showToast(`📋 Imepakia Mtaala Rasmi wa TET kwa ${sub} (${selectedClass}) kwa kufuata Mihula!`);
                 }
               }}
               className="w-full px-2.5 py-1.5 text-xs font-semibold border border-blue-300 rounded-xl bg-blue-50 focus:bg-white"
@@ -436,7 +482,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           </div>
           {/* Subject */}
           <div>
-            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Subject</label>
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Subject (Somo)</label>
             <select
               value={selectedSubject}
               onChange={e => {
@@ -484,7 +530,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
 
           {/* Stream */}
           <div>
-            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Stream</label>
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Stream (Mkondo)</label>
             <select
               value={selectedStream}
               onChange={e => setSelectedStream(e.target.value)}
@@ -511,23 +557,49 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
             </select>
           </div>
 
-          {/* Term */}
+          {/* Term (Muhula) */}
           <div>
-            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Term</label>
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Muhula (Term)</label>
             <select
               value={selectedTerm}
               onChange={e => setSelectedTerm(e.target.value as any)}
-              className="w-full px-2.5 py-1.5 text-xs font-semibold border border-slate-300 rounded-xl bg-slate-50 focus:bg-white"
+              className="w-full px-2.5 py-1.5 text-xs font-bold border border-amber-300 rounded-xl bg-amber-50/60 text-amber-950 focus:bg-white"
             >
-              <option value="Term 1">Term 1</option>
-              <option value="Term 2">Term 2</option>
-              <option value="Full Year">Full Year (Mwaka Mzima)</option>
+              <option value="Full Year">Full Year (Mwaka Mzima - Muhula I &amp; II)</option>
+              <option value="Term 1">Term 1 (Muhula wa I)</option>
+              <option value="Term 2">Term 2 (Muhula wa II)</option>
             </select>
           </div>
-          
-          {/* Topics & Language */}
+
+          {/* Vipindi kwa Wiki (Periods per Week) */}
           <div>
-            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Language</label>
+            <label className="text-[10px] font-black text-emerald-800 uppercase block mb-1">
+              Vipindi kwa Wiki (Periods/Wk)
+            </label>
+            <div className="flex items-center gap-1">
+              <input
+                type="number"
+                min={1}
+                max={20}
+                value={periodsPerWeek}
+                onChange={e => {
+                  const val = Math.max(1, Math.min(20, Number(e.target.value) || 1));
+                  setPeriodsPerWeek(val);
+                  // Also immediately update currentScheme periodsPerWeek & rows
+                  setCurrentScheme(prev => ({
+                    ...prev,
+                    periodsPerWeek: val,
+                    items: prev.items.map(it => ({ ...it, periodsCount: val }))
+                  }));
+                }}
+                className="w-full px-2.5 py-1.5 text-xs font-black border-2 border-emerald-400 rounded-xl bg-emerald-50 text-emerald-950 focus:bg-white text-center"
+              />
+            </div>
+          </div>
+
+          {/* Language */}
+          <div>
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Language (Lugha)</label>
             <select
               value={language}
               onChange={e => setLanguage(e.target.value as any)}
@@ -537,11 +609,28 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
               <option value="Kiswahili">Kiswahili</option>
             </select>
           </div>
-          <div className="col-span-2">
-            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Manage Topics</label>
-            <div className="flex flex-wrap gap-2 mb-2">
+
+          {/* Mihula / Term Dates Toggle Button */}
+          <div className="col-span-2 flex items-end">
+            <button
+              type="button"
+              onClick={() => setShowTermDatesEditor(prev => !prev)}
+              className={`w-full py-1.5 px-3 rounded-xl text-xs font-black border flex items-center justify-center gap-1.5 cursor-pointer transition ${
+                showTermDatesEditor
+                  ? 'bg-blue-900 text-white border-blue-900'
+                  : 'bg-blue-50 hover:bg-blue-100 text-blue-900 border-blue-200'
+              }`}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              <span>📅 Kalenda ya Mihula ({localTermDates.yearOpeningDate} → {localTermDates.annualBreakStart})</span>
+            </button>
+          </div>
+
+          <div className="col-span-3">
+            <label className="text-[10px] font-bold text-slate-600 uppercase block mb-1">Mada Maalum / Manage Topics (Optional)</label>
+            <div className="flex flex-wrap gap-1.5 mb-1.5">
               {topics.split(',').map(t => t.trim()).filter(Boolean).map((topic, idx) => (
-                <span key={idx} className="px-2 py-1 bg-blue-100 text-blue-800 text-[10px] font-bold rounded-lg flex items-center gap-1">
+                <span key={idx} className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[10px] font-bold rounded-lg flex items-center gap-1">
                   {topic}
                   <button 
                     onClick={() => setTopics(topics.split(',').map(t => t.trim()).filter(Boolean).filter((_, i) => i !== idx).join(', '))}
@@ -555,7 +644,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
             <div className="flex gap-2">
               <input
                 type="text"
-                placeholder="Enter topic..."
+                placeholder="Weka mada maalum kisha bonyeza Add..."
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     const val = e.currentTarget.value.trim();
@@ -579,7 +668,7 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
                     input.value = '';
                   }
                 }}
-                className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold"
+                className="px-3 py-1.5 bg-slate-800 text-white rounded-xl text-xs font-bold cursor-pointer"
               >
                 Add
               </button>
@@ -587,25 +676,123 @@ export const SchemeOfWorkView: React.FC<SchemeOfWorkViewProps> = ({
           </div>
 
           {/* Action Buttons */}
-          <div className="lg:col-span-2 flex items-end gap-2">
+          <div className="col-span-2 lg:col-span-2 flex items-end gap-2">
             <button
               type="button"
               disabled={isGeneratingAI}
               onClick={handleAIGenerate}
-              className="flex-1 py-2 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+              className="flex-1 py-2 px-3 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 text-white rounded-xl text-xs font-black shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
             >
               <Sparkles className={`w-3.5 h-3.5 text-amber-300 ${isGeneratingAI ? 'animate-spin' : ''}`} />
-              <span>{isGeneratingAI ? 'AI Generating...' : '✨ AI Smart Generate'}</span>
+              <span>{isGeneratingAI ? 'Inapanga Azimio...' : '✨ AI Generate Scheme'}</span>
             </button>
             <button
               type="button"
               onClick={handleGenerate}
-              className="py-2 px-3 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold border border-slate-300 flex items-center justify-center gap-1 cursor-pointer transition"
+              className="py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black flex items-center justify-center gap-1 cursor-pointer transition shadow-xs"
             >
-              <span>Instant</span>
+              <span>Panga Sasa</span>
             </button>
           </div>
         </div>
+
+        {/* Mihula / Academic Term Dates Configuration Panel */}
+        {showTermDatesEditor && (
+          <div className="p-4 bg-blue-50/70 border border-blue-200 rounded-2xl space-y-3 animate-in fade-in">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h4 className="text-xs font-black text-blue-950 uppercase flex items-center gap-1.5">
+                  <Calendar className="w-4 h-4 text-blue-700" />
+                  <span>Mpangilio wa Mihula ya Shule (Academic Term Dates Used in Scheme of Work)</span>
+                </h4>
+                <p className="text-[11px] text-slate-600 font-medium">
+                  Azimio la Kazi linapangwa kwa kufuata tarehe za kufungua shule, likizo fupi za nusu muhula (Midterm), na kufunga muhula (Terminal &amp; Annual).
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleGenerate}
+                className="px-3 py-1.5 bg-blue-800 hover:bg-blue-900 text-white rounded-xl text-xs font-black cursor-pointer"
+              >
+                Tumia Mihula Hii Kupanga Azimio
+              </button>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2.5">
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-1">Kufungua Mwaka (Term 1 Start)</label>
+                <input
+                  type="date"
+                  value={localTermDates.yearOpeningDate}
+                  onChange={e => setLocalTermDates(prev => ({ ...prev, yearOpeningDate: e.target.value }))}
+                  className="w-full px-2 py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-1">Midterm I Kuanza</label>
+                <input
+                  type="date"
+                  value={localTermDates.midTerm1BreakStart}
+                  onChange={e => setLocalTermDates(prev => ({ ...prev, midTerm1BreakStart: e.target.value }))}
+                  className="w-full px-2 py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-1">Midterm I Kuisha</label>
+                <input
+                  type="date"
+                  value={localTermDates.midTerm1BreakEnd}
+                  onChange={e => setLocalTermDates(prev => ({ ...prev, midTerm1BreakEnd: e.target.value }))}
+                  className="w-full px-2 py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-1">Kufunga Muhula I (Terminal)</label>
+                <input
+                  type="date"
+                  value={localTermDates.terminalBreakStart}
+                  onChange={e => setLocalTermDates(prev => ({ ...prev, terminalBreakStart: e.target.value }))}
+                  className="w-full px-2 py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-1">Kufungua Muhula II</label>
+                <input
+                  type="date"
+                  value={localTermDates.terminalBreakEnd}
+                  onChange={e => setLocalTermDates(prev => ({ ...prev, terminalBreakEnd: e.target.value }))}
+                  className="w-full px-2 py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-1">Midterm II Kuanza</label>
+                <input
+                  type="date"
+                  value={localTermDates.midTerm2BreakStart}
+                  onChange={e => setLocalTermDates(prev => ({ ...prev, midTerm2BreakStart: e.target.value }))}
+                  className="w-full px-2 py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-1">Midterm II Kuisha</label>
+                <input
+                  type="date"
+                  value={localTermDates.midTerm2BreakEnd}
+                  onChange={e => setLocalTermDates(prev => ({ ...prev, midTerm2BreakEnd: e.target.value }))}
+                  className="w-full px-2 py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-bold text-slate-700 block mb-1">Kufunga Mwaka (Annual)</label>
+                <input
+                  type="date"
+                  value={localTermDates.annualBreakStart}
+                  onChange={e => setLocalTermDates(prev => ({ ...prev, annualBreakStart: e.target.value }))}
+                  className="w-full px-2 py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg"
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Main View Area */}

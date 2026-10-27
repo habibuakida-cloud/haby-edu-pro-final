@@ -917,13 +917,17 @@ export async function exportInvigilationPDF(options: {
   teachers: Teacher[];
   invigilationAssignments: Record<string, number>;
   schoolInfo?: SchoolInfo;
+  examTitle?: string;
+  mode?: 'download' | 'print';
 }): Promise<void> {
   const {
     schoolName,
     sessions,
     teachers,
     invigilationAssignments,
-    schoolInfo
+    schoolInfo,
+    examTitle = 'Midterm Examination 2026',
+    mode = 'download'
   } = options;
 
   const teacherMap = new Map<number | string, Teacher>();
@@ -945,7 +949,7 @@ export async function exportInvigilationPDF(options: {
   try {
     const origin = typeof window !== 'undefined' ? window.location.origin : '';
     const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-    const verifyUrl = `${origin}${pathname}?verifyMasterInvigilation=true`;
+    const verifyUrl = `${origin}${pathname}?verifyMasterInvigilation=true&exam=${encodeURIComponent(examTitle)}`;
     qrDataUrl = await QRCode.toDataURL(verifyUrl, { margin: 1 });
   } catch (err) {
     console.warn('QR Code generation error:', err);
@@ -953,7 +957,7 @@ export async function exportInvigilationPDF(options: {
 
   // Header Banner
   doc.setFillColor(31, 77, 139);
-  doc.roundedRect(margin, y, contentWidth, 20, 2, 2, 'F');
+  doc.roundedRect(margin, y, contentWidth, 23, 2, 2, 'F');
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
@@ -963,23 +967,28 @@ export async function exportInvigilationPDF(options: {
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7.5);
   doc.setTextColor(224, 231, 255);
-  doc.text(`ANWANI: ${schoolInfo?.address || 'P.O. BOX 145, TANGA'}  •  SIMU: ${schoolInfo?.phone || '0717616343'}`, pageWidth / 2, y + 12, { align: 'center' });
+  doc.text(`ANWANI: ${schoolInfo?.address || 'P.O. BOX 145, TANGA'}  •  SIMU: ${schoolInfo?.phone || '0717616343'}`, pageWidth / 2, y + 11.5, { align: 'center' });
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
+  doc.setFontSize(8.5);
   doc.setTextColor(254, 240, 138);
-  doc.text('RATIBA RASMI YA USIMAMIZI WA MITIHANI (EXAMINATION INVIGILATION TIMETABLE)', pageWidth / 2, y + 17, { align: 'center' });
+  doc.text(`RATIBA RASMI YA USIMAMIZI WA MITIHANI: ${examTitle.toUpperCase()}`, pageWidth / 2, y + 16.5, { align: 'center' });
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(6.8);
+  doc.setTextColor(191, 219, 254);
+  doc.text(`OFFICIAL EXAMINATION INVIGILATION TIMETABLE  •  JINA LA MTIHANI: ${examTitle.toUpperCase()}  •  VIPINDI: ${sessions.length}`, pageWidth / 2, y + 20.5, { align: 'center' });
 
   if (qrDataUrl) {
     doc.setFillColor(255, 255, 255);
-    doc.roundedRect(pageWidth - margin - 19, y + 2, 16, 16, 1, 1, 'F');
-    doc.addImage(qrDataUrl, 'PNG', pageWidth - margin - 18.2, y + 2.5, 14.5, 14.5);
+    doc.roundedRect(pageWidth - margin - 20, y + 2.5, 18, 18, 1, 1, 'F');
+    doc.addImage(qrDataUrl, 'PNG', pageWidth - margin - 19, y + 3.2, 16, 16);
   }
 
-  y += 24;
+  y += 26;
 
   const tableHead = [
-    ['#', 'TAREHE & SIKU', 'KIPINDI (SESSION)', 'MUDA', 'DARASA & MKONDO', 'SOMO LA MTIHANI', 'VYUMBA NA WASIMAMIZI (INVIGILATORS)']
+    ['#', 'MTIHANI (EXAM)', 'TAREHE & SIKU', 'KIPINDI (SESSION)', 'MUDA', 'DARASA & MKONDO', 'SOMO LA MTIHANI', 'VYUMBA NA WASIMAMIZI (INVIGILATORS)']
   ];
 
   const tableBody = sessions.map((s, idx) => {
@@ -993,6 +1002,7 @@ export async function exportInvigilationPDF(options: {
 
     return [
       idx + 1,
+      s.examTitle || examTitle,
       `${s.date || ''}\n(${s.day || ''})`,
       s.session || 'SESSION I',
       `${s.start || ''} - ${s.end || ''}`,
@@ -1010,26 +1020,27 @@ export async function exportInvigilationPDF(options: {
     headStyles: {
       fillColor: [31, 77, 139],
       textColor: [255, 255, 255],
-      fontSize: 7.5,
+      fontSize: 7.2,
       fontStyle: 'bold',
       halign: 'center',
       valign: 'middle',
-      cellPadding: 2.5
+      cellPadding: 2
     },
     bodyStyles: {
-      fontSize: 7,
+      fontSize: 6.8,
       valign: 'middle',
       textColor: [30, 41, 59],
-      cellPadding: 2.5
+      cellPadding: 2
     },
     columnStyles: {
-      0: { cellWidth: 10, halign: 'center' },
-      1: { cellWidth: 32, fontStyle: 'bold', halign: 'center' },
-      2: { cellWidth: 28, halign: 'center' },
+      0: { cellWidth: 8, halign: 'center' },
+      1: { cellWidth: 34, fontStyle: 'bold', textColor: [30, 58, 138] },
+      2: { cellWidth: 28, fontStyle: 'bold', halign: 'center' },
       3: { cellWidth: 24, halign: 'center' },
-      4: { cellWidth: 34, fontStyle: 'bold', halign: 'center' },
-      5: { cellWidth: 45, fontStyle: 'bold' },
-      6: { cellWidth: 'auto' }
+      4: { cellWidth: 22, halign: 'center' },
+      5: { cellWidth: 30, fontStyle: 'bold', halign: 'center' },
+      6: { cellWidth: 38, fontStyle: 'bold' },
+      7: { cellWidth: 'auto' }
     },
     margin: { left: margin, right: margin }
   });
@@ -1043,8 +1054,37 @@ export async function exportInvigilationPDF(options: {
   doc.text('Mratibu wa Mitihani: ___________________________', margin + 4, finalY + 4);
   doc.text('Mkuu wa Shule / Stamp: ___________________________', pageWidth - margin - 4, finalY + 4, { align: 'right' });
 
-  const filename = `Ratiba_Usimamizi_Mitihani_${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(filename);
+  const safeExam = examTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const filename = `Ratiba_Usimamizi_${safeExam}_${new Date().toISOString().split('T')[0]}.pdf`;
+
+  if (mode === 'print') {
+    doc.autoPrint();
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+    let printIframe = document.getElementById('haby-invigilation-pdf-print-frame') as HTMLIFrameElement | null;
+    if (printIframe) printIframe.remove();
+    printIframe = document.createElement('iframe');
+    printIframe.id = 'haby-invigilation-pdf-print-frame';
+    printIframe.style.position = 'fixed';
+    printIframe.style.right = '0';
+    printIframe.style.bottom = '0';
+    printIframe.style.width = '1px';
+    printIframe.style.height = '1px';
+    printIframe.style.border = '0';
+    printIframe.style.opacity = '0.01';
+    printIframe.src = blobUrl;
+    document.body.appendChild(printIframe);
+    printIframe.onload = () => {
+      try {
+        printIframe?.contentWindow?.focus();
+        printIframe?.contentWindow?.print();
+      } catch (e) {
+        window.print();
+      }
+    };
+  } else {
+    doc.save(filename);
+  }
 }
 
 /**
@@ -1053,17 +1093,23 @@ export async function exportInvigilationPDF(options: {
 export async function exportTeacherInvigilationPDF(options: {
   schoolName: string;
   teacher: Teacher;
+  examTitle?: string;
   sessions: InvigilationSession[];
   invigilationAssignments: Record<string, number>;
   schoolInfo?: SchoolInfo;
+  mode?: 'download' | 'print';
 }): Promise<void> {
   const {
     schoolName,
     teacher,
+    examTitle,
     sessions,
     invigilationAssignments,
-    schoolInfo
+    schoolInfo,
+    mode = 'download'
   } = options;
+
+  const resolvedExamTitle = (examTitle || 'MTIHANI WA SHULE').toUpperCase();
 
   const doc = new jsPDF({
     orientation: 'landscape',
@@ -1105,7 +1151,7 @@ export async function exportTeacherInvigilationPDF(options: {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
   doc.setTextColor(254, 240, 138);
-  doc.text(`RATIBA BINAFSI YA USIMAMIZI WA MITIHANI (TEACHER INVIGILATION TIMETABLE) — MWL. ${(teacher?.name || '').toUpperCase()} (${teacher?.initial || '--'})`, pageWidth / 2, y + 15, { align: 'center' });
+  doc.text(`RATIBA BINAFSI YA USIMAMIZI: ${resolvedExamTitle} — MWL. ${(teacher?.name || '').toUpperCase()} (${teacher?.initial || '--'})`, pageWidth / 2, y + 15, { align: 'center' });
 
   if (qrDataUrl) {
     doc.setFillColor(255, 255, 255);
@@ -1140,7 +1186,7 @@ export async function exportTeacherInvigilationPDF(options: {
   doc.setFontSize(7.2);
   doc.setTextColor(30, 58, 138);
   doc.text(`Mwalimu: ${teacher.name} (Initial: ${teacher.initial || '--'})`, margin + 3, y + 5.2);
-  doc.text(`Wadhifa: ${teacher.schoolRole || 'Msimamizi wa Mtihani'}`, margin + 95, y + 5.2);
+  doc.text(`Mtihani: ${resolvedExamTitle}`, margin + 95, y + 5.2);
   doc.text(`Jumla ya Vipindi vya Usimamizi: ${teacherDuties.length} Sessions`, pageWidth - margin - 3, y + 5.2, { align: 'right' });
 
   y += 10.5;
@@ -1245,15 +1291,45 @@ export async function exportTeacherInvigilationPDF(options: {
   doc.setFontSize(6);
   doc.setTextColor(148, 163, 184);
   doc.text(
-    `HabyEduPro3A • Ratiba Binafsi ya Usimamizi • ${teacher.name} (${teacher.initial || '--'}) • Tarehe: ${new Date().toLocaleDateString('en-GB')}`,
+    `HabyEduPro3A • Ratiba Binafsi ya Usimamizi (${resolvedExamTitle}) • ${teacher.name} (${teacher.initial || '--'}) • Tarehe: ${new Date().toLocaleDateString('en-GB')}`,
     pageWidth / 2,
     pageHeight - 3,
     { align: 'center' }
   );
 
   const cleanTeacher = teacher.name.replace(/[^a-zA-Z0-9]/g, '_');
-  const filename = `Ratiba_Usimamizi_${cleanTeacher}_${new Date().toISOString().split('T')[0]}.pdf`;
-  doc.save(filename);
+  const cleanExam = resolvedExamTitle.replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = `Ratiba_Usimamizi_${cleanExam}_${cleanTeacher}_${new Date().toISOString().split('T')[0]}.pdf`;
+
+  if (mode === 'print' && typeof window !== 'undefined') {
+    doc.autoPrint();
+    const blobUrl = String(doc.output('bloburl'));
+    let printIframe = document.getElementById('pdf-print-iframe') as HTMLIFrameElement | null;
+    if (printIframe) {
+      printIframe.remove();
+    }
+    printIframe = document.createElement('iframe');
+    printIframe.id = 'pdf-print-iframe';
+    printIframe.style.position = 'fixed';
+    printIframe.style.right = '0';
+    printIframe.style.bottom = '0';
+    printIframe.style.width = '1px';
+    printIframe.style.height = '1px';
+    printIframe.style.border = '0';
+    printIframe.style.opacity = '0.01';
+    printIframe.src = blobUrl;
+    document.body.appendChild(printIframe);
+    printIframe.onload = () => {
+      try {
+        printIframe?.contentWindow?.focus();
+        printIframe?.contentWindow?.print();
+      } catch (e) {
+        window.print();
+      }
+    };
+  } else {
+    doc.save(filename);
+  }
 }
 
 /**
@@ -2587,5 +2663,572 @@ export function exportTeacherProgressionReportPDF(options: ExportTeacherProgress
     doc.save(fileName);
   }
 }
+
+export interface ExamControlPdfReportOptions {
+  reportType: 'dispatch_checklist' | 'reconciliation_report' | 'setting_tracker' | 'script_marking' | 'ream_calculator';
+  examTitle: string;
+  periodLabel?: string;
+  schoolName?: string;
+  schoolInfo?: SchoolInfo;
+  officerName?: string;
+  dispatchRecords?: any[];
+  settingRecords?: any[];
+  scriptRecords?: any[];
+  reamRecords?: any[];
+  reamSummary?: {
+    totalStudents?: number;
+    totalSubjects?: number;
+    totalSheets?: number;
+    exactReams?: number;
+    wholeReamsToBuy?: number;
+    sheetsPerReam?: number;
+    printModeLabel?: string;
+    extraCopiesPerExam?: number;
+    pricePerReam?: number;
+    totalEstimatedCost?: number;
+    classBreakdown?: Array<{
+      className: string;
+      studentCount: number;
+      subjectsCount: number;
+      totalSheets: number;
+      exactReams: number;
+      wholeReams: number;
+    }>;
+  };
+  mode?: 'download' | 'print';
+}
+
+/**
+ * Generates an official, printable & downloadable A4 PDF for Exam Control & Tracking
+ * (Mitihani Vyumbani Check-in/Check-out, Ripoti ya Urejesho, Utungaji Mitihani, Script za Kusahihisha, Makadirio ya Ream)
+ * with the specific Exam Title and Period Scope prominently displayed in the header.
+ */
+export function exportExamControlReportPDF(options: ExamControlPdfReportOptions) {
+  const {
+    reportType,
+    examTitle = 'Midterm Examination 2026',
+    periodLabel,
+    schoolName = 'HABY EDUPRO ACADEMY',
+    schoolInfo,
+    officerName = 'Afisa Mitihani',
+    dispatchRecords = [],
+    settingRecords = [],
+    scriptRecords = [],
+    reamRecords = [],
+    reamSummary,
+    mode = 'download'
+  } = options;
+
+  const doc = new jsPDF({
+    orientation: 'landscape',
+    unit: 'mm',
+    format: 'a4'
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 10;
+  const contentWidth = pageWidth - margin * 2;
+  let y = margin;
+
+  const resolvedSchoolName = (schoolInfo?.name || schoolName || 'HABY EDUPRO ACADEMY').toUpperCase();
+  const resolvedAddress = schoolInfo?.address || 'P.O. BOX 145, TANGA, TANZANIA';
+  const resolvedPhone = schoolInfo?.phone || '0717616343';
+
+  const reportTitles: Record<ExamControlPdfReportOptions['reportType'], string> = {
+    dispatch_checklist: 'FOMU YA UDHIBITI WA MITIHANI VYUMBANI (CHECK-IN & CHECK-OUT LOG)',
+    reconciliation_report: 'RIPOTI RASMI YA UREJESHO WA MITIHANI (NANI KARUDISHA VS NANI HAJARUDISHA)',
+    setting_tracker: 'FOMU YA UFUATILIAJI WA UTUNGAJI NA UHAKIKI WA MITIHANI (DARASA ZIMA / WHOLE CLASS)',
+    script_marking: 'FOMU YA UDHIBITI WA SCRIPT ZA KUSAHIHISHA (EXAM SCRIPT MARKING LOG)',
+    ream_calculator: 'MAKADIRIO YA MAHITAJI YA REAM NA URUDUFISHAJI WA MITIHANI (EXAM PAPER & REAM ESTIMATE)'
+  };
+
+  const drawHeader = (isContinuation = false) => {
+    doc.setFillColor(15, 23, 42);
+    doc.roundedRect(margin, y, contentWidth, isContinuation ? 14 : 24, 2, 2, 'F');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(isContinuation ? 10 : 13.5);
+    doc.setTextColor(255, 255, 255);
+    doc.text(resolvedSchoolName, pageWidth / 2, y + (isContinuation ? 5.5 : 6.5), { align: 'center' });
+
+    if (!isContinuation) {
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(7.5);
+      doc.setTextColor(203, 213, 225);
+      doc.text(`IDARA YA TAALUMA NA MITIHANI  •  ANWANI: ${resolvedAddress}  •  SIMU: ${resolvedPhone}`, pageWidth / 2, y + 11.5, { align: 'center' });
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(isContinuation ? 8 : 9);
+    doc.setTextColor(251, 191, 36);
+    doc.text(reportTitles[reportType], pageWidth / 2, y + (isContinuation ? 10.5 : 16.5), { align: 'center' });
+
+    if (!isContinuation) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8.2);
+      doc.setTextColor(125, 211, 252);
+      const scopeSuffix = periodLabel ? `  •  [ ${periodLabel.toUpperCase()} ]` : '';
+      doc.text(`MTIHANI UNAOFUATILIWA: ${examTitle.toUpperCase()}${scopeSuffix}`, pageWidth / 2, y + 21.5, { align: 'center' });
+    }
+
+    y += isContinuation ? 17 : 27;
+  };
+
+  drawHeader(false);
+
+  // Summary Info Bar
+  doc.setFillColor(241, 245, 249);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(margin, y, contentWidth, 9, 1.5, 1.5, 'FD');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(30, 41, 59);
+  doc.text(`Mtihani: ${examTitle}${periodLabel ? ` (${periodLabel})` : ''}`, margin + 4, y + 5.8);
+  doc.text(`Afisa Msimamizi: ${officerName}`, margin + 125, y + 5.8);
+  doc.text(`Tarehe ya Kuchapisha: ${new Date().toLocaleDateString('en-GB')} ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`, pageWidth - margin - 4, y + 5.8, { align: 'right' });
+  y += 12;
+
+  if (reportType === 'dispatch_checklist') {
+    const takenCount = dispatchRecords.filter(r => Boolean(r.isTaken) || r.status === 'RETURNED').length;
+    const returnedCount = dispatchRecords.filter(r => Boolean(r.isReturned) || r.status === 'RETURNED').length;
+    const pendingCount = dispatchRecords.length - returnedCount;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(30, 58, 138);
+    doc.text(
+      `MUHTASARI WA UDHIBITI${periodLabel ? ` (${periodLabel})` : ''}: Jumla ya Vipindi: ${dispatchRecords.length}  |  Waliochukua Bahasha: ${takenCount}  |  Waliorudisha Salama: ${returnedCount}  |  Hawajarudisha (Vyumbani): ${pendingCount}`,
+      margin,
+      y
+    );
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [[
+        '#',
+        'Mtihani (Exam)',
+        'Somo & Tarehe',
+        'Darasa & Chumba',
+        'Msimamizi (Invigilator)',
+        'Amechukua Mtihani',
+        'Amerudisha Mtihani',
+        'Scripts Zilizorudishwa',
+        'Hali & Sahihi'
+      ]],
+      body: dispatchRecords.length === 0
+        ? [['—', examTitle, 'Hakuna vipindi vilivyosajiliwa kwa kipindi hiki cha mtihani', '—', '—', '—', '—', '—', '—']]
+        : dispatchRecords.map((r, i) => {
+            const isTaken = Boolean(r.isTaken) || r.status === 'RETURNED';
+            const isReturned = Boolean(r.isReturned) || r.status === 'RETURNED';
+            return [
+              String(i + 1),
+              r.examName || examTitle,
+              `${r.subject}\n${r.date || ''} (${r.sessionTime || ''})`,
+              `${r.className} ${r.stream || ''}\n${r.roomVenue || ''}`,
+              `${r.invigilatorName}${r.invigilatorPhone ? `\nTel: ${r.invigilatorPhone}` : ''}`,
+              isTaken ? `[✓] AMECHUKUA\n(${r.checkoutTime || '08:00'})` : '[  ] HAJACHUKUA',
+              isReturned ? `[✓] AMERUDISHA\n(${r.returnTime || '11:00'})` : '[  ] HAJARUDISHA',
+              isReturned ? `${r.scriptsReturnedCount || 40} Scripts\n(${r.receivedBy || officerName})` : '—',
+              isReturned ? 'IMEREJESHWA' : isTaken ? 'BADO VYUMBANI' : 'INASUBIRI'
+            ];
+          }),
+      theme: 'grid',
+      headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold', halign: 'center' },
+      bodyStyles: { fontSize: 6.8, textColor: [30, 41, 59], valign: 'middle' },
+      didParseCell: data => {
+        if (data.section === 'body' && dispatchRecords.length > 0) {
+          const rec = dispatchRecords[data.row.index];
+          if (!rec) return;
+          const isReturned = Boolean(rec.isReturned) || rec.status === 'RETURNED';
+          const isTaken = Boolean(rec.isTaken) || isReturned;
+          if (data.column.index === 5 && isTaken) {
+            data.cell.styles.textColor = [29, 78, 216];
+            data.cell.styles.fontStyle = 'bold';
+          }
+          if (data.column.index === 6 || data.column.index === 8) {
+            if (isReturned) {
+              data.cell.styles.textColor = [4, 120, 87];
+              data.cell.styles.fillColor = [236, 253, 245];
+              data.cell.styles.fontStyle = 'bold';
+            } else if (isTaken) {
+              data.cell.styles.textColor = [190, 18, 60];
+              data.cell.styles.fillColor = [255, 241, 242];
+              data.cell.styles.fontStyle = 'bold';
+            }
+          }
+        }
+      },
+      margin: { left: margin, right: margin }
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  } else if (reportType === 'reconciliation_report') {
+    const pendingList = dispatchRecords.filter(r => !r.isReturned && r.status !== 'RETURNED');
+    const returnedList = dispatchRecords.filter(r => Boolean(r.isReturned) || r.status === 'RETURNED');
+
+    // Table 1: Pending / Unreturned
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.2);
+    doc.setTextColor(190, 18, 60);
+    doc.text(`1. ORODHA YA WASIMAMIZI AMBAO HAWAJARUDISHA MITIHANI YA ${examTitle.toUpperCase()}${periodLabel ? ` — ${periodLabel.toUpperCase()}` : ''} (JUMLA: ${pendingList.length})`, margin, y);
+    y += 3.5;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Msimamizi (Invigilator)', 'Simu', 'Tarehe & Kipindi', 'Somo & Darasa', 'Chumba / Venue', 'Muda wa Kuchukua', 'Hali ya Bahasha']],
+      body: pendingList.length === 0
+        ? [['✓', 'Mitihani yote imerejeshwa salama! Hakuna mwalimu anayedaiwa mtihani huu.', '—', '—', '—', '—', '—', 'SALAMA (100%)']]
+        : pendingList.map((p, i) => [
+            String(i + 1),
+            p.invigilatorName,
+            p.invigilatorPhone || '—',
+            `${p.date || ''}\n${p.sessionTime || ''}`,
+            `${p.subject} (${p.className} ${p.stream || ''})`,
+            p.roomVenue,
+            p.checkoutTime || '08:00',
+            'HAJARUDISHA (INASHIKILIWA)'
+          ]),
+      theme: 'grid',
+      headStyles: { fillColor: [159, 18, 57], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold', halign: 'center' },
+      bodyStyles: { fontSize: 6.8, textColor: [30, 41, 59], valign: 'middle' },
+      margin: { left: margin, right: margin }
+    });
+    y = (doc as any).lastAutoTable.finalY + 7;
+
+    if (y > pageHeight - 50) {
+      doc.addPage();
+      y = margin;
+      drawHeader(true);
+    }
+
+    // Table 2: Returned
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.2);
+    doc.setTextColor(4, 120, 87);
+    doc.text(`2. ORODHA YA WASIMAMIZI WALIOREJESHA MITIHANI YA ${examTitle.toUpperCase()}${periodLabel ? ` — ${periodLabel.toUpperCase()}` : ''} SALAMA (JUMLA: ${returnedList.length})`, margin, y);
+    y += 3.5;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Msimamizi (Invigilator)', 'Tarehe & Kipindi', 'Somo & Darasa', 'Chumba / Venue', 'Muda wa Kurudisha', 'Scripts Zilizopokelewa', 'Mpokeaji & Uthibitisho']],
+      body: returnedList.length === 0
+        ? [['—', 'Bado hakuna mtihani uliorejeshwa kwenye orodha hii.', '—', '—', '—', '—', '—', '—']]
+        : returnedList.map((r, i) => [
+            String(i + 1),
+            r.invigilatorName,
+            `${r.date || ''}\n${r.sessionTime || ''}`,
+            `${r.subject} (${r.className} ${r.stream || ''})`,
+            r.roomVenue,
+            r.returnTime || '11:00',
+            `${r.scriptsReturnedCount || 40} Scripts`,
+            `${r.receivedBy || officerName} (✓ Imethibitishwa)`
+          ]),
+      theme: 'grid',
+      headStyles: { fillColor: [6, 95, 70], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold', halign: 'center' },
+      bodyStyles: { fontSize: 6.8, textColor: [30, 41, 59], valign: 'middle' },
+      margin: { left: margin, right: margin }
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  } else if (reportType === 'setting_tracker') {
+    const involvedSettingRecords = (settingRecords || []).filter((r: any) => r.isInvolved !== false);
+    const totalInvolved = involvedSettingRecords.length;
+    const countNotSet = involvedSettingRecords.filter((r: any) => r.status === 'NOT_SET').length;
+    const countInProgress = involvedSettingRecords.filter((r: any) => r.status === 'IN_PROGRESS').length;
+    const countSubmitted = involvedSettingRecords.filter((r: any) => r.status === 'SUBMITTED').length;
+    const countVetted = involvedSettingRecords.filter((r: any) => r.status === 'VETTED').length;
+    const countPrinted = involvedSettingRecords.filter((r: any) => r.status === 'PRINTED_AND_SEALED').length;
+    const countCompletedOrSubmitted = countSubmitted + countVetted + countPrinted;
+    const overallProgressPct = totalInvolved > 0 ? Math.round((countCompletedOrSubmitted / totalInvolved) * 100) : 0;
+
+    // 1. Overall Progression Summary Table
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(6, 95, 70);
+    doc.text('1. RIPOTI YA MAENDELEO YA UTUNGAJI WA MITIHANI (PROGRESSION REPORT — WANAOHUSIKA TU)', margin, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['Jumla ya Masomo (Wanaohusika)', '1. Bado Haijatungwa (0%)', '2. Inatungwa (35%)', '3. Imewasilishwa (70%)', '4. Imehakikiwa (90%)', '5. Tayari & Sealed (100%)', 'Wastani wa Kukamilika (%)']],
+      body: [[
+        `${totalInvolved} Masomo`,
+        `${countNotSet}`,
+        `${countInProgress}`,
+        `${countSubmitted}`,
+        `${countVetted}`,
+        `${countPrinted}`,
+        `${overallProgressPct}% (${countCompletedOrSubmitted}/${totalInvolved} Zimewasilishwa+)`
+      ]],
+      theme: 'grid',
+      headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontSize: 6.8, fontStyle: 'bold', halign: 'center' },
+      bodyStyles: { fontSize: 7.2, textColor: [15, 23, 42], fontStyle: 'bold', halign: 'center', valign: 'middle' },
+      margin: { left: margin, right: margin }
+    });
+    y = (doc as any).lastAutoTable.finalY + 5;
+
+    // 2. Class-by-Class (Kidato kwa Kidato) Progression Table
+    const classMap = new Map<string, { total: number; submittedOrMore: number; printed: number; notSet: number; inProgress: number }>();
+    involvedSettingRecords.forEach((r: any) => {
+      const cls = r.className || 'Kidato';
+      const curr = classMap.get(cls) || { total: 0, submittedOrMore: 0, printed: 0, notSet: 0, inProgress: 0 };
+      curr.total += 1;
+      if (r.status === 'NOT_SET') curr.notSet += 1;
+      if (r.status === 'IN_PROGRESS') curr.inProgress += 1;
+      if (r.status === 'SUBMITTED' || r.status === 'VETTED' || r.status === 'PRINTED_AND_SEALED') {
+        curr.submittedOrMore += 1;
+      }
+      if (r.status === 'PRINTED_AND_SEALED') {
+        curr.printed += 1;
+      }
+      classMap.set(cls, curr);
+    });
+
+    if (classMap.size > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(30, 41, 59);
+      doc.text('2. MCHANGANUO WA MAENDELEO KWA KILA KIDATO (CLASS-BY-CLASS PROGRESSION)', margin, y);
+      y += 3.5;
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Kidato / Darasa Zima', 'Jumla ya Mitihani (Wanaohusika)', 'Bado Haijatungwa', 'Inatungwa', 'Zilizowasilishwa / Kuhakikiwa', 'Zilizochapishwa & Sealed', 'Asilimia ya Maendeleo (%)']],
+        body: Array.from(classMap.entries()).map(([className, stats]) => {
+          const pct = stats.total > 0 ? Math.round((stats.submittedOrMore / stats.total) * 100) : 0;
+          return [
+            `${className} (Darasa Zima)`,
+            String(stats.total),
+            String(stats.notSet),
+            String(stats.inProgress),
+            `${stats.submittedOrMore} / ${stats.total}`,
+            `${stats.printed} / ${stats.total}`,
+            `${pct}%`
+          ];
+        }),
+        theme: 'grid',
+        headStyles: { fillColor: [79, 70, 229], textColor: [255, 255, 255], fontSize: 6.8, fontStyle: 'bold', halign: 'center' },
+        bodyStyles: { fontSize: 6.8, textColor: [30, 41, 59], halign: 'center', valign: 'middle' },
+        margin: { left: margin, right: margin }
+      });
+      y = (doc as any).lastAutoTable.finalY + 6;
+    }
+
+    // 3. Detailed Involved Setters Table
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(6, 95, 70);
+    doc.text('3. ORODHA RASMI YA WATUNGAJI WANAOHUSIKA NA HATUA ZA UTUNGAJI', margin, y);
+    y += 4;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Mtihani & Muhula', 'Somo', 'Kidato / Darasa Zima', 'Mwalimu Mtungaji (Anahusika)', 'Deadline', 'Hali ya Utungaji', 'Maendeleo (%)', 'Uhakiki (Vetted By)', 'Maelezo']],
+      body: involvedSettingRecords.length === 0
+        ? [['—', examTitle, 'Hakuna walimu wanaohusika waliobaki kwenye ripoti hii', '—', '—', '—', '—', '—', '—', '—']]
+        : involvedSettingRecords.map((r: any, i: number) => [
+            String(i + 1),
+            `${r.examName || examTitle} (${r.term || 'Term 1'})`,
+            r.subject,
+            `${r.className} (Darasa Zima)`,
+            `${r.teacherName}${r.isHODOverride ? ' (HOD Override)' : ''}`,
+            r.deadlineDate || '—',
+            r.status === 'NOT_SET' ? 'BADO HAIJATUNGWA' :
+            r.status === 'IN_PROGRESS' ? 'INATUNGWA' :
+            r.status === 'SUBMITTED' ? 'IMEWASILISHWA' :
+            r.status === 'VETTED' ? 'IMEHAKIKIWA' : 'IMECHAPISHWA & SEALED',
+            r.status === 'NOT_SET' ? '0%' :
+            r.status === 'IN_PROGRESS' ? '35%' :
+            r.status === 'SUBMITTED' ? '70%' :
+            r.status === 'VETTED' ? '90%' : '100%',
+            r.vettedBy ? `${r.vettedBy} (${r.vettedDate || ''})` : 'Bado kuhakikiwa',
+            r.remarks || '—'
+          ]),
+      theme: 'grid',
+      headStyles: { fillColor: [6, 95, 70], textColor: [255, 255, 255], fontSize: 6.8, fontStyle: 'bold', halign: 'center' },
+      bodyStyles: { fontSize: 6.5, textColor: [30, 41, 59], valign: 'middle' },
+      margin: { left: margin, right: margin }
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  } else if (reportType === 'script_marking') {
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Mtihani (Exam)', 'Somo', 'Darasa & Mkondo', 'Mwalimu Msahihishaji', 'Idadi ya Scripts', 'Muda wa Kuchukua', 'Deadline ya Kusahihisha', 'Hali ya Usahihishaji']],
+      body: scriptRecords.length === 0
+        ? [['—', examTitle, 'Hakuna kumbukumbu za script za kusahihisha kwa mtihani huu', '—', '—', '—', '—', '—', '—']]
+        : scriptRecords.map((r, i) => [
+            String(i + 1),
+            r.examName || examTitle,
+            r.subject,
+            `${r.className} ${r.stream || ''}`,
+            r.teacherName,
+            `${r.scriptsCount || 40} Scripts`,
+            `${r.checkoutDate || ''} ${r.checkoutTime || ''}`,
+            r.markingDeadline || '—',
+            r.status === 'COMPLETED_AND_RETURNED'
+              ? `✓ ZIMESAHIHISHWA & KURUDISHWA (${r.returnedDate || ''} ${r.returnedTime || ''})`
+              : 'ZINASAHIHISHWA NA MWALIMU'
+          ]),
+      theme: 'grid',
+      headStyles: { fillColor: [88, 28, 135], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold', halign: 'center' },
+      bodyStyles: { fontSize: 6.8, textColor: [30, 41, 59], valign: 'middle' },
+      margin: { left: margin, right: margin }
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  } else if (reportType === 'ream_calculator') {
+    const sheetsPerReam = reamSummary?.sheetsPerReam || 500;
+    const totalSheets = reamSummary?.totalSheets || 0;
+    const exactReams = reamSummary?.exactReams || 0;
+    const wholeReams = reamSummary?.wholeReamsToBuy || 0;
+    const printModeLabel = reamSummary?.printModeLabel || 'Pande Mbili (Kurasa 2 = Karatasi 1)';
+
+    // Grand Summary Banner
+    doc.setFillColor(239, 246, 255);
+    doc.setDrawColor(147, 197, 253);
+    doc.roundedRect(margin, y, contentWidth, 12, 1.5, 1.5, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.2);
+    doc.setTextColor(30, 58, 138);
+    doc.text(
+      `MUHTASARI WA MAHITAJI YA REAM (${examTitle.toUpperCase()}):  Jumla ya Karatasi: ${totalSheets.toLocaleString()} Sheets  •  Ream Halisi: ${exactReams.toFixed(2)} Reams  •  REAM ZA KUNUNUA: REAM ${wholeReams} KAMILI (${sheetsPerReam} Karatasi/Ream)`,
+      margin + 4,
+      y + 5
+    );
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.2);
+    doc.setTextColor(51, 65, 85);
+    doc.text(
+      `Mtindo wa Urudufishaji: ${printModeLabel}  •  Nakala za Akiba kwa Somo: +${reamSummary?.extraCopiesPerExam || 0}  •  Makadirio ya Gharama: TZS ${(reamSummary?.totalEstimatedCost || 0).toLocaleString()}`,
+      margin + 4,
+      y + 9.5
+    );
+    y += 15;
+
+    // Class Breakdown Table
+    if (reamSummary?.classBreakdown && reamSummary.classBreakdown.length > 0) {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(15, 23, 42);
+      doc.text('1. MUHTASARI WA MAHITAJI YA KARATASI NA REAM KWA KILA KIDATO (BY CLASS/FORM):', margin, y);
+      y += 3.5;
+
+      autoTable(doc, {
+        startY: y,
+        head: [['Kidato / Darasa', 'Idadi ya Wanafunzi', 'Idadi ya Masomo ya Mtihani', 'Jumla ya Karatasi (Sheets)', 'Idadi ya Ream (Exact)', 'Ream Kamili za Kununua']],
+        body: reamSummary.classBreakdown.map(cb => [
+          cb.className,
+          `${cb.studentCount} Wanafunzi`,
+          `${cb.subjectsCount} Masomo`,
+          `${cb.totalSheets.toLocaleString()} Karatasi`,
+          `${cb.exactReams.toFixed(2)} Ream`,
+          `Ream ${cb.wholeReams}`
+        ]),
+        theme: 'grid',
+        headStyles: { fillColor: [15, 23, 42], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold', halign: 'center' },
+        bodyStyles: { fontSize: 7, textColor: [30, 41, 59], halign: 'center', fontStyle: 'bold' },
+        margin: { left: margin, right: margin }
+      });
+      y = (doc as any).lastAutoTable.finalY + 7;
+    }
+
+    // Subject-by-Subject Duplication Table
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(15, 23, 42);
+    doc.text('2. MCHANGANUO WA KARATASI NA REAM KWA KILA SOMO NA KILA KIDATO:', margin, y);
+    y += 3.5;
+
+    autoTable(doc, {
+      startY: y,
+      head: [['#', 'Kidato / Darasa', 'Somo la Mtihani', 'Tarehe', 'Idadi ya Wanafunzi (+Akiba)', 'Kurasa za Mtihani (Pages)', 'Karatasi kwa Mwanafunzi', 'Jumla ya Karatasi (Sheets)', 'Idadi ya Ream']],
+      body: reamRecords.length === 0
+        ? [['—', '—', 'Hakuna masomo yaliyoingizwa kwenye makadirio', '—', '—', '—', '—', '—', '—']]
+        : reamRecords.map((r, i) => [
+            String(i + 1),
+            r.className,
+            r.subject,
+            r.examDate || '—',
+            `${r.studentCount} (+${r.extraCopies || 0} = ${r.totalCopies})`,
+            `${r.pagesCount} Kurasa`,
+            `${r.sheetsPerStudent} Karatasi`,
+            `${r.totalSheets.toLocaleString()} Karatasi`,
+            `${r.reamsRequired.toFixed(2)} Ream`
+          ]),
+      theme: 'grid',
+      headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontSize: 7, fontStyle: 'bold', halign: 'center' },
+      bodyStyles: { fontSize: 6.8, textColor: [30, 41, 59], valign: 'middle', halign: 'center' },
+      columnStyles: {
+        2: { halign: 'left', fontStyle: 'bold' }
+      },
+      margin: { left: margin, right: margin }
+    });
+    y = (doc as any).lastAutoTable.finalY + 8;
+  }
+
+  // Signatures Block
+  if (y > pageHeight - 30) {
+    doc.addPage();
+    y = margin;
+    drawHeader(true);
+  }
+
+  const sigY = y + 8;
+  doc.setDrawColor(148, 163, 184);
+  doc.line(margin, sigY, margin + 80, sigY);
+  doc.line(pageWidth - margin - 80, sigY, pageWidth - margin, sigY);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(7.5);
+  doc.setTextColor(15, 23, 42);
+  doc.text(`SAINI YA AFISA MITIHANI (${officerName.toUpperCase()})`, margin + 40, sigY + 4.5, { align: 'center' });
+  doc.text('SAINI YA MKUU WA SHULE / TAALUMA & MHURI', pageWidth - margin - 40, sigY + 4.5, { align: 'center' });
+
+  const totalPages = doc.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    doc.setTextColor(100, 116, 139);
+    doc.text(
+      `${resolvedSchoolName}  •  ${reportTitles[reportType]}  •  Mtihani: ${examTitle}  •  Ukurasa ${p} kati ya ${totalPages}`,
+      pageWidth / 2,
+      pageHeight - 5,
+      { align: 'center' }
+    );
+  }
+
+  const safeExam = examTitle.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const fileName = `Ripoti_${reportType}_${safeExam}_${new Date().toISOString().split('T')[0]}.pdf`;
+
+  if (mode === 'print') {
+    doc.autoPrint();
+    const pdfBlob = doc.output('blob');
+    const blobUrl = URL.createObjectURL(pdfBlob);
+    let printIframe = document.getElementById('haby-exam-control-pdf-print-frame') as HTMLIFrameElement | null;
+    if (printIframe) printIframe.remove();
+    printIframe = document.createElement('iframe');
+    printIframe.id = 'haby-exam-control-pdf-print-frame';
+    printIframe.style.position = 'fixed';
+    printIframe.style.right = '0';
+    printIframe.style.bottom = '0';
+    printIframe.style.width = '1px';
+    printIframe.style.height = '1px';
+    printIframe.style.border = '0';
+    printIframe.style.opacity = '0.01';
+    printIframe.src = blobUrl;
+    document.body.appendChild(printIframe);
+    printIframe.onload = () => {
+      try {
+        printIframe?.contentWindow?.focus();
+        printIframe?.contentWindow?.print();
+      } catch (e) {
+        window.print();
+      }
+    };
+  } else {
+    doc.save(fileName);
+  }
+}
+
 
 

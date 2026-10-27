@@ -18,15 +18,15 @@ export const StudentTransferModal: React.FC<StudentTransferModalProps> = ({
   onConfirmTransfer,
   currentUserName = 'Academic Office'
 }) => {
-  if (!isOpen || !student) return null;
-
   const [toClass, setToClass] = useState<string>(
-    ALL_SCHOOL_CLASSES.find(c => c !== student.className) || 'Form 2'
+    ALL_SCHOOL_CLASSES.find(c => c !== student?.className) || 'Form 2'
   );
   const [toStream, setToStream] = useState<string>('STREAM A');
   const [reason, setReason] = useState<string>('');
   const [date, setDate] = useState<string>(new Date().toISOString().slice(0, 10));
   const [error, setError] = useState<string | null>(null);
+
+  if (!isOpen || !student) return null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

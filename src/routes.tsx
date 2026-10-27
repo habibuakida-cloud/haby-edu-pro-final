@@ -26,7 +26,8 @@ import {
   PenTool,
   Send,
   UserCheck,
-  Leaf
+  Leaf,
+  Vote
 } from 'lucide-react';
 
 export type ActiveView = 
@@ -34,6 +35,7 @@ export type ActiveView =
   | 'dashboard'
   | 'students'
   | 'teachers'
+  | 'teacher-profile'
   | 'teacherportal'
   | 'classjournal'
   | 'lessonplans'
@@ -51,6 +53,7 @@ export type ActiveView =
   | 'invigilation-calendar'
   | 'attendance'
   | 'discipline'
+  | 'election'
   | 'environment'
   | 'studentid'
   | 'finance'
@@ -62,6 +65,7 @@ export type ActiveView =
   | 'reampapers'
   | 'pastpapers'
   | 'nectaregs'
+  | 'nectaexamreports'
   | 'laboratory'
   | 'examsettings'
   | 'attendance-scan'
@@ -70,6 +74,10 @@ export type ActiveView =
   | 'biometric-report'
   | 'student-progress'
   | 'officialletters'
+  | 'monitordashboard'
+  | 'journalreport'
+  | 'jointexams'
+  | 'envelope-cover'
   | 'settings';
 
 export interface SubModuleRoute {
@@ -100,6 +108,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     subModules: [
       { id: 'students', label: 'Student Registration', description: 'Admission, profile, enrollment, nominal rolls & CSV import' },
       { id: 'teachers', label: 'Teacher Management', description: 'Teacher registration, profiles, subjects & class assignments' },
+      { id: 'teacher-profile', label: 'Teacher Profile Dashboard (Wasifu & Ratiba ya Mwalimu)', description: 'Individual teacher upcoming lessons, assigned invigilation sessions & teaching journal entries', badge: 'PROFILE' },
       { id: 'teacher-attendance', label: 'Teacher Attendance (Mahudhurio ya Walimu)', description: 'Daily staff presence tracking, check-in times, absence logs & Supabase sync', badge: 'NEW' },
       { id: 'biometric-report', label: 'Biometric Report (Ripoti ya Vidole)', description: 'Aggregates daily arrival & departure times, highlighting late arrivals & early departures', badge: 'BIOMETRIC' },
       { id: 'staff-payroll', label: 'Staff Payroll Management (Mishahara)', description: 'Monthly salary calculation from attendance, tax deductions, bonuses & PDF payslips', badge: 'PAYROLL' }
@@ -114,8 +123,11 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     iconColor: 'text-amber-400',
     badgeBg: 'bg-amber-100 text-amber-800 border-amber-200',
     subModules: [
+      { id: 'teacher-profile', label: 'Teacher Profile Dashboard (Wasifu wa Mwalimu)', description: 'Individual teacher upcoming lessons, assigned invigilation sessions & teaching journal entries', badge: 'PROFILE' },
       { id: 'teacherportal', label: 'Sehemu ya Mwalimu (Teacher Hub)', description: 'Kuita majina, kuingiza marks, lesson plan, scheme of work & ripoti za darasa', badge: 'MWALIMU' },
+      { id: 'monitordashboard', label: 'Monitor & Monitress Portal (Journal & Usajili)', description: 'Usajili wa Monitor na Monitress wa darasa & kurekodi walimu kuingia/kutoka darasani', badge: 'MONITOR' },
       { id: 'classjournal', label: 'Class Journal', description: 'Classroom period log & daily monitoring book' },
+      { id: 'journalreport', label: 'Teaching Journal Report', description: 'Automatically prepared teaching reports from journal scans', badge: 'REPORTS' },
       { id: 'lessonplans', label: 'Lesson Plan', description: 'Prepare, generate & track daily teaching lesson plans' },
       { id: 'schemes', label: 'Scheme of Work', description: 'Curriculum schemes & weekly topic completion' },
       { id: 'laboratory', label: 'Laboratory Inventory', description: 'Physics, Chemistry & Biology lab apparatus, chemicals and equipment tracking', badge: 'LAB' }
@@ -131,11 +143,14 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     badgeBg: 'bg-purple-100 text-purple-800 border-purple-200',
     subModules: [
       { id: 'results', label: 'Academic / Results Dashboard', description: 'Performance reports, report cards & student analysis' },
+      { id: 'jointexams', label: 'Mitihani ya Pamoja (Joint Examinations)', description: 'Mitihani ya Pamoja ya Shule 2+, fomu ya alama kwa shule, Best 7 NECTA & Dual View Ranking', badge: 'JOINT' },
       { id: 'markentry', label: 'Mark Entry', description: 'Subject mark entry, teacher grading & USAL scores', badge: 'RESTORED' },
       { id: 'exams', label: 'Exams & Scheduling', description: 'Examination sessions, paper configs & grading thresholds' },
       { id: 'examsettings', label: 'Exam Settings (Lock Control)', description: 'Lock or unlock exams to control teacher mark entry (Active / Locked)', badge: 'LOCK' },
       { id: 'examrecords', label: 'Exam Records & Top Performers', description: 'Master marksheets, Top Performers leaderboard, yearly profiles & promotion', badge: 'Leaderboard' },
       { id: 'nectaanalyzer', label: 'NECTA Analyzer', description: 'National exam statistics, divisions & GPA analysis' },
+      { id: 'nectaexamreports', label: 'NECTA Examination Reports (Taarifa ya Usimamizi NECTA)', description: 'Jaza kidijitali taarifa rasmi za usimamizi wa mitihani ya kitaifa na kutoa PDF ya A4 (Kurasa 16–22)', badge: 'NECTA A4' },
+      { id: 'envelope-cover', label: 'Fomu ya Bahasha ya Script (Script Return Envelope)', description: 'Fomu rasmi ya NECTA ya kubandika juu ya bahasha ya scripts za majibu ya wanafunzi (A4 Print & PDF)', badge: 'BAHASHA' },
       { id: 'sittingplan', label: 'Sitting Plan', description: 'Automated exam hall seating arrangement & desk labels' },
       { id: 'evaluationanalysis', label: 'Evaluation Analysis', description: 'Subject teacher evaluation & class performance audit' },
       { id: 'dailytracker', label: 'Daily Ticker', description: 'Real-time academic activity ticker & lesson log' },
@@ -156,6 +171,7 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     subModules: [
       { id: 'timetable', label: 'Master Timetable', description: 'Conflict-free master class & teacher timetable' },
       { id: 'invigilation', label: 'Invigilation Schedule', description: 'Exam supervision & invigilator duty roster' },
+      { id: 'envelope-cover', label: 'Fomu ya Bahasha ya Script (Script Return Envelope)', description: 'Fomu rasmi ya NECTA ya kubandika juu ya bahasha ya scripts za majibu ya wanafunzi (A4 Print & PDF)', badge: 'BAHASHA' },
       { id: 'invigilation-calendar', label: 'Invigilation Calendar (Kalenda ya Usimamizi)', description: 'Monthly calendar view of exam duties, halls & invigilators', badge: 'KALENDA' }
     ]
   },
@@ -168,8 +184,10 @@ export const MAIN_MODULE_GROUPS: MainModuleGroup[] = [
     iconColor: 'text-rose-400',
     badgeBg: 'bg-rose-100 text-rose-800 border-rose-200',
     subModules: [
+      { id: 'monitordashboard', label: 'Usajili wa Monitor & Monitress (Monitor Portal)', description: 'Sajili Monitor na Monitress wa kila darasa na kusimamia Journal ya Vipindi', badge: 'MONITOR' },
       { id: 'attendance', label: 'Smart Attendance', description: 'Daily class rollcall & automatic monthly parent reports', badge: 'Smart' },
       { id: 'discipline', label: 'Discipline Management', description: 'Student conduct, warnings, suspensions & offenses' },
+      { id: 'election', label: 'Student Government Elections (Uchaguzi wa Serikali ya Wanafunzi)', description: 'Uchaguzi wa Viongozi, Uteuzi wa Wagombea, Upigaji Kura za Siri & Matokeo Mubashara', badge: 'ELECTION' },
       { id: 'officialletters', label: 'Barua za Wito & Wazazi (Bulk Letters)', description: 'Andika barua moja, mfumo uweke jina la kila mwanafunzi wa darasa moja kwa moja', badge: 'MPYA' },
       { id: 'studentid', label: 'Student ID Generator', description: 'Generate & print student ID cards with QR codes' }
     ]

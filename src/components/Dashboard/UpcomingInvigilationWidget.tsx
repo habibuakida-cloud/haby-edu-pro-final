@@ -1,12 +1,13 @@
 import React, { useMemo } from 'react';
-import { ShieldCheck, Calendar, Clock, MapPin, ChevronRight, ArrowRight, BookOpen, AlertCircle, CheckCircle2 } from 'lucide-react';
-import { InvigilationSession, Teacher, UserAccount } from '../../types';
+import { ShieldCheck, Calendar, Clock, MapPin, ChevronRight, ArrowRight, BookOpen, AlertCircle, CheckCircle2, Award } from 'lucide-react';
+import { InvigilationSession, Teacher, Supervisor, UserAccount } from '../../types';
 import { getSubjectColor } from '../../utils/colors';
 
 interface UpcomingInvigilationWidgetProps {
   sessions: InvigilationSession[];
   invigilationAssignments: Record<string, number>;
   teachers: Teacher[];
+  supervisors?: Supervisor[];
   currentUser?: UserAccount | null;
   onNavigateToCalendar?: () => void;
   onNavigateToInvigilation?: () => void;
@@ -16,6 +17,7 @@ export const UpcomingInvigilationWidget: React.FC<UpcomingInvigilationWidgetProp
   sessions = [],
   invigilationAssignments = {},
   teachers = [],
+  supervisors = [],
   currentUser,
   onNavigateToCalendar,
   onNavigateToInvigilation
@@ -33,6 +35,16 @@ export const UpcomingInvigilationWidget: React.FC<UpcomingInvigilationWidgetProp
     // Fallback to first teacher in staff directory if no auth match
     return teachers[0] || null;
   }, [currentUser, teachers]);
+
+  // Check if current teacher is an assigned Supervisor
+  const isSupervisor = useMemo(() => {
+    if (!currentTeacher || !supervisors || supervisors.length === 0) return false;
+    return supervisors.some(s => 
+      Number(s.teacherId) === Number(currentTeacher.id) ||
+      (s.name && currentTeacher.name && s.name.toLowerCase().includes(currentTeacher.name.toLowerCase())) ||
+      (currentTeacher.name && s.name && currentTeacher.name.toLowerCase().includes(s.name.toLowerCase()))
+    );
+  }, [currentTeacher, supervisors]);
 
   // 2. Extract and sort all invigilation duties for this teacher
   const allDuties = useMemo(() => {
@@ -102,10 +114,16 @@ export const UpcomingInvigilationWidget: React.FC<UpcomingInvigilationWidgetProp
             <ShieldCheck className="w-5 h-5 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <h3 className="text-base font-black text-slate-900 tracking-tight">
                 Upcoming Invigilation
               </h3>
+              {isSupervisor && (
+                <span className="text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full bg-gradient-to-r from-amber-400 to-amber-500 text-slate-950 shadow-2xs flex items-center gap-1 border border-amber-300">
+                  <ShieldCheck className="w-3 h-3 text-slate-950" />
+                  <span>MSIMAMIZI MKUU (SUPERVISOR)</span>
+                </span>
+              )}
               <span className="text-[10px] font-black uppercase px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 border border-indigo-200">
                 {allDuties.length} {allDuties.length === 1 ? 'Duty' : 'Duties'} Total
               </span>
@@ -143,6 +161,26 @@ export const UpcomingInvigilationWidget: React.FC<UpcomingInvigilationWidgetProp
           )}
         </div>
       </div>
+
+      {/* Supervisor Status Callout Banner */}
+      {isSupervisor && (
+        <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-blue-950 text-white p-4 rounded-2xl border border-amber-400/40 shadow-sm space-y-1.5 animate-in fade-in">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Award className="w-5 h-5 text-amber-400 shrink-0" />
+              <h4 className="text-xs sm:text-sm font-black text-amber-300 uppercase tracking-wide">
+                🛡️ WEWE NI MSIMAMIZI MKUU (SUPERVISOR WA MITIHANI)
+              </h4>
+            </div>
+            <span className="px-2.5 py-0.5 bg-amber-400 text-slate-950 font-black text-[10px] uppercase rounded-full shadow-2xs">
+              EXAM SUPERVISOR
+            </span>
+          </div>
+          <p className="text-xs text-blue-100 font-medium">
+            Mwalimu <strong className="text-white">{currentTeacher?.name}</strong>, umepangiwa kama Msimamizi Mkuu wa kituo hiki cha mtihani. Unasimamia uendeshaji mzima wa mitihani, ufunguzi wa bahasha na wasimamizi wote wa vyumba.
+          </p>
+        </div>
+      )}
 
       {/* Content: Next 3 Sessions or Empty State */}
       {nextThreeSessions.length === 0 ? (

@@ -58,7 +58,7 @@ export function getEducationLevelFromClass(className: string): EducationLevel {
  */
 export interface PrimaryGradeInfo {
   score: number;
-  grade: 'A' | 'B' | 'C' | 'D' | 'E';
+  grade: 'A' | 'B' | 'C' | 'D' | 'E' | 'ABS';
   points: number;
   remark: string;
   swahiliRemark: string;
@@ -67,8 +67,20 @@ export interface PrimaryGradeInfo {
   border: string;
 }
 
-export function getPrimarySubjectGradeInfo(score: number): PrimaryGradeInfo {
-  const num = Math.min(100, Math.max(0, Math.round(score)));
+export function getPrimarySubjectGradeInfo(score: number | string): PrimaryGradeInfo & { grade: 'A' | 'B' | 'C' | 'D' | 'E' | 'ABS' } {
+  if (typeof score === 'string' && (score.toUpperCase() === 'ABS' || score.toUpperCase() === 'ABSENT' || score.toUpperCase() === 'X')) {
+    return {
+      score: 0,
+      grade: 'ABS',
+      points: 0,
+      remark: 'ABSENT',
+      swahiliRemark: 'HAKUHUDHURIA',
+      color: '#64748b', // slate-500
+      bg: '#f1f5f9',
+      border: '#cbd5e1'
+    };
+  }
+  const num = Math.min(100, Math.max(0, Math.round(Number(score))));
   if (num >= 81) {
     return {
       score: num,
@@ -133,16 +145,16 @@ export interface PrimaryScoreResult {
   total: number;
   maxPossibleTotal: number;
   average: number;
-  overallGrade: 'A' | 'B' | 'C' | 'D' | 'E';
+  overallGrade: 'A' | 'B' | 'C' | 'D' | 'E' | 'ABS';
   gradeLabel: string;
-  passStatus: 'AMEFAULU' | 'HAJAFAULU';
+  passStatus: 'AMEFAULU' | 'HAJAFAULU' | 'ABSENT';
   passStatusLabel: string;
   gpa: number;
   scoredSubjectsCount: number;
   description: string;
 }
 
-export function calculatePrimaryScoreResult(marks: Record<string, number | undefined | null>): PrimaryScoreResult {
+export function calculatePrimaryScoreResult(marks: Record<string, number | string | undefined | null>): PrimaryScoreResult {
   const validEntries: { subject: string; score: number }[] = [];
   Object.entries(marks || {}).forEach(([subject, score]) => {
     if (typeof score === 'number' && !isNaN(score) && score >= 0) {
@@ -152,17 +164,20 @@ export function calculatePrimaryScoreResult(marks: Record<string, number | undef
 
   const count = validEntries.length;
   if (count === 0) {
+    const isExplicitlyAbsent = Object.values(marks || {}).some(v => 
+      typeof v === 'string' && (v.toUpperCase() === 'ABS' || v.toUpperCase() === 'ABSENT' || v.toUpperCase() === 'X')
+    );
     return {
       total: 0,
       maxPossibleTotal: 0,
       average: 0,
-      overallGrade: 'E',
-      gradeLabel: 'GRADE -',
-      passStatus: 'HAJAFAULU',
-      passStatusLabel: 'NO RESULTS',
+      overallGrade: isExplicitlyAbsent ? 'ABS' : 'E',
+      gradeLabel: isExplicitlyAbsent ? 'ABSENT' : 'GRADE -',
+      passStatus: isExplicitlyAbsent ? 'ABSENT' : 'HAJAFAULU',
+      passStatusLabel: isExplicitlyAbsent ? 'ABSENT' : 'NO RESULTS',
       gpa: 0,
       scoredSubjectsCount: 0,
-      description: 'No scores recorded'
+      description: isExplicitlyAbsent ? 'Candidate was Absent' : 'No scores recorded'
     };
   }
 
@@ -215,7 +230,7 @@ export function calculatePrimaryScoreResult(marks: Record<string, number | undef
 
 export interface SubjectGradeInfo {
   score: number;
-  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  grade: 'A' | 'B' | 'C' | 'D' | 'F' | 'ABS';
   points: number;
   remark: string;
   swahiliRemark: string;
@@ -224,8 +239,20 @@ export interface SubjectGradeInfo {
   border: string;
 }
 
-export function getSubjectGradeInfo(score: number): SubjectGradeInfo {
-  const num = Math.min(100, Math.max(0, Math.round(score)));
+export function getSubjectGradeInfo(score: number | string): SubjectGradeInfo & { grade: 'A' | 'B' | 'C' | 'D' | 'F' | 'ABS' } {
+  if (typeof score === 'string' && (score.toUpperCase() === 'ABS' || score.toUpperCase() === 'ABSENT' || score.toUpperCase() === 'X')) {
+    return {
+      score: 0,
+      grade: 'ABS',
+      points: 0,
+      remark: 'ABSENT',
+      swahiliRemark: 'HAKUHUDHURIA',
+      color: '#64748b', // slate-500
+      bg: '#f1f5f9',
+      border: '#cbd5e1'
+    };
+  }
+  const num = Math.min(100, Math.max(0, Math.round(Number(score))));
   // Official O-Level Grading: A=75-100, B=65-74, C=45-64, D=30-44, F=0-29
   if (num >= 75) {
     return {
@@ -315,19 +342,23 @@ export function cleanAndFilterMarksForClass(
   rawMarks: Record<string, any> | undefined | null,
   className?: string,
   level?: EducationLevel
-): Record<string, number> {
+): Record<string, number | string> {
   if (!rawMarks || typeof rawMarks !== 'object') return {};
 
   const isNursery = isPrePrimaryLevel(level, className);
   const isPrimary = !isNursery && isPrimaryLevel(level, className);
   const isSecondary = !isNursery && !isPrimary;
 
-  const result: Record<string, number> = {};
+  const result: Record<string, number | string> = {};
 
-  const extractNum = (val: any): number | null => {
+  const extractMark = (val: any): number | string | null => {
     if (typeof val === 'number' && !isNaN(val)) return Math.min(100, Math.max(0, Math.round(val)));
-    if (typeof val === 'string' && val.trim() !== '' && !isNaN(Number(val))) {
-      return Math.min(100, Math.max(0, Math.round(Number(val))));
+    if (typeof val === 'string') {
+      const upper = val.trim().toUpperCase();
+      if (upper === 'ABS' || upper === 'X' || upper === 'ABSENT') return upper;
+      if (val.trim() !== '' && !isNaN(Number(val))) {
+        return Math.min(100, Math.max(0, Math.round(Number(val))));
+      }
     }
     if (typeof val === 'object' && val !== null && typeof val.marks === 'number' && !isNaN(val.marks)) {
       return Math.min(100, Math.max(0, Math.round(val.marks)));
@@ -336,8 +367,8 @@ export function cleanAndFilterMarksForClass(
   };
 
   for (const [rawKey, rawVal] of Object.entries(rawMarks)) {
-    const num = extractNum(rawVal);
-    if (num === null) continue;
+    const mark = extractMark(rawVal);
+    if (mark === null) continue;
 
     const lower = rawKey.trim().toLowerCase();
 
@@ -408,9 +439,14 @@ export function cleanAndFilterMarksForClass(
 
       // Deduplicate: If key exists, take maximum or non-empty score
       if (result[canonical] === undefined) {
-        result[canonical] = num;
+        result[canonical] = mark;
       } else {
-        result[canonical] = Math.max(result[canonical], num);
+        const existing = result[canonical];
+        if (typeof mark === 'number' && typeof existing === 'number') {
+          result[canonical] = Math.max(existing, mark);
+        } else {
+          result[canonical] = mark; // Take the latest if one is a string (ABS)
+        }
       }
     } else if (isPrimary) {
       // Secondary-only subjects must NOT be present in primary results
@@ -460,32 +496,40 @@ export function cleanAndFilterMarksForClass(
       }
 
       if (result[canonical] === undefined) {
-        result[canonical] = num;
+        result[canonical] = mark;
       } else {
-        result[canonical] = Math.max(result[canonical], num);
+        const existing = result[canonical];
+        if (typeof mark === 'number' && typeof existing === 'number') {
+          result[canonical] = Math.max(existing, mark);
+        } else {
+          result[canonical] = mark;
+        }
       }
     } else {
       // Nursery
-      result[rawKey.trim()] = num;
+      result[rawKey.trim()] = mark;
     }
   }
 
   return result;
 }
 
-export function calculateOLevelDivision(marks: Record<string, number | undefined | null>, className?: string): OLevelDivisionResult {
+export function calculateOLevelDivision(marks: Record<string, number | string | undefined | null>, className?: string): OLevelDivisionResult {
   const cleanMarks = cleanAndFilterMarksForClass(marks, className || 'Form 1');
-  const validScores: number[] = Object.values(cleanMarks);
+  const validScores: number[] = Object.values(cleanMarks).filter(v => typeof v === 'number') as number[];
 
   const scoredSubjectsCount = validScores.length;
 
   if (scoredSubjectsCount === 0) {
+    const isExplicitlyAbsent = Object.values(cleanMarks).some(v => 
+      typeof v === 'string' && ((v as string).toUpperCase() === 'ABS' || (v as string).toUpperCase() === 'ABSENT' || (v as string).toUpperCase() === 'X')
+    );
     return {
-      division: 'INCOMPLETE',
-      divisionLabel: '-',
+      division: isExplicitlyAbsent ? ('ABS' as any) : 'INCOMPLETE',
+      divisionLabel: isExplicitlyAbsent ? 'ABSENT' : '-',
       points: null,
       scoredSubjectsCount: 0,
-      description: 'No scores recorded'
+      description: isExplicitlyAbsent ? 'Candidate was Absent' : 'No scores recorded'
     };
   }
 
@@ -568,12 +612,12 @@ export interface PerformanceSummary {
   best7Points: number | null;
   gpa: number;
   subjectCount: number;
-  gradeCounts: { A: number; B: number; C: number; D: number; F: number };
+  gradeCounts: { A: number; B: number; C: number; D: number; F: number; ABS: number };
   status: 'EXCELLENT' | 'VERY_GOOD' | 'GOOD' | 'PASS' | 'WARNING';
 }
 
 export function calculatePerformanceSummary(
-  marks: Record<string, number>,
+  marks: Record<string, number | string>,
   level?: EducationLevel,
   className?: string
 ): PerformanceSummary {
@@ -591,7 +635,7 @@ export function calculatePerformanceSummary(
       best7Points: null,
       gpa: 0,
       subjectCount: 0,
-      gradeCounts: { A: 0, B: 0, C: 0, D: 0, F: 0 },
+      gradeCounts: { A: 0, B: 0, C: 0, D: 0, F: 0, ABS: 0 },
       status: 'WARNING'
     };
   }
@@ -599,21 +643,23 @@ export function calculatePerformanceSummary(
   // Check if Primary or Pre-Primary (Tanzanian NECTA Primary Scale: A=81-100, B=61-80, C=41-60, D=21-40, E=0-20)
   if (isPrimaryOrNursery(level, className)) {
     const primaryRes = calculatePrimaryScoreResult(cleanedMarks);
-    const gradeCounts = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+    const gradeCounts = { A: 0, B: 0, C: 0, D: 0, F: 0, ABS: 0 };
     entries.forEach(([, score]) => {
       const pInfo = getPrimarySubjectGradeInfo(score);
       if (pInfo.grade === 'E') {
         gradeCounts['F']++;
+      } else if (pInfo.grade === 'ABS') {
+        gradeCounts.ABS++;
       } else {
         gradeCounts[pInfo.grade]++;
       }
     });
 
     let status: PerformanceSummary['status'] = 'PASS';
-    if (primaryRes.overallGrade === 'A') status = 'EXCELLENT';
-    else if (primaryRes.overallGrade === 'B') status = 'VERY_GOOD';
-    else if (primaryRes.overallGrade === 'C') status = 'GOOD';
-    else if (primaryRes.overallGrade === 'D') status = 'PASS';
+    if (primaryRes.overallGrade === ('A' as any)) status = 'EXCELLENT';
+    else if (primaryRes.overallGrade === ('B' as any)) status = 'VERY_GOOD';
+    else if (primaryRes.overallGrade === ('C' as any)) status = 'GOOD';
+    else if (primaryRes.overallGrade === ('D' as any)) status = 'PASS';
     else status = 'WARNING';
 
     return {
@@ -632,26 +678,31 @@ export function calculatePerformanceSummary(
 
   let total = 0;
   let pointsTotal = 0;
-  const gradeCounts = { A: 0, B: 0, C: 0, D: 0, F: 0 };
+  const gradeCounts = { A: 0, B: 0, C: 0, D: 0, F: 0, ABS: 0 };
 
   entries.forEach(([, score]) => {
     const info = getSubjectGradeInfo(score);
-    total += info.score;
-    pointsTotal += info.points;
-    gradeCounts[info.grade]++;
+    if (info.grade === 'ABS') {
+      gradeCounts.ABS++;
+    } else {
+      total += info.score;
+      pointsTotal += info.points;
+      gradeCounts[info.grade]++;
+    }
   });
 
   const average = Number((total / subjectCount).toFixed(1));
   const divResult = calculateOLevelDivision(marks);
-  const division = divResult.division;
+  const division = divResult.division as string;
   const divisionDesc = divResult.description;
-  const gpa = Number((pointsTotal / subjectCount).toFixed(2));
+  const gpa = Number((pointsTotal / (subjectCount - gradeCounts.ABS || 1)).toFixed(2));
 
   let status: PerformanceSummary['status'] = 'PASS';
   if (division === 'I' || average >= 75) status = 'EXCELLENT';
   else if (division === 'II' || average >= 65) status = 'VERY_GOOD';
   else if (division === 'III' || average >= 45) status = 'GOOD';
   else if (division === 'IV' || average >= 30) status = 'PASS';
+  else if (division === 'ABS') status = 'WARNING';
   else status = 'WARNING';
 
   return {

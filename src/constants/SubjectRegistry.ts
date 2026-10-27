@@ -1,4 +1,4 @@
-import { SUBJECT_LIST, Subject } from './nectaSubjects';
+import { SUBJECT_LIST, type Subject } from './nectaSubjects.ts';
 
 /**
  * SubjectRegistry

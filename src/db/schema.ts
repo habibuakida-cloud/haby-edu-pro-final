@@ -23,9 +23,11 @@ export const users = pgTable('users', {
   role: text('role').default('TEACHER'),
   schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'set null' }),
   isSuperAdmin: boolean('is_super_admin').default(false),
+  passwordHash: text('password_hash'),
   assignedSubjects: jsonb('assigned_subjects').default([]),
   lastLoginAt: timestamp('last_login_at'),
   createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 // 3. STUDENTS
@@ -65,6 +67,9 @@ export const teachers = pgTable('teachers', {
   color: text('color').default('#1d4ed8'),
   maxPeriodsPerWeek: integer('max_periods_per_week').default(20),
   excludeInvigilation: boolean('exclude_invigilation').default(false),
+  pinCode: text('pin_code'),
+  fingerprintTemplate: text('fingerprint_template'),
+  hasBiometric: boolean('has_biometric').default(false),
   createdAt: timestamp('created_at').defaultNow(),
 });
 // 4B. CLASSES - ADD HII SASA
@@ -75,6 +80,8 @@ export const classes = pgTable('classes', {
   stream: text('stream').default('A'),
   level: text('level').default('CSEE'),
   classTeacherId: uuid('class_teacher_id').references(() => teachers.id, { onDelete: 'set null' }),
+  monitorId: text('monitor_id').references(() => users.id, { onDelete: 'set null' }),
+  monitressId: text('monitress_id').references(() => users.id, { onDelete: 'set null' }),
   capacity: integer('capacity').default(45),
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
@@ -139,6 +146,30 @@ export const remedialAttendance = pgTable('remedial_attendance', {
   ratePerPeriod: numeric('rate_per_period').default('5000'),
   markedBy: text('marked_by'),
   markedAt: timestamp('marked_at').defaultNow(),
+});
+
+export const remedialTimeSlots = pgTable('remedial_time_slots', {
+  id: text('id').primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  className: text('class_name').notNull(),
+  startTime: text('start_time').notNull(),
+  endTime: text('end_time').notNull(),
+  days: jsonb('days').default([]), // ["Monday", "Tuesday", ...]
+  sessionType: text('session_type').default('Evening'),
+  updatedAt: timestamp('updated_at').defaultNow(),
+}, (table) => [
+  unique('unique_remedial_slot').on(table.schoolId, table.className, table.sessionType),
+]);
+
+export const remedialGlobalSettings = pgTable('remedial_global_settings', {
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }).primaryKey(),
+  startDate: date('start_date'),
+  endDate: date('end_date'),
+  defaultStartTime: text('default_start_time'),
+  defaultEndTime: text('default_end_time'),
+  morningStartTime: text('morning_start_time'),
+  morningEndTime: text('morning_end_time'),
+  updatedAt: timestamp('updated_at').defaultNow(),
 });
 
 // 8. RELATIONS
@@ -841,4 +872,146 @@ export const staffPayroll = pgTable('staff_payroll', {
   updatedAt: timestamp('updated_at').defaultNow(),
 });
 
+// 17. CLASS JOURNALS (MFUMO WA MONITOR)
+export const classJournals = pgTable('class_journals', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  teacherId: uuid('teacher_id').references(() => teachers.id, { onDelete: 'cascade' }),
+  teacherName: text('teacher_name'),
+  monitorId: text('monitor_id').notNull(),
+  className: text('class_name').notNull(),
+  stream: text('stream'),
+  subject: text('subject').notNull(),
+  mainTopic: text('main_topic'),
+  subTopic: text('sub_topic'),
+  period: integer('period'),
+  periodName: text('period_name'),
+  timeIn: timestamp('time_in').notNull(),
+  timeOut: timestamp('time_out'),
+  method: text('method').notNull(), // 'usb_scanner' or 'phone_pin'
+  presentCount: integer('present_count').default(0),
+  absentCount: integer('absent_count').default(0),
+  sickCount: integer('sick_count').default(0),
+  permittedCount: integer('permitted_count').default(0),
+  date: text('date'), // YYYY-MM-DD
+  academicWeek: integer('academic_week'),
+  term: text('term'),
+  isOffline: boolean('is_offline').default(false),
+  createdAt: timestamp('created_at').defaultNow(),
+});
 
+// 18. ELECTION EVENTS (STUDENT GOVERNMENT ELECTIONS - DISCIPLINE DEPARTMENT)
+export const electionEvents = pgTable('election_events', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  academicYear: text('academic_year').notNull(),
+  nominationStart: timestamp('nomination_start').notNull(),
+  nominationEnd: timestamp('nomination_end').notNull(),
+  votingStart: timestamp('voting_start').notNull(),
+  votingEnd: timestamp('voting_end').notNull(),
+  status: text('status').default('DRAFT'), // 'DRAFT', 'NOMINATION_OPEN', 'VOTING_OPEN', 'CLOSED', 'RESULTS_PUBLISHED'
+  createdByDisciplineHead: text('created_by_discipline_head'),
+  resultsPublishedAt: timestamp('results_published_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// 19. ELECTION POSITIONS (VIONGOZI WA SERIKALI YA WANAFUNZI)
+export const electionPositions = pgTable('election_positions', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  electionId: uuid('election_id').references(() => electionEvents.id, { onDelete: 'cascade' }),
+  title: text('title').notNull(),
+  description: text('description'),
+  genderRule: text('gender_rule').default('ALL'), // 'ALL', 'BOYS_ONLY', 'GIRLS_ONLY'
+  classRule: text('class_rule').default('ALL'), // 'ALL', 'FORM_3_4', 'FORM_1_2', 'FORM_5_6', etc.
+  orderNumber: integer('order_number').default(1),
+  isCustom: boolean('is_custom').default(false),
+  photoRequired: boolean('photo_required').default(true),
+  manifestoRequired: boolean('manifesto_required').default(true),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// 20. ELECTION CANDIDATES (WAGOMBEA)
+export const electionCandidates = pgTable('election_candidates', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  electionId: uuid('election_id').references(() => electionEvents.id, { onDelete: 'cascade' }),
+  positionId: uuid('position_id').references(() => electionPositions.id, { onDelete: 'cascade' }),
+  studentId: text('student_id').notNull(),
+  studentName: text('student_name').notNull(),
+  studentClass: text('student_class').notNull(),
+  studentGender: text('student_gender').default('Male'),
+  manifestoText: text('manifesto_text'),
+  manifestoVideoUrl: text('manifesto_video_url'),
+  photoUrl: text('photo_url'),
+  status: text('status').default('PENDING'), // 'PENDING', 'APPROVED', 'REJECTED'
+  rejectionReason: text('rejection_reason'),
+  reviewedBy: text('reviewed_by'),
+  votesCount: integer('votes_count').default(0),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// 21. ELECTION VOTES (KURA ZILIZOPIGWA - ONE VOTE PER POSITION PER STUDENT)
+export const electionVotes = pgTable('election_votes', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  electionId: uuid('election_id').references(() => electionEvents.id, { onDelete: 'cascade' }),
+  voterStudentId: text('voter_student_id').notNull(),
+  positionId: uuid('position_id').references(() => electionPositions.id, { onDelete: 'cascade' }),
+  candidateId: uuid('candidate_id').references(() => electionCandidates.id, { onDelete: 'cascade' }),
+  votedAt: timestamp('voted_at').defaultNow(),
+  ipAddress: text('ip_address'),
+  deviceId: text('device_id'),
+  verificationMethod: text('verification_method').default('PORTAL_AUTH'), // 'PIN', 'FINGERPRINT', 'PORTAL_AUTH'
+}, (table) => [
+  unique('unique_voter_position_election').on(table.electionId, table.voterStudentId, table.positionId),
+]);
+
+// 22. JOINT EXAMINATIONS (MITIHANI YA PAMOJA YA SHULE 2 AU ZAIDI)
+export const jointExams = pgTable('joint_exams', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  schoolId: uuid('school_id').references(() => schools.id, { onDelete: 'cascade' }),
+  name: text('name').notNull(),
+  examDate: text('exam_date').notNull(),
+  className: text('class_name').default('Form 4'),
+  level: text('level').default('CSEE'), // 'FTNA', 'CSEE', 'ACSEE'
+  subjects: jsonb('subjects').default([]).notNull(), // string[] e.g. ["CIVICS", "HISTORY", "GEOGRAPHY", ...]
+  status: text('status').default('ACTIVE'), // 'ACTIVE', 'PUBLISHED', 'LOCKED'
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// 23. JOINT PARTICIPATING SCHOOLS (SHULE ZINAZOSHIRIKI MTIHANI WA PAMOJA)
+export const jointSchools = pgTable('joint_schools', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  jointExamId: uuid('joint_exam_id').references(() => jointExams.id, { onDelete: 'cascade' }).notNull(),
+  schoolCode: text('school_code').notNull(), // e.g. S0101, S0204
+  schoolName: text('school_name').notNull(),
+  hexColor: text('hex_color').default('#1E40AF').notNull(), // e.g. #1E40AF, #047857, #B91C1C
+  region: text('region'),
+  district: text('district'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// 24. JOINT EXAMINATION RESULTS (MATOKEO YA WANAFUNZI WA SHULE ZINAZOSHIRIKI)
+export const jointResults = pgTable('joint_results', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  jointExamId: uuid('joint_exam_id').references(() => jointExams.id, { onDelete: 'cascade' }).notNull(),
+  jointSchoolId: uuid('joint_school_id').references(() => jointSchools.id, { onDelete: 'cascade' }).notNull(),
+  studentName: text('student_name').notNull(),
+  regNo: text('reg_no').notNull(),
+  gender: text('gender').default('M'), // 'M' or 'F'
+  stream: text('stream').default('A'),
+  subjectMarks: jsonb('subject_marks').default({}).notNull(), // { [subject: string]: number }
+  subjectGrades: jsonb('subject_grades').default({}), // { [subject: string]: string }
+  subjectsSat: integer('subjects_sat').default(0),
+  totalMarks: numeric('total_marks').default('0'),
+  averageScore: numeric('average_score').default('0'),
+  overallGrade: text('overall_grade').default('F'),
+  best7Points: integer('best_7_points'), // null if < 7 subjects
+  division: text('division').default('-'), // 'I', 'II', 'III', 'IV', '0', or '-' when < 7 subjects
+  schoolRank: integer('school_rank').default(1),
+  overallRank: integer('overall_rank').default(1),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});

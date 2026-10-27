@@ -26,13 +26,16 @@ import { StudentIDView } from './components/StudentIDView';
 import { SubscriptionData, getSchoolSubscription, initializeTrial, isSubscriptionValid } from './utils/SubscriptionService';
 import { SubscriptionModal } from './components/common/SubscriptionModal';
 import { DisciplineView } from './components/DisciplineView';
+import { StudentGovernmentElectionView } from './components/Discipline/Election/StudentGovernmentElectionView';
 import { OfficialLettersView } from './components/OfficialLettersView';
 import { EnvironmentModule } from './components/Environment/EnvironmentModule';
 import { LaboratoryInventoryView } from './components/Laboratory/LaboratoryInventoryView';
 import { LessonPlanView } from './components/LessonPlan/LessonPlanView';
 import { SchemeOfWorkView } from './components/SchemeOfWork/SchemeOfWorkView';
 import { TeacherPortalView } from './components/Teachers/TeacherPortalView';
+import { TeacherProfileDashboard } from './components/Teachers/TeacherProfileDashboard';
 import { InvigilationCalendarView } from './components/Invigilation/InvigilationCalendarView';
+import { ScriptReturnEnvelopeView } from './components/Invigilation/ScriptReturnEnvelopeView';
 import { FloatingBubbles } from './components/FloatingBubbles';
 import { AuthScreen } from './components/auth/AuthScreen';
 import { ParentPortalView } from './components/ParentPortalView';
@@ -40,14 +43,18 @@ import { DailyTeachingTrackerView } from './components/DailyTeachingTrackerView'
 import { EvaluationAnalysisView } from './components/EvaluationAnalysisView';
 import { ReamPaperModule } from './components/Academic/ReamPaperModule';
 import { NectaRegistrationView } from './components/Academic/NectaRegistrationView';
+import { NectaExaminationReportsView } from './components/Academic/NectaExaminationReportsView';
+import { JointExamModuleView } from './components/Academic/JointExamModuleView';
 import { PastPaperCenter } from './components/Academic/PastPaperCenter';
 import { StudentProgressTrackerView } from './components/Academic/StudentProgressTrackerView';
 import { RemedialTimetableSetup } from './components/Remedial/RemedialTimetableSetup';
 import { RemedialDailyTracker } from './components/Remedial/RemedialDailyTracker';
-import { RemedialPaymentAnalyzer } from './components/Remedial/RemedialPaymentAnalyzer';
+import { RemedialPayroll } from './components/Remedial/RemedialPayroll';
 import { OnboardingTour } from './components/common/OnboardingTour';
 import { VerifiedStudentProfileView } from './components/common/VerifiedStudentProfileView';
 import { RoleGuard } from './components/common/RoleGuard';
+import { MonitorDashboard } from './components/Monitor/MonitorDashboard';
+import { TeachingJournalReport } from './components/Monitor/TeachingJournalReport';
 import { useAuth } from './context/AuthContext';
 import { ConfirmDeleteProvider } from './context/ConfirmDeleteContext';
 import SittingPlan from './components/SittingPlan.jsx';
@@ -124,6 +131,27 @@ const mergeById = (arr1: any[], arr2: any[]) => {
 export default function App() {
   const { userAccount, loading: authLoading, logout } = useAuth();
   const [activeView, setActiveView] = useState<ActiveView>('dashboard');
+  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('haby_dark_mode');
+      if (saved !== null) return JSON.parse(saved);
+      return window.matchMedia('(prefers-color-scheme: dark)').matches;
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('haby_dark_mode', JSON.stringify(isDarkMode));
+      if (isDarkMode) {
+        document.documentElement.classList.add('dark');
+      } else {
+        document.documentElement.classList.remove('dark');
+      }
+    } catch {}
+  }, [isDarkMode]);
+
   const [data, setData] = useState<AppData>(() => {
     const schoolId = typeof window !== 'undefined' 
       ? (localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || sessionStorage.getItem('haby_school_id') || DEFAULT_PRIMARY_SCHOOL_ID)
@@ -150,19 +178,16 @@ export default function App() {
       } catch (e) { console.error("App init: Error loading localStorage:", e); }
     }
     
-    if (schoolId !== DEFAULT_PRIMARY_SCHOOL_ID) {
-      return {
-        ...DEFAULT_APP_DATA,
-        students: [],
-        teachers: [],
-        exams: [],
-        timetableAssignments: [],
-        examinationRecords: [],
-        disciplineRecords: [],
-        activityLogs: [],
-      };
-    }
-    return DEFAULT_APP_DATA;
+    return {
+      ...DEFAULT_APP_DATA,
+      students: [],
+      teachers: [],
+      exams: [],
+      timetableAssignments: [],
+      examinationRecords: [],
+      disciplineRecords: [],
+      activityLogs: [],
+    };
   });
 
   const dataRef = useRef<AppData>(data);
@@ -188,7 +213,10 @@ export default function App() {
       }
     }
 
-    if (userAccount?.role === 'TEACHER' && !sessionStorage.getItem('haby_teacher_viewed')) {
+    if (userAccount?.role === 'MONITOR' && !sessionStorage.getItem('haby_monitor_viewed')) {
+      sessionStorage.setItem('haby_monitor_viewed', 'true');
+      setActiveView('monitordashboard');
+    } else if (userAccount?.role === 'TEACHER' && !sessionStorage.getItem('haby_teacher_viewed')) {
       sessionStorage.setItem('haby_teacher_viewed', 'true');
       setActiveView('teacherportal');
     } else if ((userAccount?.isSuperAdmin || userAccount?.role === 'SUPER_ADMIN') && !sessionStorage.getItem('haby_superadmin_viewed')) {
@@ -359,13 +387,13 @@ export default function App() {
       if (localSnap || localTimetable || localPeriods || localStreams || localTeacherAssignments) {
         const parsed = localSnap ? JSON.parse(localSnap) : {};
         setData(prev => {
-          const parsedStudents = Array.isArray(parsed.students) ? parsed.students : [];
-          const parsedTeachers = Array.isArray(parsed.teachers) ? parsed.teachers : [];
+          const parsedStudents = Array.isArray(parsed.students) ? parsed.students : prev.students;
+          const parsedTeachers = Array.isArray(parsed.teachers) ? parsed.teachers : prev.teachers;
           const nextBoot: AppData = {
             ...prev,
             ...parsed,
-            students: parsedStudents.length > 0 ? parsedStudents : prev.students,
-            teachers: parsedTeachers.length > 0 ? parsedTeachers : prev.teachers,
+            students: parsedStudents,
+            teachers: parsedTeachers,
             timetableAssignments: localTimetable ? JSON.parse(localTimetable) : (parsed.timetableAssignments || prev.timetableAssignments || []),
             periodSettings: localPeriods ? JSON.parse(localPeriods) : (parsed.periodSettings || prev.periodSettings || []),
             streamSettings: localStreams ? JSON.parse(localStreams) : (parsed.streamSettings || prev.streamSettings || []),
@@ -383,13 +411,13 @@ export default function App() {
       if (hasLoadedRemoteRef.current || Date.now() - lastLocalMutationRef.current < 10000) return;
       if (cached && typeof cached === 'object') {
         setData(prev => {
-          const cachedStudents = Array.isArray(cached.students) ? cached.students : [];
-          const cachedTeachers = Array.isArray(cached.teachers) ? cached.teachers : [];
+          const cachedStudents = Array.isArray(cached.students) ? cached.students : prev.students;
+          const cachedTeachers = Array.isArray(cached.teachers) ? cached.teachers : prev.teachers;
           const nextCached: AppData = {
             ...prev,
             ...cached,
-            students: cachedStudents.length > 0 ? cachedStudents : prev.students,
-            teachers: cachedTeachers.length > 0 ? cachedTeachers : prev.teachers,
+            students: cachedStudents,
+            teachers: cachedTeachers,
             timetableAssignments: Array.isArray(cached.timetableAssignments) ? cached.timetableAssignments : prev.timetableAssignments,
             periodSettings: cached.periodSettings && cached.periodSettings.length > 0 ? cached.periodSettings : prev.periodSettings,
             streamSettings: cached.streamSettings && cached.streamSettings.length > 0 ? cached.streamSettings : prev.streamSettings,
@@ -413,8 +441,8 @@ export default function App() {
         const rawSchoolData = (supabaseDataSnapshot || {}) as Record<string, any>;
         const hasValidSnapshot = Boolean(rawSchoolData && (rawSchoolData.schoolId || rawSchoolData.school_id || rawSchoolData.id));
 
-        const hasSnapStudents = Array.isArray(rawSchoolData.students) && rawSchoolData.students.length > 0;
-        const hasSnapTeachers = Array.isArray(rawSchoolData.teachers) && rawSchoolData.teachers.length > 0;
+        const hasSnapStudents = Array.isArray(rawSchoolData.students) && (rawSchoolData.students.length > 0 || hasValidSnapshot);
+        const hasSnapTeachers = Array.isArray(rawSchoolData.teachers) && (rawSchoolData.teachers.length > 0 || hasValidSnapshot);
         const hasSnapExams = Array.isArray(rawSchoolData.exams);
 
         // Only query relational tables if school_data snapshot doesn't already contain them
@@ -444,18 +472,16 @@ export default function App() {
         hasLoadedRemoteRef.current = true;
 
         setData(prev => {
-          const snapStudents = Array.isArray(rawSchoolData.students) ? rawSchoolData.students : [];
           let resolvedStudents = prev.students;
-          if (snapStudents.length > 0) {
-            resolvedStudents = snapStudents;
+          if (Array.isArray(rawSchoolData.students) && (rawSchoolData.students.length > 0 || hasValidSnapshot)) {
+            resolvedStudents = rawSchoolData.students;
           } else if (supaStudents.length > 0) {
             resolvedStudents = supaStudents;
           }
 
-          const snapTeachers = Array.isArray(rawSchoolData.teachers) ? rawSchoolData.teachers : [];
           let resolvedTeachers = prev.teachers;
-          if (snapTeachers.length > 0) {
-            resolvedTeachers = snapTeachers;
+          if (Array.isArray(rawSchoolData.teachers) && (rawSchoolData.teachers.length > 0 || hasValidSnapshot)) {
+            resolvedTeachers = rawSchoolData.teachers;
           } else if (supaTeachers.length > 0) {
             resolvedTeachers = supaTeachers;
           }
@@ -650,28 +676,24 @@ export default function App() {
     // without resurrecting deleted students, teachers, periods, or exams
     const unsubSchoolData = subscribeSchoolData(schoolId, (firestoreSnap) => {
       if (!firestoreSnap || typeof firestoreSnap !== 'object') return;
-      // Ignore echo of our own recent save or older snapshots
-      if (Date.now() - lastLocalMutationRef.current < 4500) return;
-      if (typeof firestoreSnap.updatedAtMs === 'number' && firestoreSnap.updatedAtMs <= lastLocalMutationRef.current) return;
+      
+      const remoteUpdatedAt = Number(firestoreSnap.updatedAtMs || 0);
+      const lastLocalMutation = Number(lastLocalMutationRef.current || 0);
+      
+      // Ignore echo of our own recent save (4.5s buffer) or older snapshots
+      if (Date.now() - lastLocalMutation < 4500) return;
+      if (remoteUpdatedAt > 0 && remoteUpdatedAt <= lastLocalMutation) return;
+      
       hasLoadedRemoteRef.current = true;
 
       setData(prev => {
-        // Guard against accidental 3-student demo seed while allowing intentional single/bulk deletions
-        let nextStudents = prev.students;
-        if (Array.isArray(firestoreSnap.students)) {
-          const isDemoWipe = prev.students.length > 15 && firestoreSnap.students.length <= 15 && firestoreSnap.students.length > 0;
-          if (!isDemoWipe && firestoreSnap.students.length > 0) {
-            nextStudents = firestoreSnap.students;
-          }
-        }
+        const nextStudents = Array.isArray(firestoreSnap.students)
+          ? firestoreSnap.students
+          : prev.students;
 
-        let nextTeachers = prev.teachers;
-        if (Array.isArray(firestoreSnap.teachers)) {
-          const isDemoTeacherWipe = prev.teachers.length > 10 && firestoreSnap.teachers.length <= 5 && firestoreSnap.teachers.length > 0;
-          if (!isDemoTeacherWipe && firestoreSnap.teachers.length > 0) {
-            nextTeachers = firestoreSnap.teachers;
-          }
-        }
+        const nextTeachers = Array.isArray(firestoreSnap.teachers)
+          ? firestoreSnap.teachers
+          : prev.teachers;
 
         const nextTimetable = Array.isArray(firestoreSnap.timetableAssignments)
           ? firestoreSnap.timetableAssignments
@@ -785,19 +807,24 @@ export default function App() {
   };
 
   const updateRemoteData = useCallback(async (updates: Partial<AppData>) => {
-    lastLocalMutationRef.current = Date.now();
-    hasUnsavedChangesRef.current = true;
-    setSaveStatus('saving');
     const schoolId = userAccount?.schoolId || getCurrentSchoolId() || DEFAULT_PRIMARY_SCHOOL_ID;
     const schoolKey = `haby_school_data_${schoolId}`;
 
-    const nextData: AppData = {
-      ...dataRef.current,
-      ...updates
-    };
-    dataRef.current = nextData;
-    // Update React UI immediately (< 1ms) without blocking main thread
-    setData(nextData);
+    const now = Date.now();
+    lastLocalMutationRef.current = now;
+    hasUnsavedChangesRef.current = true;
+    setSaveStatus('saving');
+
+    // Update React UI immediately with a functional update to prevent race conditions
+    setData(prev => {
+      const next = {
+        ...prev,
+        ...updates,
+        updatedAtMs: now
+      };
+      dataRef.current = next;
+      return next;
+    });
 
     // 1. Defer heavy JSON.stringify / IndexedDB write off the synchronous click thread (80ms)
     if (localCacheTimerRef.current) clearTimeout(localCacheTimerRef.current);
@@ -833,7 +860,7 @@ export default function App() {
         tasks.push(
           saveTimetableAssignments(schoolId, updates.timetableAssignments, {
             replace: true,
-            periodSettings: nextData.periodSettings
+            periodSettings: dataRef.current.periodSettings
           }).catch(() => {})
         );
       }
@@ -1468,6 +1495,35 @@ export default function App() {
       activityLogs
     });
 
+    // Auto-create authorized user account for teacher so they appear in users list
+    const cleanNameSlug = (teacherWithId.name || 'mwalimu')
+      .toLowerCase()
+      .replace(/^(mr\.|mrs\.|ms\.|dr\.|mwl\.|prof\.)\s*/i, '')
+      .trim()
+      .replace(/[^a-z0-9]+/g, '.')
+      .replace(/^\.+|\.+$/g, '');
+    const tEmail = (teacherWithId.email && teacherWithId.email.includes('@')
+      ? teacherWithId.email
+      : `${cleanNameSlug || 'mwalimu'}.${teacherWithId.id}@school.ac.tz`).trim().toLowerCase();
+    const tRole: UserAccount['role'] = teacherWithId.schoolRole === 'Headmaster' ? 'HEADMASTER' : teacherWithId.schoolRole === 'Academic Master' ? 'ACADEMIC' : 'TEACHER';
+    const defaultPass = '123456';
+    const tSubjects = Array.isArray(teacherWithId.subjects) ? teacherWithId.subjects : [];
+
+    const newStaffUserDoc: UserAccount = {
+      id: `usr_${teacherWithId.id}_${Date.now()}`,
+      email: tEmail,
+      fullName: teacherWithId.name,
+      role: tRole,
+      password: defaultPass,
+      assignedSubjects: tSubjects,
+      schoolId: schoolId,
+    };
+
+    setUsers(prev => {
+      if (prev.some(u => u.email.toLowerCase() === tEmail)) return prev;
+      return [...prev, newStaffUserDoc];
+    });
+
     (async () => {
       try {
         const dbRow = toSupabaseTeacher(teacherWithId, schoolId);
@@ -1497,6 +1553,21 @@ export default function App() {
       } catch (fsErr) {
         console.warn("Firestore save teacher error:", fsErr);
       }
+      // Save UserAccount in background
+      try {
+        await fetch('/api/db/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: tEmail,
+            password: defaultPass,
+            fullName: teacherWithId.name,
+            role: tRole,
+            schoolId: schoolId,
+            assignedSubjects: tSubjects,
+          }),
+        });
+      } catch (_e) {}
     })();
   };
 
@@ -1545,6 +1616,30 @@ export default function App() {
           excludeInvigilation: t.excludeInvigilation ?? false,
           schoolId: schoolId
         } as any).catch(() => {});
+
+        // Auto-create user account for each bulk teacher
+        const cleanNameSlug = (t.name || 'mwalimu')
+          .toLowerCase()
+          .replace(/^(mr\.|mrs\.|ms\.|dr\.|mwl\.|prof\.)\s*/i, '')
+          .trim()
+          .replace(/[^a-z0-9]+/g, '.')
+          .replace(/^\.+|\.+$/g, '');
+        const tEmail = (t.email && t.email.includes('@') ? t.email : `${cleanNameSlug || 'mwalimu'}.${t.id}@school.ac.tz`).trim().toLowerCase();
+        const tRole: UserAccount['role'] = t.schoolRole === 'Headmaster' ? 'HEADMASTER' : t.schoolRole === 'Academic Master' ? 'ACADEMIC' : 'TEACHER';
+        const defaultPass = '123456';
+
+        fetch('/api/db/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: tEmail,
+            password: defaultPass,
+            fullName: t.name,
+            role: tRole,
+            schoolId: schoolId,
+            assignedSubjects: Array.isArray(t.subjects) ? t.subjects : [],
+          }),
+        }).catch(() => {});
       }
     })();
   };
@@ -1616,6 +1711,57 @@ export default function App() {
         } as any);
       } catch (fsErr) {
         console.warn("Firestore update teacher error:", fsErr);
+      }
+    })();
+  };
+
+  const handleBulkUpdateTeachers = async (updatedTeachers: Teacher[]) => {
+    if (!updatedTeachers || updatedTeachers.length === 0) return;
+    const schoolId = userAccount?.schoolId || localStorage.getItem('currentSchoolId') || DEFAULT_PRIMARY_SCHOOL_ID;
+    const updatedMap = new Map(updatedTeachers.map(t => [t.id, t]));
+
+    const activityLogs = logActivity(
+      'TEACHER_UPDATED',
+      'teachers',
+      'Bulk Staff Invigilation Status Updated',
+      `Updated invigilation availability for ${updatedTeachers.length} teachers in bulk`
+    );
+
+    const currentTeachers = Array.isArray(dataRef.current.teachers) ? dataRef.current.teachers : [];
+    const nextTeachers = currentTeachers.map(t => updatedMap.get(t.id) || t);
+
+    updateRemoteData({
+      teachers: nextTeachers,
+      activityLogs
+    });
+
+    (async () => {
+      try {
+        const rows = updatedTeachers.map(t => toSupabaseTeacher(t, schoolId));
+        await supabase.from('teachers').upsert(rows, { onConflict: 'id' });
+      } catch (e) {
+        console.warn("Error bulk updating teachers in Supabase:", e);
+      }
+      for (const t of updatedTeachers) {
+        const docId = (t as any).firestoreDocId || `tch_${t.id}`;
+        saveTeacherToFirestore({
+          id: docId,
+          numericId: t.id,
+          name: t.name,
+          gender: t.gender || 'Male',
+          schoolRole: t.schoolRole || 'Subject Teacher',
+          phone: t.phone || '',
+          email: t.email || '',
+          subject: t.subjects?.[0] || '',
+          subjects: t.subjects || [],
+          teachingStreams: t.teachingStreams || [],
+          passportPhoto: t.passportPhoto || '',
+          color: t.color || '#1d4ed8',
+          maxPeriodsPerWeek: t.maxPeriodsPerWeek || 20,
+          initial: t.initial || '',
+          excludeInvigilation: t.excludeInvigilation ?? false,
+          schoolId: schoolId
+        } as any).catch(() => {});
       }
     })();
   };
@@ -1992,6 +2138,8 @@ export default function App() {
         onStartTour={() => setIsOnboardingOpen(true)}
         isSidebarCollapsed={isSidebarCollapsed}
         onToggleSidebar={() => setIsSidebarCollapsed(prev => !prev)}
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={() => setIsDarkMode(prev => !prev)}
       />
 
       {/* Interactive Onboarding Tour */}
@@ -2146,6 +2294,7 @@ export default function App() {
               onAddTeacher={handleAddTeacher}
               onBulkAddTeachers={handleBulkAddTeachers}
               onUpdateTeacher={handleUpdateTeacher}
+              onBulkUpdateTeachers={handleBulkUpdateTeachers}
               onDeleteTeacher={handleDeleteTeacher}
               onBulkDeleteTeachers={handleBulkDeleteTeachers}
               teacherEvaluations={data.teacherEvaluations || []}
@@ -2155,8 +2304,30 @@ export default function App() {
               timetableAssignments={data.timetableAssignments || []}
               onUpdateTimetableAssignments={assignments => updateRemoteData({ timetableAssignments: assignments })}
               periodSettings={data.periodSettings || []}
+              sessions={data.sessions || []}
+              invigilationAssignments={data.invigilationAssignments || {}}
+              supervisors={data.supervisors || []}
+              journalRecords={data.journalRecords || {}}
+              onUpdateJournal={journalRecords => updateRemoteData({ journalRecords })}
               schoolInfo={data.schoolInfo}
               currentUser={userAccount}
+            />
+          )}
+
+          {activeView === 'teacher-profile' && (
+            <TeacherProfileDashboard
+              teachers={data.teachers || []}
+              timetableAssignments={data.timetableAssignments || []}
+              periodSettings={data.periodSettings || []}
+              sessions={data.sessions || []}
+              invigilationAssignments={data.invigilationAssignments || {}}
+              supervisors={data.supervisors || []}
+              journalRecords={data.journalRecords || {}}
+              onUpdateJournal={journalRecords => updateRemoteData({ journalRecords })}
+              streamSettings={data.streamSettings || []}
+              schoolInfo={data.schoolInfo}
+              currentUser={userAccount}
+              onNavigateToView={view => setActiveView(view as any)}
             />
           )}
 
@@ -2173,6 +2344,8 @@ export default function App() {
               sessions={data.sessions || []}
               invigilationAssignments={data.invigilationAssignments || {}}
               supervisors={data.supervisors || []}
+              journalRecords={data.journalRecords || {}}
+              onUpdateJournal={journalRecords => updateRemoteData({ journalRecords })}
               onUpdateTeacher={handleUpdateTeacher}
               onSaveDailyAttendance={(date, rollCallRecords) => {
                 const currentDaily = data.dailyAttendance || {};
@@ -2197,6 +2370,17 @@ export default function App() {
               }}
               onNavigateToView={view => setActiveView(view as any)}
               academicTermDates={data.academicTermDates}
+              dutyRosterData={data.dutyRosterData}
+              onUpdateDutyRoster={dutyRosterData => {
+                const activityLogs = logActivity(
+                  'DISCIPLINE_RECORD_UPDATED',
+                  'discipline',
+                  'Kitabu cha Zamu cha Walimu Kimesasishwa',
+                  'Taarifa za zamu zimehifadhiwa kwenye database'
+                );
+                updateRemoteData({ dutyRosterData, activityLogs });
+              }}
+              disciplineRecords={data.disciplineRecords || []}
             />
           )}
 
@@ -2246,6 +2430,7 @@ export default function App() {
           {activeView === 'examrecords' && (
             <ExaminationRecordsView
               students={data.students}
+              teachers={data.teachers}
               examinationRecords={data.examinationRecords || []}
               promotionHistory={data.promotionHistory || []}
               transferHistory={data.transferHistory || []}
@@ -2284,6 +2469,7 @@ export default function App() {
                 setActiveView('sms');
               }}
               onNavigateToNectaAnalyzer={() => setActiveView('nectaanalyzer')}
+              onNavigateToInvigilation={() => setActiveView('invigilation')}
             />
           )}
 
@@ -2482,6 +2668,15 @@ export default function App() {
             />
           )}
 
+          {activeView === 'election' && (
+            <StudentGovernmentElectionView
+              students={data.students}
+              disciplineRecords={data.disciplineRecords || []}
+              schoolInfo={data.schoolInfo}
+              currentUser={userAccount}
+            />
+          )}
+
           {activeView === 'environment' && (
             <EnvironmentModule
               currentUser={userAccount}
@@ -2533,6 +2728,8 @@ export default function App() {
               schoolInfo={data.schoolInfo}
               timetableAssignments={data.timetableAssignments || []}
               periodSettings={data.periodSettings || []}
+              teachers={data.teachers || []}
+              streamSettings={data.streamSettings || []}
             />
           )}
 
@@ -2573,6 +2770,24 @@ export default function App() {
             />
           )}
 
+          {activeView === 'nectaexamreports' && (
+            <NectaExaminationReportsView
+              schoolInfo={data.schoolInfo}
+              students={data.students || []}
+              teachers={data.teachers || []}
+              currentUser={userAccount}
+            />
+          )}
+
+          {activeView === 'jointexams' && (
+            <JointExamModuleView
+              schoolInfo={data.schoolInfo}
+              students={data.students || []}
+              currentUser={userAccount}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+            />
+          )}
+
           {activeView === 'remedialtimetable' && (
             <RemedialTimetableSetup
               schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
@@ -2580,6 +2795,12 @@ export default function App() {
               schoolInfo={data.schoolInfo}
               students={data.students}
               periodSettings={data.periodSettings}
+              streamSettings={data.streamSettings}
+              timetableAssignments={data.timetableAssignments}
+              teacherAssignments={data.teacherAssignments}
+              examinationRecords={data.examinationRecords}
+              exams={data.exams}
+              currentUser={userAccount}
               onAddActivityLog={log => {
                 const activityLogs = logActivity(
                   log.action,
@@ -2597,19 +2818,24 @@ export default function App() {
               schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
               currentUser={userAccount}
               students={data.students}
+              teachers={data.teachers}
             />
           )}
 
           {activeView === 'remedialanalyzer' && (
-            <RemedialPaymentAnalyzer
+            <RemedialPayroll
               schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              teachers={data.teachers}
               schoolInfo={data.schoolInfo}
+              currentUser={userAccount}
             />
           )}
 
           {activeView === 'exams' && (
             <ExamsView
               exams={data.exams}
+              teachers={data.teachers}
+              currentUser={userAccount}
               onAddExam={handleAddExam}
               onUpdateExam={handleUpdateExam}
               onUpdateExams={handleUpdateExams}
@@ -2633,6 +2859,16 @@ export default function App() {
               onNavigateToExams={() => setActiveView('exams')}
               currentUser={userAccount}
               schoolInfo={data.schoolInfo}
+            />
+          )}
+
+          {activeView === 'journalreport' && (
+            <TeachingJournalReport
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              teachers={data.teachers}
+              currentUser={userAccount}
+              timetableAssignments={data.timetableAssignments || []}
+              periodSettings={data.periodSettings || []}
             />
           )}
 
@@ -2783,16 +3019,18 @@ export default function App() {
 
           {activeView === 'invigilation' && (
             <InvigilationContainer
-              sessions={data.sessions}
-              teachers={data.teachers}
-              supervisors={data.supervisors}
-              selectedInvigilators={data.selectedInvigilators}
-              invigilationAssignments={data.invigilationAssignments}
+              sessions={data.sessions || []}
+              teachers={data.teachers || []}
+              supervisors={data.supervisors || []}
+              selectedInvigilators={data.selectedInvigilators || []}
+              invigilationAssignments={data.invigilationAssignments || {}}
               savedInvigilationRecords={data.savedInvigilationRecords || []}
-              timetableReleased={data.timetableReleased}
-              schoolInfo={data.schoolInfo}
-              dayThemes={data.dayThemes}
+              timetableReleased={Boolean(data.timetableReleased)}
+              schoolInfo={data.schoolInfo || DEFAULT_APP_DATA.schoolInfo}
+              dayThemes={data.dayThemes || {}}
               currentUser={userAccount}
+              exams={data.exams || []}
+              onUpdateTeacher={handleUpdateTeacher}
               onUpdateSessions={sessions => updateRemoteData({ sessions })}
               onUpdateSupervisors={supervisors => updateRemoteData({ supervisors })}
               onUpdateSelectedInvigilators={selectedInvigilators => updateRemoteData({ selectedInvigilators })}
@@ -2809,6 +3047,17 @@ export default function App() {
               onToggleRelease={() => updateRemoteData({ timetableReleased: !data.timetableReleased })}
               onNavigateToSittingPlan={() => setActiveView('sittingplan')}
               onNavigateToCalendar={() => setActiveView('invigilation-calendar')}
+            />
+          )}
+
+          {activeView === 'envelope-cover' && (
+            <ScriptReturnEnvelopeView
+              schoolInfo={data.schoolInfo || DEFAULT_APP_DATA.schoolInfo}
+              sessions={data.sessions || []}
+              teachers={data.teachers || []}
+              supervisors={data.supervisors || []}
+              invigilationAssignments={data.invigilationAssignments || {}}
+              onBack={() => setActiveView('invigilation')}
             />
           )}
 
@@ -2860,6 +3109,21 @@ export default function App() {
               onUpdateCommunicationTemplates={templates => {
                 updateRemoteData({ communicationTemplates: templates });
               }}
+            />
+          )}
+
+          {activeView === 'monitordashboard' && (
+            <MonitorDashboard
+              currentUser={userAccount}
+              schoolId={userAccount?.schoolId || DEFAULT_PRIMARY_SCHOOL_ID}
+              teachers={data.teachers}
+              timetableAssignments={data.timetableAssignments || []}
+              periodSettings={data.periodSettings || []}
+              students={data.students || []}
+              streamSettings={data.streamSettings || []}
+              users={users || []}
+              academicTermDates={data.academicTermDates}
+              schoolInfo={data.schoolInfo}
             />
           )}
 

@@ -1,5 +1,6 @@
 import { SchemeOfWork, SchemeOfWorkItem, TeachingLogBookEntry } from '../types/schemeOfWork';
 import { CurriculumType } from '../types/lessonPlan';
+import { AcademicTermDates } from '../types';
 
 export interface SubjectSchemeWeek {
   week: number;
@@ -48,9 +49,85 @@ export function resolveTermKey(term: string): 'term_1' | 'term_2' {
   return 'term_1';
 }
 
-// Format realistic date range for 12 weeks of school terms in Tanzania
-export function getTanzanianTermDates(weekNum: number, termKey: 'term_1' | 'term_2', language: 'Kiswahili' | 'English'): string {
+const MONTHS_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+function formatShortDate(d: Date): string {
+  const day = String(d.getDate()).padStart(2, '0');
+  const mon = MONTHS_SHORT[d.getMonth()] || 'Jan';
+  return `${day} ${mon}`;
+}
+
+function addDays(base: Date, days: number): Date {
+  const copy = new Date(base.getTime());
+  copy.setDate(copy.getDate() + days);
+  return copy;
+}
+
+// Format realistic date range for 12 weeks of school terms in Tanzania using configured AcademicTermDates (Mihula)
+export function getTanzanianTermDates(
+  weekNum: number,
+  termKey: 'term_1' | 'term_2',
+  language: 'Kiswahili' | 'English',
+  academicTermDates?: AcademicTermDates
+): string {
   const isSwahili = language === 'Kiswahili';
+
+  if (academicTermDates) {
+    if (termKey === 'term_1' && academicTermDates.yearOpeningDate) {
+      const termStart = new Date(academicTermDates.yearOpeningDate);
+      const midBreakStart = academicTermDates.midTerm1BreakStart ? new Date(academicTermDates.midTerm1BreakStart) : null;
+      const midBreakEnd = academicTermDates.midTerm1BreakEnd ? new Date(academicTermDates.midTerm1BreakEnd) : null;
+      const termEnd = academicTermDates.terminalBreakStart ? new Date(academicTermDates.terminalBreakStart) : null;
+
+      if (!isNaN(termStart.getTime())) {
+        let weekStart = addDays(termStart, (weekNum - 1) * 7);
+        // After week 8 (Midterm), shift subsequent weeks past the midterm break if configured
+        if (weekNum > 8 && midBreakStart && midBreakEnd && !isNaN(midBreakStart.getTime()) && !isNaN(midBreakEnd.getTime())) {
+          const breakDays = Math.max(0, Math.round((midBreakEnd.getTime() - midBreakStart.getTime()) / (1000 * 60 * 60 * 24)));
+          weekStart = addDays(weekStart, breakDays);
+        }
+        let weekEnd = addDays(weekStart, 4);
+        if (weekNum === 12 && termEnd && !isNaN(termEnd.getTime()) && termEnd > weekStart) {
+          weekEnd = termEnd;
+        }
+        const tag = weekNum === 8
+          ? (isSwahili ? ' - Mtihani wa Nusu Muhula I' : ' - Midterm I')
+          : weekNum === 12
+          ? (isSwahili ? ' - Mtihani wa Muhula I' : ' - Terminal Exam')
+          : '';
+        const rangeStr = `${formatShortDate(weekStart)} - ${formatShortDate(weekEnd)}${tag}`;
+        return isSwahili ? `Muhula I • Wiki ya ${weekNum} (${rangeStr})` : `Term 1 • Week ${weekNum} (${rangeStr})`;
+      }
+    }
+
+    if (termKey === 'term_2' && academicTermDates.terminalBreakEnd) {
+      // Term 2 starts right after terminalBreakEnd
+      const term2Open = addDays(new Date(academicTermDates.terminalBreakEnd), 1);
+      const mid2Start = academicTermDates.midTerm2BreakStart ? new Date(academicTermDates.midTerm2BreakStart) : null;
+      const mid2End = academicTermDates.midTerm2BreakEnd ? new Date(academicTermDates.midTerm2BreakEnd) : null;
+      const annualStart = academicTermDates.annualBreakStart ? new Date(academicTermDates.annualBreakStart) : null;
+
+      if (!isNaN(term2Open.getTime())) {
+        let weekStart = addDays(term2Open, (weekNum - 1) * 7);
+        if (weekNum > 8 && mid2Start && mid2End && !isNaN(mid2Start.getTime()) && !isNaN(mid2End.getTime())) {
+          const breakDays = Math.max(0, Math.round((mid2End.getTime() - mid2Start.getTime()) / (1000 * 60 * 60 * 24)));
+          weekStart = addDays(weekStart, breakDays);
+        }
+        let weekEnd = addDays(weekStart, 4);
+        if (weekNum === 12 && annualStart && !isNaN(annualStart.getTime()) && annualStart > weekStart) {
+          weekEnd = annualStart;
+        }
+        const tag = weekNum === 8
+          ? (isSwahili ? ' - Mtihani wa Nusu Muhula II' : ' - Midterm II')
+          : weekNum === 12
+          ? (isSwahili ? ' - Mtihani wa Mwaka' : ' - Annual Exam')
+          : '';
+        const rangeStr = `${formatShortDate(weekStart)} - ${formatShortDate(weekEnd)}${tag}`;
+        return isSwahili ? `Muhula II • Wiki ya ${weekNum} (${rangeStr})` : `Term 2 • Week ${weekNum} (${rangeStr})`;
+      }
+    }
+  }
+
   if (termKey === 'term_1') {
     // Term 1: Jan to April (12 Weeks)
     const dates = [
@@ -797,7 +874,9 @@ export function getSubjectSchemeTemplate(
   className: string,
   term: string,
   curriculumType: CurriculumType,
-  language: 'Kiswahili' | 'English' = 'English'
+  language: 'Kiswahili' | 'English' = 'English',
+  academicTermDates?: AcademicTermDates,
+  customTopics?: string[]
 ): SubjectSchemeTemplate {
   const normSub = String(subject || 'General Studies').trim().toLowerCase();
   const classKey = resolveClassKey(className);
@@ -1090,6 +1169,27 @@ export function getSubjectSchemeTemplate(
     }));
   }
 
+  // If teacher specified custom topics, weave them into non-exam weeks
+  if (customTopics && customTopics.length > 0) {
+    weeklyTopics = weeklyTopics.map((wt, idx) => {
+      const weekNum = idx + 1;
+      if (weekNum === 8 || weekNum === 12) return wt;
+      const customTopic = customTopics[idx % customTopics.length];
+      if (!customTopic) return wt;
+      return {
+        ...wt,
+        mainTopic: customTopic,
+        subTopic: `${customTopic} — ${wt.subTopic}`,
+        cbcMain: isSwahili
+          ? `Kutumia umahiri wa ${customTopic} katika somo la ${subject} kutatua changamoto za kijamii`
+          : `Applying competences in ${customTopic} (${subject}) to solve real-world problems`,
+        cbcSpec: isSwahili
+          ? `Kuchambua na kufanya vitendo kuhusu ${customTopic}`
+          : `Analyzing and performing practical activities on ${customTopic}`
+      };
+    });
+  }
+
   // Construct 12 weeks of structured items
   const weeks: SubjectSchemeWeek[] = weeklyTopics.slice(0, 12).map((t, idx) => {
     const weekNum = idx + 1;
@@ -1098,7 +1198,7 @@ export function getSubjectSchemeTemplate(
 
     return {
       week: weekNum,
-      dates: getTanzanianTermDates(weekNum, termKey, isSwahili ? 'Kiswahili' : 'English'),
+      dates: getTanzanianTermDates(weekNum, termKey, isSwahili ? 'Kiswahili' : 'English', academicTermDates),
       cbc: {
         mainCompetence: isMidterm
           ? (isSwahili ? `PIMHO LA KATIKATI YA MUHULA KATIKA SOMO LA ${subject.toUpperCase()}` : `MIDTERM COMPETENCE ASSESSMENT IN ${subject.toUpperCase()}`)
@@ -1164,19 +1264,26 @@ export const generateAutoSchemeOfWork = (
   teacherName: string,
   schoolId = 'DEMO_SCHOOL',
   periodsPerWeek = 5,
-  language: 'Kiswahili' | 'English' = 'English'
+  language: 'Kiswahili' | 'English' = 'English',
+  academicTermDates?: AcademicTermDates,
+  customTopics?: string[]
 ): SchemeOfWork => {
   const isSwahili = language === 'Kiswahili' || String(subject).toLowerCase().includes('kiswahili');
 
   if (term === 'Full Year') {
-    const t1 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 1', teacherName, schoolId, periodsPerWeek, language);
-    const t2 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 2', teacherName, schoolId, periodsPerWeek, language);
+    const t1Topics = customTopics && customTopics.length > 0 ? customTopics.slice(0, Math.ceil(customTopics.length / 2)) : undefined;
+    const t2Topics = customTopics && customTopics.length > 1 ? customTopics.slice(Math.ceil(customTopics.length / 2)) : customTopics;
+
+    const t1 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 1', teacherName, schoolId, periodsPerWeek, language, academicTermDates, t1Topics);
+    const t2 = generateAutoSchemeOfWork(subject, className, stream, curriculumType, academicYear, 'Term 2', teacherName, schoolId, periodsPerWeek, language, academicTermDates, t2Topics);
 
     const t2Items = t2.items.map(item => ({
       ...item,
       id: `${item.id}_full`,
       weekNumber: item.weekNumber + t1.items.length,
-      datesOrMonth: item.datesOrMonth.replace(/Wiki ya (\d+)/i, (_, n) => `Wiki ya ${Number(n) + t1.items.length}`).replace(/Week (\d+)/i, (_, n) => `Week ${Number(n) + t1.items.length}`)
+      datesOrMonth: item.datesOrMonth
+        .replace(/Wiki ya (\d+)/i, (_, n) => `Wiki ya ${Number(n) + t1.items.length}`)
+        .replace(/Week (\d+)/i, (_, n) => `Week ${Number(n) + t1.items.length}`)
     }));
 
     const t2Logs = t2.logBookEntries.map(log => ({
@@ -1189,14 +1296,23 @@ export const generateAutoSchemeOfWork = (
       ...t1,
       id: `scheme_full_${Date.now()}`,
       term: 'Full Year',
+      periodsPerWeek,
       totalWeeks: t1.items.length + t2.items.length,
       items: [...t1.items, ...t2Items],
       logBookEntries: [...t1.logBookEntries, ...t2Logs]
     };
   }
 
-  // Resolve template using exact subject, exact class level and exact term
-  const template = getSubjectSchemeTemplate(subject, className, term, curriculumType, isSwahili ? 'Kiswahili' : 'English');
+  // Resolve template using exact subject, exact class level, exact term, and configured AcademicTermDates
+  const template = getSubjectSchemeTemplate(
+    subject,
+    className,
+    term,
+    curriculumType,
+    isSwahili ? 'Kiswahili' : 'English',
+    academicTermDates,
+    customTopics
+  );
 
   const items: SchemeOfWorkItem[] = template.weeks.map(w => {
     if (curriculumType === 'NEW_CBC_2023') {

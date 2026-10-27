@@ -17,7 +17,14 @@ import { calculateNectaLevelResults } from './nectaRules';
  * D: 30 - 44
  * F: 0 - 29
  */
-export function calculateExamGrade(score: number): 'A' | 'B' | 'C' | 'D' | 'F' {
+export function calculateExamGrade(score: number | string): 'A' | 'B' | 'C' | 'D' | 'F' | 'ABS' | 'INC' {
+  if (typeof score === 'string') {
+    const upper = score.trim().toUpperCase();
+    if (upper === 'ABS' || upper === 'X' || upper === 'ABSENT') return 'ABS';
+    if (upper === 'INC' || upper === 'INCOMPLETE') return 'INC';
+    if (!isNaN(Number(score))) return calculateExamGrade(Number(score));
+    return 'INC';
+  }
   if (score >= 80) return 'A';
   if (score >= 60) return 'B';
   if (score >= 45) return 'C';
@@ -25,13 +32,17 @@ export function calculateExamGrade(score: number): 'A' | 'B' | 'C' | 'D' | 'F' {
   return 'F';
 }
 
-export function getGradeRemark(grade: 'A' | 'B' | 'C' | 'D' | 'F'): string {
-  switch (grade) {
+export function getGradeRemark(grade: string): string {
+  switch (String(grade).toUpperCase()) {
     case 'A': return 'Excellent';
     case 'B': return 'Very Good';
     case 'C': return 'Average';
     case 'D': return 'Pass';
     case 'F': return 'Fail';
+    case 'E': return 'Fail';
+    case 'S': return 'Subsidiary';
+    case 'ABS': return 'Absent';
+    case 'INC': return 'Incomplete';
     default: return 'Satisfactory';
   }
 }
@@ -136,13 +147,13 @@ export function buildExaminationRecord(
   let subjectCount = 0;
 
   Object.entries(cleanedMarks).forEach(([subjName, score]) => {
+    const grade = calculateExamGrade(score);
+    subjectsRecord[subjName] = {
+      marks: score,
+      grade,
+      remark: getGradeRemark(grade)
+    };
     if (typeof score === 'number' && !isNaN(score)) {
-      const grade = calculateExamGrade(score);
-      subjectsRecord[subjName] = {
-        marks: score,
-        grade,
-        remark: getGradeRemark(grade)
-      };
       totalMarks += score;
       subjectCount++;
     }

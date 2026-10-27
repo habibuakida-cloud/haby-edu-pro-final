@@ -1,11 +1,11 @@
-import { LessonPlan } from './types/lessonPlan';
-import { SchemeOfWork } from './types/schemeOfWork';
+import type { LessonPlan } from './types/lessonPlan.ts';
+import type { SchemeOfWork } from './types/schemeOfWork.ts';
 
 export interface CharacterTrait {
   id: string;
   name: string;
   swahiliName?: string;
-  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  grade: 'A' | 'B' | 'C' | 'D' | 'F' | 'E' | 'ABS';
   remark: string;
 }
 
@@ -21,7 +21,7 @@ export interface ReportCardPeriodSetting {
 export interface StudentReportCardData {
   periodSetting?: ReportCardPeriodSetting;
   characterAssessment?: {
-    overallConductGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+    overallConductGrade: 'A' | 'B' | 'C' | 'D' | 'F' | 'E' | 'ABS';
     overallConductRemark: string;
     traits: CharacterTrait[];
   };
@@ -50,8 +50,8 @@ export interface Student {
   stream?: string;
   combination?: string;
   subjects: string[];
-  marks?: Record<string, number>;
-  examMarks?: Record<string, Record<string, number>>; // examKey -> (subject -> score)
+  marks?: Record<string, number | string>;
+  examMarks?: Record<string, Record<string, number | string>>; // examKey -> (subject -> score)
   total?: number;
   average?: string;
   division?: string;
@@ -59,7 +59,7 @@ export interface Student {
   points?: number | string;
   remark?: string;
   position?: number | string;
-  primaryGrade?: 'A' | 'B' | 'C' | 'D' | 'E';
+  primaryGrade?: 'A' | 'B' | 'C' | 'D' | 'E' | 'ABS' | 'INC';
   passStatus?: 'AMEFAULU' | 'HAJAFAULU' | string;
   gpa?: number;
   classRank?: number | string;
@@ -114,8 +114,13 @@ export interface Teacher {
   passportPhoto?: string; // base64 / URL for teacher passport size photo
   teachingStreams?: string[]; // e.g. ["Form 1 - STREAM A", "Form 2 - STREAM B"]
   maxPeriodsPerWeek?: number; // target periods per week (each period = 40 mins)
+  hasBiometric?: boolean;
+  pinCode?: string;
+  fingerprintTemplate?: string;
   fingerprintEnrolled?: boolean; // Admin controlled fingerprint biometric enrollment
   fingerprintId?: string; // Biometric fingerprint identifier
+  isClassTeacher?: boolean; // Whether teacher is assigned as Mwalimu wa Darasa
+  classTeacherOf?: { className: string; stream: string } | string; // e.g. "Form 1 - STREAM A" or { className: "Form 1", stream: "STREAM A" }
 }
 
 export interface Exam {
@@ -129,6 +134,12 @@ export interface Exam {
   isActive?: boolean;
   academicYear?: string;
   term?: string;
+  subject?: string;
+  assignedTeacherId?: number;
+  assignedTeacherName?: string;
+  isHODOverride?: boolean;
+  hodApprovedBy?: string;
+  hodOverrideReason?: string;
 }
 
 export interface DisciplineRecord {
@@ -200,6 +211,7 @@ export interface TimetableAssignment {
   period: string; // formatted as "Period 1 (08:00-08:40)"
   periodName?: string;
   teacherId?: number;
+  teacherName?: string;
   subject: string;
   room?: string;
   activityType?: ActivityType;
@@ -225,6 +237,7 @@ export interface InvigilationSession {
   className: string;
   stream: string;
   rooms: number;
+  examTitle?: string; // Specific Examination Title (e.g., "Midterm Examination 2026", "Pre-National Examination 2026", "Annual Examination 2026")
 }
 
 export interface Supervisor {
@@ -239,6 +252,10 @@ export type InstitutionalLevel = 'NURSERY' | 'PRIMARY' | 'SECONDARY';
 export interface SchoolInfo {
   name: string;
   schoolNumber?: string; // Tanzanian NECTA center / school registration number e.g. "0123" or "S.0123"
+  centerNumber?: string;
+  regNumber?: string;
+  district?: string;
+  region?: string;
   address: string;
   phone: string;
   email: string;
@@ -269,7 +286,7 @@ export interface FormStreamTheme {
   text: string;
 }
 
-export type UserRole = 'HEADMASTER' | 'ACADEMIC' | 'TEACHER' | 'ENVIRONMENT_TEACHER' | 'SUPER_ADMIN';
+export type UserRole = 'HEADMASTER' | 'ACADEMIC' | 'TEACHER' | 'ENVIRONMENT_TEACHER' | 'MONITOR' | 'SUPER_ADMIN' | 'ADMIN' | 'CLASS_TEACHER';
 
 export type EquipmentCondition = 'Nzuri' | 'Mbovu' | 'Inahitaji Matengenezo';
 export type EquipmentCategory = 'Kilimo' | 'Usafi' | 'Upimaji Hali ya Hewa' | 'Maji' | 'Bustani' | 'Miti na Misitu' | 'Vinginevyo';
@@ -408,6 +425,10 @@ export interface UserAccount {
   school_id?: string;
   password?: string;
   assignedSubjects?: string[];
+  teachingStreams?: string[];
+  isClassTeacher?: boolean;
+  classTeacherOf?: { className: string; stream: string } | string;
+  teacherId?: number;
   lastLogin?: string;
   isSuperAdmin?: boolean;
 }
@@ -549,8 +570,8 @@ export type ExamTerm = 'Term 1' | 'Term 2';
 export type RecordExamType = 'Monthly' | 'Midterm' | 'Terminal' | 'Annual';
 
 export interface ExaminationRecordSubjectInfo {
-  marks: number;
-  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  marks: number | string;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F' | 'ABS' | 'INC' | 'S' | 'E';
   remark?: string;
 }
 
@@ -570,7 +591,7 @@ export interface ExaminationRecord {
   subjects: Record<string, ExaminationRecordSubjectInfo>;
   totalMarks: number;
   averageMarks: number;
-  overallGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+  overallGrade: 'A' | 'B' | 'C' | 'D' | 'F' | 'ABS' | 'INC' | 'E' | 'S';
   division?: string;
   points?: number | null;
   positionInClass: number;

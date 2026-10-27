@@ -143,6 +143,7 @@ export function toSupabaseTeacher(t: any, schoolId: string) {
   const seed = `tch_${validSchoolId}_${tchKey}`;
   const stableId = existingUuid || makeDeterministicUuid(seed);
   const calculatedInitial = (t.name ? computeTeacherInitial(t.name) : '') || t.initial || 'TR';
+  const hasBio = Boolean(t.hasBiometric ?? t.has_biometric ?? t.fingerprintEnrolled ?? t.fingerprint_enrolled);
   return {
     id: stableId,
     numericId,
@@ -165,7 +166,13 @@ export function toSupabaseTeacher(t: any, schoolId: string) {
     max_periods_per_week: t.maxPeriodsPerWeek || 20,
     maxPeriodsPerWeek: t.maxPeriodsPerWeek || 20,
     exclude_invigilation: Boolean(t.excludeInvigilation),
-    excludeInvigilation: Boolean(t.excludeInvigilation)
+    excludeInvigilation: Boolean(t.excludeInvigilation),
+    has_biometric: hasBio,
+    hasBiometric: hasBio,
+    pin_code: t.pinCode || t.pin_code || null,
+    pinCode: t.pinCode || t.pin_code || null,
+    fingerprint_template: t.fingerprintTemplate || t.fingerprint_template || null,
+    fingerprintTemplate: t.fingerprintTemplate || t.fingerprint_template || null,
   };
 }
 
@@ -179,6 +186,7 @@ export function fromSupabaseTeacher(t: any, idx: number): Teacher {
       ? t.numeric_id
       : 101 + idx;
   const calculatedInitial = (t.name ? computeTeacherInitial(t.name) : '') || t.initial || 'TR';
+  const hasBio = Boolean(t.has_biometric ?? t.hasBiometric ?? t.fingerprint_enrolled ?? t.fingerprintEnrolled);
   return {
     id: numId,
     firestoreDocId: typeof t.id === 'string' ? t.id : t.firestoreDocId,
@@ -193,7 +201,11 @@ export function fromSupabaseTeacher(t: any, idx: number): Teacher {
     teachingStreams: Array.isArray(t.teaching_streams) ? t.teaching_streams : (Array.isArray(t.teachingStreams) ? t.teachingStreams : []),
     color: t.color || '#1d4ed8',
     maxPeriodsPerWeek: t.max_periods_per_week || t.maxPeriodsPerWeek || 20,
-    excludeInvigilation: Boolean(t.exclude_invigilation ?? t.excludeInvigilation)
+    excludeInvigilation: Boolean(t.exclude_invigilation ?? t.excludeInvigilation),
+    hasBiometric: hasBio,
+    fingerprintEnrolled: hasBio,
+    pinCode: t.pin_code || t.pinCode || undefined,
+    fingerprintTemplate: t.fingerprint_template || t.fingerprintTemplate || undefined,
   };
 }
 
@@ -276,13 +288,29 @@ export async function processSyncQueue() {
   return true;
 }
 
+function getAuthHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (typeof window !== 'undefined') {
+    try {
+      const token = sessionStorage.getItem('haby_auth_token');
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+    } catch {
+      // ignore storage errors
+    }
+  }
+  return headers;
+}
+
 // Low-level record operations
 export async function upsertRecord(table: string, records: any | any[], _primaryKey = 'id') {
   try {
     const payload = Array.isArray(records) ? records : [records];
     const res = await fetch('/api/db/query', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
+      credentials: 'include',
       body: JSON.stringify({
         table,
         action: 'upsert',
@@ -303,7 +331,8 @@ export async function insertRecord(table: string, records: any | any[]) {
     const payload = Array.isArray(records) ? records : [records];
     const res = await fetch('/api/db/query', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
+      credentials: 'include',
       body: JSON.stringify({
         table,
         action: 'insert',
@@ -323,7 +352,8 @@ export async function deleteRecord(table: string, id: any) {
   try {
     const res = await fetch('/api/db/query', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
+      credentials: 'include',
       body: JSON.stringify({
         table,
         action: 'delete',
@@ -342,7 +372,8 @@ export async function getAll(tableName: string): Promise<{ data: any[] | null; e
   try {
     const res = await fetch('/api/db/query', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getAuthHeaders(),
+      credentials: 'include',
       body: JSON.stringify({
         table: tableName,
         action: 'select'
@@ -409,7 +440,8 @@ class UpdateBuilder {
     try {
       const res = await fetch('/api/db/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           table: this.tableName,
           action: 'update',
@@ -453,7 +485,8 @@ class DeleteBuilder {
     try {
       const res = await fetch('/api/db/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           table: this.tableName,
           action: 'delete',
@@ -507,11 +540,12 @@ class QueryBuilder {
     return { data, error: res.error || null };
   }
 
-  private async execute() {
+  async execute() {
     try {
       const res = await fetch('/api/db/query', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getAuthHeaders(),
+        credentials: 'include',
         body: JSON.stringify({
           table: this.tableName,
           action: 'select',
@@ -520,12 +554,15 @@ class QueryBuilder {
         })
       });
       if (!res.ok) {
-        return { data: null, error: await res.text(), count: 0 };
+        const errPayload = { data: null, error: await res.text(), count: 0 };
+        return { ...errPayload, execute: async () => errPayload };
       }
       const json = await res.json();
-      return { data: json.data || [], error: null, count: (json.data || []).length };
+      const okPayload = { data: json.data || [], error: null, count: (json.data || []).length };
+      return { ...okPayload, execute: async () => okPayload };
     } catch (err) {
-      return { data: null, error: err, count: 0 };
+      const catchPayload = { data: null, error: err, count: 0 };
+      return { ...catchPayload, execute: async () => catchPayload };
     }
   }
 

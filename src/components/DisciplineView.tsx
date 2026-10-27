@@ -14,7 +14,9 @@ import {
   FileText,
   Printer,
   ClipboardCheck,
-  Calendar
+  Calendar,
+  CalendarCheck,
+  Vote
 } from 'lucide-react';
 import { DisciplineRecord, DutyRosterData, SchoolInfo, Student, Teacher, UserAccount } from '../types';
 import { 
@@ -24,6 +26,7 @@ import {
   DEFAULT_APP_DATA
 } from '../constants/defaults';
 import { DutyRosterSystem } from './Discipline/DutyRosterSystem';
+import { StudentGovernmentElectionView } from './Discipline/Election/StudentGovernmentElectionView';
 
 interface DisciplineViewProps {
   records: DisciplineRecord[];
@@ -54,7 +57,7 @@ export const DisciplineView: React.FC<DisciplineViewProps> = ({
   onUpdateDutyRoster,
   onAddMainTeacher
 }) => {
-  const [activeMainSection, setActiveMainSection] = useState<'DUTY_ROSTER' | 'CONDUCT_LEDGER'>('DUTY_ROSTER');
+  const [activeMainSection, setActiveMainSection] = useState<'DUTY_ROSTER' | 'CONDUCT_LEDGER' | 'STUDENT_ELECTIONS'>('DUTY_ROSTER');
   const [searchQuery, setSearchQuery] = useState('');
   const [classFilter, setClassFilter] = useState<string>('All');
   const [streamFilter, setStreamFilter] = useState<string>('All');
@@ -155,7 +158,7 @@ export const DisciplineView: React.FC<DisciplineViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Main Discipline Module Switcher: Mfumo wa Zamu ya Walimu vs Rejista ya Nidhamu */}
+      {/* Main Discipline Module Switcher: Mfumo wa Zamu ya Walimu vs Rejista ya Nidhamu vs Uchaguzi wa Serikali ya Wanafunzi */}
       <div className="bg-white border border-slate-200 rounded-xl p-3 shadow-xs flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-1.5 bg-slate-100 p-1 rounded-lg">
           <button
@@ -168,7 +171,7 @@ export const DisciplineView: React.FC<DisciplineViewProps> = ({
             }`}
           >
             <Calendar className="w-4 h-4 text-emerald-400" />
-            <span>Mfumo wa Zamu ya Walimu (Teacher Duty Roster)</span>
+            <span>Mfumo wa Zamu ya Walimu (Duty Roster)</span>
           </button>
           <button
             type="button"
@@ -180,16 +183,35 @@ export const DisciplineView: React.FC<DisciplineViewProps> = ({
             }`}
           >
             <ShieldAlert className="w-4 h-4 text-blue-500" />
-            <span>Rejista ya Nidhamu ya Wanafunzi ({records.length})</span>
+            <span>Rejista ya Nidhamu ({records.length})</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveMainSection('STUDENT_ELECTIONS')}
+            className={`px-4 py-2 rounded-md text-xs font-black flex items-center gap-2 transition-colors cursor-pointer ${
+              activeMainSection === 'STUDENT_ELECTIONS'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Vote className="w-4 h-4 text-amber-300" />
+            <span>Uchaguzi wa Serikali ya Wanafunzi</span>
           </button>
         </div>
 
         <div className="text-xs text-slate-500 font-medium">
-          Idara ya Nidhamu & Usimamizi wa Zamu za Walimu — {schoolInfo?.name || 'Shule ya Sekondari'}
+          Idara ya Nidhamu & Usimamizi wa Shule — {schoolInfo?.name || 'Shule ya Sekondari'}
         </div>
       </div>
 
-      {activeMainSection === 'DUTY_ROSTER' ? (
+      {activeMainSection === 'STUDENT_ELECTIONS' ? (
+        <StudentGovernmentElectionView
+          students={students}
+          disciplineRecords={records}
+          schoolInfo={schoolInfo}
+          currentUser={currentUser}
+        />
+      ) : activeMainSection === 'DUTY_ROSTER' ? (
         <DutyRosterSystem
           schoolId={schoolId}
           schoolInfo={schoolInfo}

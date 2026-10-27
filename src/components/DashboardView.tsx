@@ -33,7 +33,7 @@ import {
   ShieldAlert
 } from 'lucide-react';
 import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting, DisciplineRecord, TeacherAssignment, ExaminationRecord, DutyRosterData, DailyRollCallRecord, AcademicTermDates } from '../types';
+import { Student, Teacher, Exam, InvigilationSession, SchoolInfo, ActivityLog, UserAccount, TimetableAssignment, PeriodSetting, StreamSetting, DisciplineRecord, TeacherAssignment, ExaminationRecord, DutyRosterData, DailyRollCallRecord, AcademicTermDates, Supervisor } from '../types';
 import { subDays, subMonths, format, startOfDay } from 'date-fns';
 import { NURSERY_CLASSES, PRIMARY_CLASSES, SECONDARY_CLASSES } from '../constants/defaults';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
@@ -58,6 +58,7 @@ interface DashboardViewProps {
   exams: Exam[];
   sessions: InvigilationSession[];
   invigilationAssignments?: Record<string, number>;
+  supervisors?: Supervisor[];
   timetableAssignments?: TimetableAssignment[];
   periodSettings?: PeriodSetting[];
   streamSettings?: StreamSetting[];
@@ -86,6 +87,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   exams = [],
   sessions = [],
   invigilationAssignments = {},
+  supervisors = [],
   timetableAssignments = [],
   periodSettings = [],
   streamSettings = [],
@@ -386,10 +388,62 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   const maxSubCount = Math.max(...sortedSubjects.map(s => s[1]), 1);
 
+  // Requirement 4: Invigilation Pending Summary calculation
+  const invigilationPendingStats = useMemo(() => {
+    try {
+      const localDisp = localStorage.getItem(`haby_exam_dispatch_${schoolId}`);
+      if (localDisp) {
+        const records = JSON.parse(localDisp);
+        if (Array.isArray(records) && records.length > 0) {
+          const unreturned = records.filter(r => !r.isReturned);
+          const teachersSet = new Set(unreturned.map(r => r.invigilatorName).filter(Boolean));
+          return {
+            pendingExamCount: unreturned.length,
+            pendingTeachersCount: teachersSet.size,
+            teachersList: Array.from(teachersSet),
+            totalRecords: records.length
+          };
+        }
+      }
+    } catch (e) {}
+
+    // Fallback: estimate based on sessions and assignments if dispatch records not yet synced
+    if (Array.isArray(sessions) && sessions.length > 0) {
+      const assignedTeacherNames = new Set<string>();
+      sessions.forEach(sess => {
+        for (let r = 0; r < sess.rooms; r++) {
+          const tid = invigilationAssignments[`${sess.id}_room${r}`];
+          if (tid) {
+            const tch = teachers.find(t => t.id === tid);
+            if (tch) assignedTeacherNames.add(tch.name);
+          }
+        }
+      });
+      return {
+        pendingExamCount: sessions.length,
+        pendingTeachersCount: assignedTeacherNames.size,
+        teachersList: Array.from(assignedTeacherNames),
+        totalRecords: sessions.length
+      };
+    }
+
+    return {
+      pendingExamCount: 0,
+      pendingTeachersCount: 0,
+      teachersList: [],
+      totalRecords: 0
+    };
+  }, [schoolId, sessions, invigilationAssignments, teachers]);
+
   const handleNavigate = (viewId: string) => {
     if (onSelectView) {
       onSelectView(viewId);
     }
+  };
+
+  const handleNavigateToInvigilationReturn = () => {
+    localStorage.setItem('haby_invigilation_active_tab', 'control_logs');
+    handleNavigate('invigilation');
   };
 
   return (
@@ -575,31 +629,120 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
 
       {/* Academic Overview Section */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
-          { title: "Total Students", value: displayStudentCount, icon: Users, color: "text-blue-600 bg-blue-50", action: () => handleNavigate('students') },
-          { title: "Active Teaching Staff", value: teachers.length, icon: GraduationCap, color: "text-emerald-600 bg-emerald-50", action: () => handleNavigate('teachers') },
-          { title: "Pending Exam Records", value: 0, icon: FileText, color: "text-amber-600 bg-amber-50", action: () => handleNavigate('results') }
+          { 
+            title: "Total Students", 
+            value: displayStudentCount, 
+            subtitle: "Wanafunzi Waliosajiliwa",
+            icon: Users, 
+            color: "text-blue-600 bg-blue-50", 
+            badge: null,
+            action: () => handleNavigate('students') 
+          },
+          { 
+            title: "Active Teaching Staff", 
+            value: teachers.length, 
+            subtitle: "Waalimu Walio Kazi",
+            icon: GraduationCap, 
+            color: "text-emerald-600 bg-emerald-50", 
+            badge: null,
+            action: () => handleNavigate('teachers') 
+          },
+          { 
+            title: "Invigilation Pending", 
+            value: `${invigilationPendingStats.pendingTeachersCount} Walimu`, 
+            subtitle: invigilationPendingStats.pendingExamCount > 0 
+              ? `${invigilationPendingStats.pendingExamCount} Mitihani Haijarudishwa`
+              : "Mitihani Yote Imerudishwa Salama",
+            icon: ShieldAlert, 
+            color: invigilationPendingStats.pendingExamCount > 0 
+              ? "text-rose-600 bg-rose-50 ring-2 ring-rose-200" 
+              : "text-emerald-600 bg-emerald-50", 
+            badge: invigilationPendingStats.pendingExamCount > 0 ? "⚠️ Inasubiriwa" : "✓ Salama",
+            badgeColor: invigilationPendingStats.pendingExamCount > 0 ? "bg-rose-100 text-rose-800" : "bg-emerald-100 text-emerald-800",
+            action: handleNavigateToInvigilationReturn 
+          },
+          { 
+            title: "Pending Exam Records", 
+            value: exams.length, 
+            subtitle: "Mitihani Kwenye Mfumo",
+            icon: FileText, 
+            color: "text-amber-600 bg-amber-50", 
+            badge: null,
+            action: () => handleNavigate('exams') 
+          }
         ].map((card, idx) => (
-          <button key={idx} onClick={card.action} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between hover:border-blue-300 transition-all cursor-pointer text-left relative overflow-hidden">
+          <button 
+            key={idx} 
+            onClick={card.action} 
+            className={`bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex items-center justify-between hover:border-blue-400 hover:shadow-md transition-all cursor-pointer text-left relative overflow-hidden group ${
+              card.title === "Invigilation Pending" && invigilationPendingStats.pendingExamCount > 0 ? 'border-rose-300 ring-1 ring-rose-200 hover:border-rose-400' : ''
+            }`}
+          >
             {isLoading && (
-              <div className="absolute inset-0 bg-slate-50 animate-pulse flex items-center px-5">
+              <div className="absolute inset-0 bg-slate-50 animate-pulse flex items-center px-5 z-10">
                 <div className="space-y-2 w-full">
                   <div className="h-2 w-1/3 bg-slate-200 rounded" />
                   <div className="h-6 w-1/2 bg-slate-200 rounded" />
                 </div>
               </div>
             )}
-            <div>
-              <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider">{card.title}</p>
-              <h3 className="text-2xl font-black text-slate-900 mt-1">{card.value}</h3>
+            <div className="min-w-0 pr-2">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <p className="text-[10px] uppercase font-black text-slate-400 tracking-wider truncate">{card.title}</p>
+                {card.badge && (
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-full uppercase ${card.badgeColor}`}>
+                    {card.badge}
+                  </span>
+                )}
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-slate-900 mt-1 truncate">{card.value}</h3>
+              {card.subtitle && (
+                <p className="text-[10px] font-semibold text-slate-500 mt-0.5 truncate">{card.subtitle}</p>
+              )}
             </div>
-            <div className={`p-3 rounded-xl ${card.color}`}>
+            <div className={`p-3 rounded-xl ${card.color} shrink-0 group-hover:scale-110 transition`}>
               <card.icon className="w-5 h-5" />
             </div>
           </button>
         ))}
       </div>
+
+      {/* DEDICATED ALERT BANNER IF EXAMS ARE PENDING RETURN */}
+      {invigilationPendingStats.pendingExamCount > 0 && (
+        <div className="p-4 sm:p-5 bg-gradient-to-r from-rose-50 via-amber-50 to-orange-50 border-2 border-rose-300 rounded-3xl shadow-sm flex flex-col md:flex-row items-start md:items-center justify-between gap-4 animate-in fade-in">
+          <div className="flex items-start sm:items-center gap-3.5">
+            <div className="w-10 h-10 rounded-2xl bg-rose-600 text-white flex items-center justify-center shrink-0 shadow-md">
+              <ShieldAlert className="w-5 h-5 animate-pulse" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-rose-200 text-rose-900 border border-rose-300">
+                  Usimamizi Unaosubiriwa
+                </span>
+                <span className="text-xs font-black text-rose-950">
+                  Walimu {invigilationPendingStats.pendingTeachersCount} Bado Hawajarudisha Bahasha za Mitihani!
+                </span>
+              </div>
+              <p className="text-xs text-rose-800 font-medium mt-0.5">
+                Kuna mitihani <strong>{invigilationPendingStats.pendingExamCount}</strong> inayoshikiliwa vyumbani. Kagua fomu ya udhibiti na utume SMS za kikumbusho kwa walimu wahusika.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 self-stretch md:self-auto shrink-0">
+            <button
+              type="button"
+              onClick={handleNavigateToInvigilationReturn}
+              className="flex-1 md:flex-initial px-4 py-2.5 bg-rose-700 hover:bg-rose-800 text-white text-xs font-black rounded-xl shadow-sm flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
+            >
+              <ClipboardCheck className="w-4 h-4" />
+              <span>Kagua & Pokea Mitihani</span>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Smart Dashboard Overview Component (Active Students, Ratios, Exam Alerts, Discipline Actions) */}
       <SmartDashboardWidget 
@@ -627,6 +770,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         sessions={sessions}
         invigilationAssignments={invigilationAssignments}
         teachers={teachers}
+        supervisors={supervisors.length > 0 ? supervisors : (dutyRosterData as any)?.supervisors || []}
         currentUser={currentUser}
         onNavigateToCalendar={() => handleNavigate('invigilation-calendar')}
         onNavigateToInvigilation={() => handleNavigate('invigilation')}

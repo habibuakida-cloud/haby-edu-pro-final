@@ -57,7 +57,7 @@ export interface GeneratedExamRecord {
   status: 'PASSED' | 'FAILED';
   subjects: {
     subjectName: string;
-    marks: number;
+    marks: number | string;
     grade: string;
     points: number;
     remarks: string;
@@ -826,11 +826,11 @@ export const VerifiedStudentProfileView: React.FC<VerifiedStudentProfileViewProp
                                   <div className="w-16 bg-slate-200 h-1 rounded-full overflow-hidden mt-1">
                                     <div 
                                       className={`h-full ${
-                                        sub.marks >= 75 ? 'bg-emerald-500' :
-                                        sub.marks >= 65 ? 'bg-blue-500' :
-                                        sub.marks >= 45 ? 'bg-amber-500' : 'bg-rose-500'
+                                        Number(sub.marks) >= 75 ? 'bg-emerald-500' :
+                                        Number(sub.marks) >= 65 ? 'bg-blue-500' :
+                                        Number(sub.marks) >= 45 ? 'bg-amber-500' : 'bg-rose-500'
                                       }`}
-                                      style={{ width: `${Math.min(sub.marks, 100)}%` }}
+                                      style={{ width: `${Math.min(Number(sub.marks) || 0, 100)}%` }}
                                     />
                                   </div>
                                 </div>

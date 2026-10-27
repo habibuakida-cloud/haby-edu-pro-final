@@ -3,6 +3,8 @@ import { DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
 import { getWeeklyAttendance } from '../lib/dataService';
 import { Award, FileText, Printer, Download, Calendar, Filter, CheckCircle, AlertTriangle, Shield, Check, X } from 'lucide-react';
 import { DEFAULT_CLASSES } from '../constants/defaults';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface EvaluationAnalysisViewProps {
   currentUser?: any;
@@ -148,6 +150,53 @@ export const EvaluationAnalysisView: React.FC<EvaluationAnalysisViewProps> = ({
     return 'bg-rose-100 text-rose-800 border-rose-300';
   };
 
+  const handleExportAnalysisPDF = () => {
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const margin = 14;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12);
+    doc.text((schoolInfo?.name || 'SECONDARY SCHOOL').toUpperCase(), pageWidth / 2, 12, { align: 'center' });
+    doc.setFontSize(9);
+    doc.text(`UCHAMBUZI WA TATHMINI YA UFUNDISHAJI (${reportType.toUpperCase()} REPORT) — ${selectedClass}`, pageWidth / 2, 18, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.text(`Muhula: ${selectedTerm} | Mwezi: ${selectedMonth} | Wiki: ${selectedWeek}`, pageWidth / 2, 23, { align: 'center' });
+
+    autoTable(doc, {
+      startY: 28,
+      head: [
+        ['S/NO', 'SUBJECT', 'TEACHER NAME', 'STREAMS', 'TOTAL PERIODS', 'TAUGHT', 'COVERAGE %', 'REASON FOR UNTAUGHT', 'REMARKS']
+      ],
+      body: reportData.map(r => [
+        String(r.sno),
+        r.subject,
+        r.teacher,
+        r.stream,
+        String(r.expected),
+        String(r.taught),
+        `${r.percentage}%`,
+        r.reasonText,
+        'Satisfactory'
+      ]),
+      theme: 'grid',
+      headStyles: { fillColor: [30, 58, 138], textColor: [255, 255, 255], fontSize: 8, fontStyle: 'bold' },
+      bodyStyles: { fontSize: 7.5, textColor: [0, 0, 0] },
+      margin: { left: margin, right: margin }
+    });
+
+    const y = (doc as any).lastAutoTable.finalY + 10;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.text('HOD Signature: ___________________', margin, y);
+    doc.text('Academic Master Signature: ___________________', margin + 80, y);
+    doc.text('Headmaster Signature & Stamp: ___________________', margin + 160, y);
+
+    const safeFile = `Uchambuzi_Ufundishaji_${selectedClass}_${reportType}.pdf`.replace(/[^a-zA-Z0-9_.-]/g, '_');
+    doc.save(safeFile);
+  };
+
   return (
     <div className="space-y-6 font-sans">
       {/* Header Banner */}
@@ -162,10 +211,17 @@ export const EvaluationAnalysisView: React.FC<EvaluationAnalysisViewProps> = ({
         <div className="flex gap-2">
           <button
             type="button"
-            onClick={() => window.print()}
-            className="px-4 py-2.5 bg-white text-blue-900 font-black rounded-xl shadow hover:bg-blue-50 transition text-xs flex items-center gap-1.5"
+            onClick={handleExportAnalysisPDF}
+            className="px-4 py-2.5 bg-emerald-700 text-white font-black rounded-xl shadow hover:bg-emerald-800 transition text-xs flex items-center gap-1.5 cursor-pointer"
           >
-            <Printer className="w-4 h-4" /> Chapisha / PDF
+            <Download className="w-4 h-4" /> Export PDF
+          </button>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="px-4 py-2.5 bg-white text-blue-900 font-black rounded-xl shadow hover:bg-blue-50 transition text-xs flex items-center gap-1.5 cursor-pointer"
+          >
+            <Printer className="w-4 h-4" /> Chapisha
           </button>
         </div>
       </div>

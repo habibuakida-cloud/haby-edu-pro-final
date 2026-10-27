@@ -525,7 +525,7 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   }, [selectedExamObj, selectedExam, selectedYear, selectedTerm]);
 
   // Helper to extract student marks strictly for the currently selected exam session
-  const getExamMarksMap = useCallback((student: Student): Record<string, number> => {
+  const getExamMarksMap = useCallback((student: Student): Record<string, number | string> => {
     // 1. Look in student.examMarks using strict keys
     const marksFromExamMarks: Record<string, number> = {};
     let foundInExamMarks = false;
@@ -593,17 +593,20 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     // Collect effective marks (including pending unsaved cell edits)
     const pending = pendingMarks[student.id];
     const baseMarks = getExamMarksMap(student);
-    const effectiveMarks: Record<string, number> = { ...baseMarks };
+    const effectiveMarks: Record<string, number | string> = { ...baseMarks };
 
     if (pending) {
       activeLedgerSubjects.forEach(sub => {
         if (pending[sub.key] !== undefined) {
-          if (pending[sub.key] === '') {
+          const val = pending[sub.key];
+          if (val === '') {
             delete effectiveMarks[sub.fullName];
             delete effectiveMarks[sub.key];
             if (sub.key === 'B.MATH') delete effectiveMarks['Mathematics'];
+          } else if (typeof val === 'string' && (val.toUpperCase() === 'ABS' || val.toUpperCase() === 'X' || val.toUpperCase() === 'ABSENT')) {
+            (effectiveMarks as any)[sub.fullName] = val.toUpperCase();
           } else {
-            effectiveMarks[sub.fullName] = Number(pending[sub.key]);
+            effectiveMarks[sub.fullName] = Number(val);
           }
         }
       });
@@ -614,14 +617,17 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     const hasAttempted = validScores.length > 0;
 
     if (!hasAttempted) {
+      const isExplicitlyAbsent = Object.values(effectiveMarks || {}).some(v => 
+        typeof v === 'string' && ((v as string).toUpperCase() === 'ABS' || (v as string).toUpperCase() === 'ABSENT' || (v as string).toUpperCase() === 'X')
+      );
       return {
         hasAttempted: false,
         total: undefined as number | undefined,
         average: undefined as string | undefined,
-        division: undefined as string | undefined,
+        division: isExplicitlyAbsent ? 'ABS' : undefined as string | undefined,
         primaryGrade: undefined as string | undefined,
         points: undefined as number | undefined,
-        remarks: 'Candidate did not sit / No marks recorded',
+        remarks: isExplicitlyAbsent ? 'ABSENT' : 'Candidate did not sit / No marks recorded',
         effectiveMarks: {} as Record<string, number>
       };
     }
@@ -790,12 +796,19 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   };
 
   const handleCellChange = (studentId: number, subjectKey: string, val: string) => {
-    const num = val === '' ? '' : Math.min(100, Math.max(0, parseInt(val, 10) || 0));
+    let finalVal: number | string = '';
+    const upper = val.trim().toUpperCase();
+    if (upper === 'ABS' || upper === 'X' || upper === 'ABSENT') {
+      finalVal = upper;
+    } else if (val !== '') {
+      finalVal = Math.min(100, Math.max(0, parseInt(val, 10) || 0));
+    }
+
     setPendingMarks(prev => ({
       ...prev,
       [studentId]: {
         ...(prev[studentId] || {}),
-        [subjectKey]: num
+        [subjectKey]: finalVal
       }
     }));
   };
@@ -818,10 +831,15 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
             delete rawMarks[sub.key];
             if (sub.key === 'B.MATH') delete rawMarks['Mathematics'];
           } else {
-            rawMarks[sub.fullName] = Number(p[sub.key]);
-            if (sub.key === 'B.MATH') {
-              rawMarks['Basic Mathematics'] = Number(p[sub.key]);
-              delete rawMarks['Mathematics'];
+            const val = p[sub.key];
+            if (typeof val === 'string' && (val.toUpperCase() === 'ABS' || val.toUpperCase() === 'X' || val.toUpperCase() === 'ABSENT')) {
+              (rawMarks as any)[sub.fullName] = val.toUpperCase();
+            } else {
+              rawMarks[sub.fullName] = Number(val);
+              if (sub.key === 'B.MATH') {
+                rawMarks['Basic Mathematics'] = Number(val);
+                delete rawMarks['Mathematics'];
+              }
             }
           }
         }
@@ -1235,6 +1253,12 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
     const satGirls = satCandidates.filter(s => s.gender === 'Female').length;
     const satRate = totalCandidates > 0 ? ((satCount / totalCandidates) * 100).toFixed(1) : '0.0';
 
+    const absCandidates = allClassCandidates.filter(s => s.division === 'ABS' || s.passStatus === 'ABSENT');
+    const absCount = absCandidates.length;
+    const absBoys = absCandidates.filter(s => s.gender === 'Male').length;
+    const absGirls = absCandidates.filter(s => s.gender === 'Female').length;
+    const absRate = totalCandidates > 0 ? ((absCount / totalCandidates) * 100).toFixed(1) : '0.0';
+
     let divI = 0;
     let divII = 0;
     let divIII = 0;
@@ -1262,7 +1286,8 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
       else if (s.division === 'II') divII++;
       else if (s.division === 'III') divIII++;
       else if (s.division === 'IV') divIV++;
-      else if (s.division === 'INCOMPLETE') divIncomplete++;
+      else if (s.division === 'INCOMPLETE' || s.division === 'INC') divIncomplete++;
+      else if (s.division === 'ABS') { /* already counted in absCount */ }
       else if (s.division === '0') div0++;
 
       const isGirl = (s.gender || '').toLowerCase().startsWith('f') || s.sex === 'F';
@@ -1332,13 +1357,20 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
       let subTotalM = 0, subTotalF = 0, testedM = 0, testedF = 0;
       let highestM = -1, highestF = -1, lowestM = 999, lowestF = 999;
       let passedM = 0, passedF = 0;
-      const subGrades: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
-      const subGradesBoys: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
-      const subGradesGirls: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0 };
+      const subGrades: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'ABS', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, ABS: 0 };
+      const subGradesBoys: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'ABS', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, ABS: 0 };
+      const subGradesGirls: Record<'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'ABS', number> = { A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, ABS: 0 };
 
       allClassCandidates.forEach(s => {
         const sc = s.marks?.[sub.fullName] ?? s.marks?.[sub.key];
         const isGirl = (s.gender || '').toLowerCase().startsWith('f') || s.sex === 'F';
+        
+        if (String(sc).toUpperCase() === 'ABS' || String(sc).toUpperCase() === 'ABSENT' || String(sc).toUpperCase() === 'X') {
+          subGrades.ABS++;
+          if (isGirl) subGradesGirls.ABS++; else subGradesBoys.ABS++;
+          return;
+        }
+
         if (typeof sc === 'number' && !isNaN(sc)) {
           if (isGirl) {
             subTotalF += sc;
@@ -1419,6 +1451,10 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
       satBoys,
       satGirls,
       satRate,
+      absCount,
+      absBoys,
+      absGirls,
+      absRate,
       schoolGPA,
       divI,
       divII,
@@ -2522,9 +2558,9 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
             </div>
 
             <div className="bg-white border border-rose-200 bg-rose-50/30 rounded-xl p-4 shadow-xs text-center">
-              <div className="text-[10px] font-bold text-rose-800 uppercase tracking-wider">Didn't Do Subject</div>
-              <div className="text-2xl sm:text-3xl font-black text-rose-600 mt-1">{dashboardMetrics.noSubjectCount}</div>
-              <div className="text-[10px] text-rose-600 font-bold mt-0.5">{dashboardMetrics.noSubjectRate}% (B:{dashboardMetrics.noSubjectBoys} G:{dashboardMetrics.noSubjectGirls})</div>
+              <div className="text-[10px] font-bold text-rose-800 uppercase tracking-wider">Total Absent (ABS)</div>
+              <div className="text-2xl sm:text-3xl font-black text-rose-600 mt-1">{dashboardMetrics.absCount}</div>
+              <div className="text-[10px] text-rose-600 font-bold mt-0.5">{dashboardMetrics.absRate}% (B:{dashboardMetrics.absBoys} G:{dashboardMetrics.absGirls})</div>
             </div>
 
             <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-xs text-center">
@@ -2662,6 +2698,20 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
                   </div>
                 </div>
               )}
+
+              {/* Absent (ABS) */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl text-center">
+                <div className="text-xs font-black text-slate-800 uppercase tracking-wider">ABSENT (ABS)</div>
+                <div className="text-[10px] text-slate-500 font-semibold mt-0.5">Did Not Sit / X</div>
+                <div className="text-3xl font-black text-slate-700 mt-2">
+                  {dashboardMetrics.absCount}
+                </div>
+                <div className="text-[11px] text-slate-500 font-bold mt-1">
+                  {dashboardMetrics.totalCandidates > 0 
+                    ? `${((dashboardMetrics.absCount / dashboardMetrics.totalCandidates) * 100).toFixed(1)}%`
+                    : '0%'}
+                </div>
+              </div>
             </div>
 
             {/* Proportion Progress Bar */}

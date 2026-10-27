@@ -21,14 +21,21 @@ async function generateWithFallback(config: {
   responseMimeType?: string;
   temperature?: number;
 }) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey || apiKey === 'PLACEHOLDER_KEY' || apiKey.trim() === '') {
+    throw new Error('GEMINI_API_KEY is not configured');
+  }
+
   const ai = getAiClient();
-  const models = ['gemini-3.8-flash', 'gemini-flash-latest', 'gemini-3.1-flash-lite'];
+  const models = ['gemini-flash-latest', 'gemini-3.1-flash-lite'];
   let lastError = null;
 
   for (const model of models) {
     try {
-      console.log(`[Gemini Client] Attempting scheme generation with model: ${model}`);
-      const response = await ai.models.generateContent({
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error(`Timeout waiting for ${model}`)), 5500)
+      );
+      const genPromise = ai.models.generateContent({
         model: model,
         contents: config.contents,
         config: {
@@ -38,30 +45,31 @@ async function generateWithFallback(config: {
           thinkingConfig: { thinkingLevel: ThinkingLevel.LOW },
         }
       });
+
+      const response: any = await Promise.race([genPromise, timeoutPromise]);
       if (response && response.text) {
-        console.log(`[Gemini Client] Successfully generated scheme content using model: ${model}`);
         return response;
       }
     } catch (err: any) {
-      console.warn(`[Gemini Client] Model ${model} failed with message:`, err?.message || err);
       lastError = err;
     }
   }
-  throw lastError || new Error('All Gemini models in fallback sequence failed to generate content');
+  throw lastError || new Error('All Gemini models in fallback sequence failed or timed out');
 }
 
 export interface AISchemeRequest {
   subject: string;
   className: string;
   stream?: string;
-  curriculumType: 'NEW_CBC_2023' | 'OLD_CONTENT_2019';
+  curriculumType: 'NEW_CBC_2023' | 'OLD_CONTENT_2019' | 'OLD_CONTENT_BASED';
   academicYear: string;
-  term: 'Term 1' | 'Term 2';
+  term: 'Term 1' | 'Term 2' | 'Full Year';
   teacherName?: string;
   schoolName?: string;
   periodsPerWeek?: number;
   topics?: string[];
   language: 'Kiswahili' | 'English';
+  academicTermDates?: any;
 }
 
 export interface AILessonPlanRequest {
@@ -80,37 +88,35 @@ export interface AILessonPlanRequest {
 }
 
 export async function generateAISchemeOfWork(req: AISchemeRequest) {
-  if (!process.env.GEMINI_API_KEY) {
+  if (!process.env.GEMINI_API_KEY || process.env.GEMINI_API_KEY === 'PLACEHOLDER_KEY') {
     throw new Error('GEMINI_API_KEY is missing on server');
   }
 
   const isSwahili = req.language === 'Kiswahili' || req.subject.toLowerCase().includes('kiswahili');
   const isCbc = req.curriculumType === 'NEW_CBC_2023';
+  const totalWeeksCount = req.term === 'Full Year' ? 24 : 12;
+  const termDatesInfo = req.academicTermDates
+    ? `School Term Calendar (Mihula): Opening ${req.academicTermDates.yearOpeningDate || 'Jan'}, Mid-Term 1 Break ${req.academicTermDates.midTerm1BreakStart || 'Mar'} to ${req.academicTermDates.midTerm1BreakEnd || 'Apr'}, Terminal Break ${req.academicTermDates.terminalBreakStart || 'Jun'} to ${req.academicTermDates.terminalBreakEnd || 'Jul'}, Mid-Term 2 Break ${req.academicTermDates.midTerm2BreakStart || 'Aug'} to ${req.academicTermDates.midTerm2BreakEnd || 'Sep'}, Annual Closure ${req.academicTermDates.annualBreakStart || 'Nov'}.`
+    : 'Follow standard Tanzanian school calendar (Term 1: Jan-May, Term 2: Jul-Nov).';
 
   const systemInstruction = `You are a Tanzanian Senior Academic Master, National Curriculum Developer, and Chief Inspector of Schools specializing in Taasisi ya Elimu Tanzania (TIE) and NECTA curriculum frameworks.
 You generate 100% authentic, realistic, detailed Tanzanian Schemes of Work (Azimio la Kazi) and Teaching Log Book entries (Daftari la Kumbukumbu ya Kazi ya Kufundisha).
 
 CRITICAL AUTHENTICITY RULES:
 1. CURRICULUM SYLLABUS ALIGNMENT:
-   - For secondary schools (Form 1 - Form 4): Strictly follow the official TIE syllabus for ${req.subject} at ${req.className} level for ${req.term}.
-   - For primary schools (Standard 1 - 7): Strictly follow the TIE primary syllabus guidelines (Wizara ya Elimu, Sayansi na Teknolojia).
+   - Strictly follow the official TIE syllabus for ${req.subject} at ${req.className} level for ${req.term}.
+   - ${termDatesInfo}
    - If curriculum is Competence-Based (NEW_CBC_2023), use authentic "Main Competence / Umahiri Mkuu" and "Specific Competence / Umahiri Mahususi".
-   - If curriculum is Traditional Content-Based (OLD_CONTENT_2019), use authentic "Main Topic / Mada Kuu" and "Subtopic / Mada Ndogo" with specific instructional objectives.
+   - If curriculum is Traditional Content-Based, use authentic "Main Topic / Mada Kuu" and "Subtopic / Mada Ndogo" with specific instructional objectives.
 2. NO GENERIC OR REPETITIVE PLACEHOLDERS:
-   - Every single week (Weeks 1 to 12) MUST have real, non-duplicate, logically progressing topics from the official Tanzanian syllabus for that specific Form/Class and Term.
-   - Week 8 is typically Midterm Assessment / Examination and revision.
-   - Week 12 is Terminal Assessment / Examination and closure.
-   - DO NOT copy Physics or other subjects' topics when generating for Mathematics, Kiswahili, English, Biology, Chemistry, Geography, History, Civics, Commerce, or Bookkeeping!
-3. AUTHENTIC LOCAL MATERIALS & REAL REFERENCES:
-   - Use real Tanzanian teaching aids (e.g. geometric sets, local soil samples, maps of Tanzania, LUKU receipts, TIE wall charts, microscopes, red cabbage indicator, dictionary of Kiswahili Sanifu).
-   - Official TIE textbook references must cite real books: e.g. "Kitabu cha Mwanafunzi cha ${req.subject} Kidato cha ${req.className.replace(/[^0-9]/g, '') || '1'} (TET)", "TIE ${req.subject} for Secondary Schools Form ${req.className.replace(/[^0-9]/g, '') || '1'}", "NECTA Syllabus Guidelines".
-4. LANGUAGE:
-   - If language is "Kiswahili", ALL fields (competences, activities, materials, assessment, remarks, logbook entries) MUST be written in natural, grammatically correct Tanzanian educational Kiswahili.
-   - If language is "English", write in professional pedagogical English adhering to Tanzanian syllabus standards.
-5. STRICT JSON OUTPUT ONLY:
-   - Output valid JSON only, without markdown backticks or commentary outside JSON.`;
+   - Every single week (Weeks 1 to ${totalWeeksCount}) MUST have real, non-duplicate, logically progressing topics from the official Tanzanian syllabus for that specific Form/Class and Term.
+   - Use exact periodsCount = ${req.periodsPerWeek || 4} per week.
+3. LANGUAGE:
+   - If language is "Kiswahili", ALL fields MUST be written in natural Tanzanian educational Kiswahili.
+4. STRICT JSON OUTPUT ONLY:
+   - Output valid JSON only, without markdown backticks.`;
 
-  const prompt = `Generate a complete, 100% realistic 12-week Tanzanian Scheme of Work and Teaching Log Book for:
+  const prompt = `Generate a complete ${totalWeeksCount}-week Tanzanian Scheme of Work and Teaching Log Book for:
 - Subject: ${req.subject}
 - Class Level: ${req.className}
 - Stream: ${req.stream || 'STREAM A'}
@@ -120,6 +126,7 @@ CRITICAL AUTHENTICITY RULES:
 - Teacher Name: ${req.teacherName || 'Subject Teacher'}
 - School Name: ${req.schoolName || 'Tanzania Secondary School'}
 - Language Required: ${req.language}
+- ${termDatesInfo}
 ${req.topics && req.topics.length > 0 ? `- Specific Topics Requested to Cover: ${req.topics.join(', ')}` : '- Cover the official TIE syllabus sequence for this subject and term.'}
 
 Return JSON with exact structure:
@@ -135,8 +142,8 @@ Return JSON with exact structure:
       "learningActivitiesOrObjectives": "Concrete student-centred learner activities",
       "teachingActivities": "Concrete pedagogical teacher activities",
       "teachingMaterials": "Realistic Tanzanian teaching aids and materials",
-      "assessmentMethods": "Authentic assessment methods (e.g. rubriki, zoezi la darasani, kazi ya nyumbani)",
-      "references": "Official TIE textbook title and page/unit for ${req.subject} ${req.className}",
+      "assessmentMethods": "Authentic assessment methods",
+      "references": "Official TIE textbook title for ${req.subject} ${req.className}",
       "periodsCount": ${req.periodsPerWeek || 4},
       "remarks": "Imefundishwa kama ilivyopangwa / Covered as scheduled"
     }
@@ -147,7 +154,7 @@ Return JSON with exact structure:
       "date": "2026-01-12",
       "periodTime": "Period 2 & 3 (08:40 - 10:00)",
       "subTopicTaught": "Subtopic taught during this session",
-      "workCoveredSummary": "Realistic summary of concepts delivered and students' classroom engagement",
+      "workCoveredSummary": "Realistic summary of concepts delivered",
       "studentsPresent": 43,
       "studentsTotal": 45,
       "comprehensionEvaluation": "EXCELLENT",
@@ -155,7 +162,7 @@ Return JSON with exact structure:
     }
   ]
 }
-Provide exactly 12 weekly items (Week 1 through Week 12) and 12 corresponding weekly log book entries.`;
+Provide ${totalWeeksCount} weekly items and ${totalWeeksCount} corresponding weekly log book entries.`;
 
   const response = await generateWithFallback({
     contents: prompt,
@@ -164,7 +171,6 @@ Provide exactly 12 weekly items (Week 1 through Week 12) and 12 corresponding we
   });
 
   const text = (response.text || '').trim();
-  // Strip code block fences if present
   const cleanJson = text.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
   const parsed = JSON.parse(cleanJson);
 

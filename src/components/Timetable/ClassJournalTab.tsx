@@ -30,7 +30,18 @@ import {
 } from 'lucide-react';
 import { printFormattedSection } from '../../utils/export';
 import { exportClassJournalPDF } from '../../utils/timetablePdfExport';
-import { Download } from 'lucide-react';
+import { Download, Fingerprint, Smartphone, AlertTriangle, Wifi, WifiOff } from 'lucide-react';
+import { FingerprintScanner } from '../common/FingerprintScanner';
+
+
+export interface AbsentStudentPeriodRecord {
+  id: string | number;
+  name: string;
+  regNo?: string;
+  gender?: string;
+  reason: 'ABSENT' | 'SICK' | 'PERMITTED';
+  remarks?: string;
+}
 
 export interface ClassJournalEntry {
   id: string; // `${className}_${stream}_${day}_${periodIndex}_${week}`
@@ -50,7 +61,11 @@ export interface ClassJournalEntry {
   actualTeacherName?: string;
   topicTaught: string;
   studentsPresent: number;
+  studentsAbsent?: number;
+  studentsSick?: number;
+  studentsPermitted?: number;
   totalStudentsInClass: number;
+  absentStudentsList?: AbsentStudentPeriodRecord[];
   
   // Teacher sign-off
   teacherSignature: string;
@@ -75,6 +90,7 @@ interface ClassJournalTabProps {
   institutionalPolicy?: InstitutionalPolicy;
   journalRecords?: Record<string, ClassJournalEntry>;
   onUpdateJournal?: (records: Record<string, ClassJournalEntry>) => void;
+  schoolId?: string;
 }
 
 export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
@@ -87,7 +103,8 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
   students = [],
   institutionalPolicy,
   journalRecords: initialJournalRecords = {},
-  onUpdateJournal
+  onUpdateJournal,
+  schoolId
 }) => {
   const [journalRecords, setJournalRecords] = useState<Record<string, ClassJournalEntry>>(initialJournalRecords);
 
@@ -268,7 +285,63 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
     return selectedWeek;
   };
 
+  // Scanner & Offline Logic
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [scannerAction, setScannerAction] = useState<'in' | 'out'>('in');
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [offlineQueue, setOfflineQueue] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('haby_journal_queue');
+      return saved ? JSON.parse(saved) : [];
+    } catch { return []; }
+  });
+
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const syncOfflineQueue = async () => {
+    if (offlineQueue.length === 0 || !isOnline || isSyncing) return;
+    setIsSyncing(true);
+    try {
+      const response = await fetch('/api/sync-journals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ journals: offlineQueue, schoolId: schoolId || currentUser?.schoolId }),
+      });
+      if (response.ok) {
+        setOfflineQueue([]);
+        localStorage.removeItem('haby_journal_queue');
+      }
+    } catch (e) {
+      console.error('Sync failed', e);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  useEffect(() => {
+    if (isOnline && offlineQueue.length > 0) {
+      syncOfflineQueue();
+    }
+  }, [isOnline, offlineQueue]);
+
+  const handleVerified = (teacher: Teacher, method: 'usb_scanner' | 'phone_pin') => {
+    // This is called after server-side recording, but we might want to update local state too
+    // For now, let's just trigger a refresh or show success
+    console.log('Verified teacher:', teacher.name, 'via', method);
+  };
+
   // Monitor Profile state (persisted per class & stream)
+
   const [monitorName, setMonitorName] = useState<string>(() => {
     try {
       const saved = localStorage.getItem(`haby_monitor_${selectedClass}_${selectedStream}`);
@@ -285,14 +358,33 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
     return teachers[0]?.name || 'Class Teacher';
   });
 
+  // Students belonging to this class & stream
+  const classStudentsList = useMemo(() => {
+    const cleanTargetStream = selectedStream.replace(/^STREAM\s+/i, '').trim().toUpperCase();
+    const matched = students.filter(s => {
+      const sameCls = (s.className || '').trim().toLowerCase() === selectedClass.trim().toLowerCase();
+      if (!sameCls) return false;
+      if (!s.stream || selectedStream === 'All' || selectedStream === 'All Streams') return true;
+      const cleanS = s.stream.replace(/^STREAM\s+/i, '').trim().toUpperCase();
+      return cleanS === cleanTargetStream || s.stream.toUpperCase().includes(cleanTargetStream);
+    });
+    if (matched.length > 0) {
+      return [...matched].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
+    // Fallback to all school students if stream filter is empty
+    if (students.length > 0) {
+      return [...students].slice(0, 45).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    }
+    return [];
+  }, [students, selectedClass, selectedStream]);
+
   // Calculate student count for this class and stream
   const classStudentCount = useMemo(() => {
-    const count = students.filter(
-      s => s.className.toLowerCase() === selectedClass.toLowerCase() &&
-           (!s.stream || s.stream.toUpperCase().includes(selectedStream.toUpperCase().replace(/^STREAM\s+/i, '')) || selectedStream === 'All')
-    ).length;
-    return count > 0 ? count : 45; // sensible default
-  }, [students, selectedClass, selectedStream]);
+    return classStudentsList.length > 0 ? classStudentsList.length : 45;
+  }, [classStudentsList]);
+
+  const [activeAttendanceEntryId, setActiveAttendanceEntryId] = useState<string>('');
+  const [absentStudentSearch, setAbsentStudentSearch] = useState<string>('');
 
   // Save changes via callback
   const updateJournalEntry = (entryId: string, updates: Partial<ClassJournalEntry>) => {
@@ -308,6 +400,52 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
       };
       if (onUpdateJournal) onUpdateJournal(updated);
       return updated;
+    });
+  };
+
+  // Toggle or set a student's absence reason for a specific period entry
+  const handleToggleStudentAbsence = (
+    entry: ClassJournalEntry,
+    student: Student,
+    reason: 'ABSENT' | 'SICK' | 'PERMITTED' | 'PRESENT'
+  ) => {
+    const currentList = entry.absentStudentsList || [];
+    let nextList: AbsentStudentPeriodRecord[];
+    if (reason === 'PRESENT') {
+      nextList = currentList.filter(item => String(item.id) !== String(student.id));
+    } else {
+      const existsIdx = currentList.findIndex(item => String(item.id) === String(student.id));
+      const newRecord: AbsentStudentPeriodRecord = {
+        id: student.id,
+        name: student.name,
+        regNo: student.regNo,
+        gender: student.gender,
+        reason
+      };
+      if (existsIdx >= 0) {
+        if (currentList[existsIdx].reason === reason) {
+          // Clicking same reason unchecks back to Present
+          nextList = currentList.filter(item => String(item.id) !== String(student.id));
+        } else {
+          nextList = currentList.map((item, i) => (i === existsIdx ? newRecord : item));
+        }
+      } else {
+        nextList = [...currentList, newRecord];
+      }
+    }
+
+    const absentCount = nextList.filter(s => s.reason === 'ABSENT').length;
+    const sickCount = nextList.filter(s => s.reason === 'SICK').length;
+    const permittedCount = nextList.filter(s => s.reason === 'PERMITTED').length;
+    const totalOut = absentCount + sickCount + permittedCount;
+    const presentCount = Math.max(0, classStudentCount - totalOut);
+
+    updateJournalEntry(entry.id, {
+      absentStudentsList: nextList,
+      studentsAbsent: absentCount,
+      studentsSick: sickCount,
+      studentsPermitted: permittedCount,
+      studentsPresent: presentCount
     });
   };
 
@@ -610,14 +748,47 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
             </button>
             <button
               type="button"
-              onClick={() => handleBatchConfirmByMonitor(selectedDayView)}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-md transition-all cursor-pointer"
-              title="Class monitor verifies all taught periods"
+              onClick={() => {
+                setScannerAction('in');
+                setIsScannerOpen(true);
+              }}
+              className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-lg hover:shadow-xl transition-all cursor-pointer active:scale-95 border-b-4 border-blue-800"
             >
-              <CheckCheck className="w-4 h-4 text-emerald-300" />
-              <span>Verify All (Monitor)</span>
+              <Fingerprint className="w-4 h-4 text-emerald-300" />
+              <span>Mwalimu Ingia / Toka</span>
             </button>
           </div>
+        </div>
+
+        {/* Offline / Sync Indicator */}
+        {offlineQueue.length > 0 && (
+          <div className="mt-4 flex items-center gap-2 p-2 px-4 bg-amber-500/10 border border-amber-500/20 rounded-xl">
+            <AlertTriangle className="w-4 h-4 text-amber-500" />
+            <span className="text-[10px] font-black text-amber-600 uppercase tracking-widest">
+              Imehifadhiwa Offline ({offlineQueue.length} rekodi zinangoja mtandao...)
+            </span>
+            {isOnline && (
+              <button 
+                onClick={syncOfflineQueue}
+                disabled={isSyncing}
+                className="ml-auto text-[10px] font-black text-blue-600 underline"
+              >
+                {isSyncing ? 'Inatuma...' : 'Tuma Sasa'}
+              </button>
+            )}
+          </div>
+        )}
+        
+        <div className="mt-4 flex items-center gap-2">
+          {isOnline ? (
+            <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+              <Wifi className="w-3 h-3" /> MTANDAO: UPO
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[10px] font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded-full border border-rose-100">
+              <WifiOff className="w-3 h-3" /> MTANDAO: HAUNA (OFFLINE)
+            </span>
+          )}
         </div>
 
         {/* Ambient watermark */}
@@ -833,7 +1004,7 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
                 <th className="p-3 w-36">Subject &amp; Teacher</th>
                 <th className="p-3 w-32 text-center">Period Status</th>
                 <th className="p-3 min-w-[200px]">Topic Covered</th>
-                <th className="p-3 w-24 text-center">Attendance</th>
+                <th className="p-3 min-w-[230px] text-center">Mahudhurio (Present / Absent / Sick / Ruhusa)</th>
                 <th className="p-3 min-w-[170px]">Teacher Signature</th>
                 <th className="p-3 min-w-[190px]">Monitor Verification</th>
               </tr>
@@ -851,6 +1022,11 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
                   const isStandIn = entry.status === 'STAND_IN';
                   const isNotTaught = entry.status === 'NOT_TAUGHT';
                   const isFree = entry.status === 'FREE_PERIOD';
+
+                  const absentList = entry.absentStudentsList || [];
+                  const absentCnt = entry.studentsAbsent ?? absentList.filter(s => s.reason === 'ABSENT').length;
+                  const sickCnt = entry.studentsSick ?? absentList.filter(s => s.reason === 'SICK').length;
+                  const permittedCnt = entry.studentsPermitted ?? absentList.filter(s => s.reason === 'PERMITTED').length;
 
                   return (
                     <tr 
@@ -925,19 +1101,106 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
                         />
                       </td>
 
-                      {/* Attendance (Students present) */}
-                      <td className="p-3 text-center">
-                        <div className="inline-flex items-center gap-1 font-mono">
-                          <input
-                            type="number"
-                            min="0"
-                            max={classStudentCount}
-                            value={entry.studentsPresent}
-                            onChange={e => updateJournalEntry(entry.id, { studentsPresent: parseInt(e.target.value, 10) || 0 })}
-                            className="w-12 px-1.5 py-1 text-center font-bold text-xs bg-white border border-slate-300 rounded-lg focus:ring-1 focus:ring-blue-500 outline-none"
-                          />
-                          <span className="text-[10px] text-slate-400 font-bold">/{classStudentCount}</span>
+                      {/* Attendance (Present, Absent, Sick, Permitted + Student Selector Trigger) */}
+                      <td className="p-3">
+                        <div className="grid grid-cols-2 gap-1.5 text-[10px] mb-1.5">
+                          <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-1 flex items-center justify-between">
+                            <span className="font-black text-emerald-800">Present:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={classStudentCount}
+                              value={entry.studentsPresent}
+                              onChange={e => updateJournalEntry(entry.id, { studentsPresent: parseInt(e.target.value, 10) || 0 })}
+                              className="w-10 px-1 py-0.5 text-center font-black text-[11px] bg-white border border-emerald-300 rounded text-emerald-900 outline-none"
+                            />
+                          </div>
+                          <div className="bg-rose-50 border border-rose-200 rounded-lg p-1 flex items-center justify-between">
+                            <span className="font-black text-rose-800">Absent:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={classStudentCount}
+                              value={absentCnt}
+                              onChange={e => {
+                                const val = parseInt(e.target.value, 10) || 0;
+                                const nextPresent = Math.max(0, classStudentCount - (val + sickCnt + permittedCnt));
+                                updateJournalEntry(entry.id, { studentsAbsent: val, studentsPresent: nextPresent });
+                              }}
+                              className="w-10 px-1 py-0.5 text-center font-black text-[11px] bg-white border border-rose-300 rounded text-rose-900 outline-none"
+                            />
+                          </div>
+                          <div className="bg-amber-50 border border-amber-200 rounded-lg p-1 flex items-center justify-between">
+                            <span className="font-black text-amber-800">Sick:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={classStudentCount}
+                              value={sickCnt}
+                              onChange={e => {
+                                const val = parseInt(e.target.value, 10) || 0;
+                                const nextPresent = Math.max(0, classStudentCount - (absentCnt + val + permittedCnt));
+                                updateJournalEntry(entry.id, { studentsSick: val, studentsPresent: nextPresent });
+                              }}
+                              className="w-10 px-1 py-0.5 text-center font-black text-[11px] bg-white border border-amber-300 rounded text-amber-900 outline-none"
+                            />
+                          </div>
+                          <div className="bg-blue-50 border border-blue-200 rounded-lg p-1 flex items-center justify-between">
+                            <span className="font-black text-blue-800">Ruhusa:</span>
+                            <input
+                              type="number"
+                              min="0"
+                              max={classStudentCount}
+                              value={permittedCnt}
+                              onChange={e => {
+                                const val = parseInt(e.target.value, 10) || 0;
+                                const nextPresent = Math.max(0, classStudentCount - (absentCnt + sickCnt + val));
+                                updateJournalEntry(entry.id, { studentsPermitted: val, studentsPresent: nextPresent });
+                              }}
+                              className="w-10 px-1 py-0.5 text-center font-black text-[11px] bg-white border border-blue-300 rounded text-blue-900 outline-none"
+                            />
+                          </div>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setActiveAttendanceEntryId(entry.id);
+                            const el = document.getElementById('monitor-absent-selector-section');
+                            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                          }}
+                          className={`w-full py-1 px-2 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 transition cursor-pointer ${
+                            activeAttendanceEntryId === entry.id
+                              ? 'bg-indigo-700 text-white shadow-xs'
+                              : absentList.length > 0
+                              ? 'bg-rose-100 text-rose-800 border border-rose-300 hover:bg-rose-200'
+                              : 'bg-slate-100 text-slate-700 border border-slate-300 hover:bg-slate-200'
+                          }`}
+                        >
+                          <Users className="w-3 h-3 shrink-0" />
+                          <span>
+                            {absentList.length > 0
+                              ? `Wasiokuwepo (${absentList.length}) • Chagua`
+                              : 'Chagua Wanafunzi Wasiokuwepo'}
+                          </span>
+                        </button>
+
+                        {absentList.length > 0 && (
+                          <div className="mt-1.5 text-left bg-rose-50/70 border border-rose-200 rounded-lg p-1.5 space-y-0.5 max-h-20 overflow-y-auto">
+                            {absentList.map((st, sIdx) => (
+                              <div key={`${st.id}_${sIdx}`} className="text-[9px] font-bold flex items-center justify-between gap-1 text-slate-800">
+                                <span className="truncate">{sIdx + 1}. {st.name}</span>
+                                <span className={`px-1 rounded text-[8px] font-black shrink-0 ${
+                                  st.reason === 'SICK' ? 'bg-amber-200 text-amber-900' :
+                                  st.reason === 'PERMITTED' ? 'bg-blue-200 text-blue-900' :
+                                  'bg-rose-200 text-rose-900'
+                                }`}>
+                                  {st.reason === 'SICK' ? 'Mgonjwa' : st.reason === 'PERMITTED' ? 'Ruhusa' : 'Hayupo'}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </td>
 
                       {/* Teacher Signature & Remarks */}
@@ -1038,6 +1301,257 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
         </div>
       </div>
 
+      {/* ========================================================================= */}
+      {/* MONITOR STUDENT ATTENDANCE SELECTOR & ABSENT STUDENTS LIST PER PERIOD      */}
+      {/* ========================================================================= */}
+      <div id="monitor-absent-selector-section" className="bg-white border-2 border-indigo-200 rounded-2xl shadow-md overflow-hidden">
+        <div className="bg-gradient-to-r from-indigo-900 via-blue-900 to-slate-900 text-white p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-3">
+          <div>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-400 text-slate-950">
+              Monitor &amp; Monitress Attendance Tool
+            </span>
+            <h3 className="text-base sm:text-lg font-black mt-1 flex items-center gap-2">
+              <Users className="w-5 h-5 text-amber-300" />
+              <span>Sehemu ya Kuchagua Wanafunzi Wasiokuwepo Kwenye Kipindi ({selectedClass} - {selectedStream})</span>
+            </h3>
+            <p className="text-xs text-blue-200 mt-0.5">
+              Monitor chagua kipindi hapo chini kisha tia alama wanafunzi ambao hawapo (Absent), Wagonjwa (Sick), au Walioruhusiwa (Permitted). Watatokea moja kwa moja kwenye orodha ya kipindi husika.
+            </p>
+          </div>
+
+          <div className="w-full md:w-72">
+            <label className="text-[10px] font-black uppercase text-amber-300 block mb-1">
+              Chagua Kipindi cha Kujaza Mahudhurio:
+            </label>
+            <select
+              value={activeAttendanceEntryId || displayedEntries[0]?.id || ''}
+              onChange={e => setActiveAttendanceEntryId(e.target.value)}
+              className="w-full px-3 py-2 rounded-xl bg-white text-slate-900 font-black text-xs border-2 border-amber-400 outline-none cursor-pointer"
+            >
+              {displayedEntries.map(e => (
+                <option key={e.id} value={e.id}>
+                  {e.day} • {e.periodName} ({e.scheduledSubject})
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {(() => {
+          const targetEntry = displayedEntries.find(e => e.id === activeAttendanceEntryId) || displayedEntries[0];
+          if (!targetEntry) {
+            return (
+              <div className="p-6 text-center text-slate-400 font-bold text-xs">
+                Hakuna kipindi kilichochaguliwa.
+              </div>
+            );
+          }
+
+          const currentAbsentList = targetEntry.absentStudentsList || [];
+          const absentCount = targetEntry.studentsAbsent ?? currentAbsentList.filter(s => s.reason === 'ABSENT').length;
+          const sickCount = targetEntry.studentsSick ?? currentAbsentList.filter(s => s.reason === 'SICK').length;
+          const permittedCount = targetEntry.studentsPermitted ?? currentAbsentList.filter(s => s.reason === 'PERMITTED').length;
+
+          const filteredStudentsForRoster = classStudentsList.filter(s =>
+            !absentStudentSearch.trim() ||
+            s.name.toLowerCase().includes(absentStudentSearch.toLowerCase()) ||
+            (s.regNo && s.regNo.toLowerCase().includes(absentStudentSearch.toLowerCase()))
+          );
+
+          return (
+            <div className="p-5 space-y-5">
+              {/* Summary Bar for Selected Period */}
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 bg-slate-50 p-3.5 rounded-2xl border border-slate-200">
+                <div className="bg-white p-2.5 rounded-xl border border-slate-200">
+                  <span className="text-[10px] font-black text-slate-400 uppercase block">Kipindi Husika</span>
+                  <span className="text-xs font-black text-slate-900 block truncate">
+                    {targetEntry.day} • {targetEntry.periodName}
+                  </span>
+                  <span className="text-[11px] font-bold text-blue-700 block truncate">{targetEntry.scheduledSubject}</span>
+                </div>
+                <div className="bg-emerald-50 p-2.5 rounded-xl border border-emerald-200">
+                  <span className="text-[10px] font-black text-emerald-700 uppercase block">Waliopo (Present)</span>
+                  <span className="text-lg font-black text-emerald-900">{targetEntry.studentsPresent}</span>
+                  <span className="text-[10px] text-emerald-600 font-bold block">kati ya {classStudentCount}</span>
+                </div>
+                <div className="bg-rose-50 p-2.5 rounded-xl border border-rose-200">
+                  <span className="text-[10px] font-black text-rose-700 uppercase block">Wasiokuwepo (Absent)</span>
+                  <span className="text-lg font-black text-rose-900">{absentCount}</span>
+                  <span className="text-[10px] text-rose-600 font-bold block">Bila ruhusa</span>
+                </div>
+                <div className="bg-amber-50 p-2.5 rounded-xl border border-amber-200">
+                  <span className="text-[10px] font-black text-amber-700 uppercase block">Wagonjwa (Sick)</span>
+                  <span className="text-lg font-black text-amber-900">{sickCount}</span>
+                  <span className="text-[10px] text-amber-600 font-bold block">Matibabu / Zahanati</span>
+                </div>
+                <div className="bg-blue-50 p-2.5 rounded-xl border border-blue-200">
+                  <span className="text-[10px] font-black text-blue-700 uppercase block">Walioruhusiwa (Permitted)</span>
+                  <span className="text-lg font-black text-blue-900">{permittedCount}</span>
+                  <span className="text-[10px] text-blue-600 font-bold block">Kwa ruhusa maalum</span>
+                </div>
+              </div>
+
+              {/* Roster Selection Box */}
+              <div className="space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <h4 className="text-xs font-black uppercase text-slate-800 flex items-center gap-2">
+                    <span>1. Orodha ya Wanafunzi Wote wa {selectedClass} ({selectedStream}) — Bofya Kuselect Wasiokuwepo:</span>
+                  </h4>
+                  <input
+                    type="text"
+                    value={absentStudentSearch}
+                    onChange={e => setAbsentStudentSearch(e.target.value)}
+                    placeholder="Tafuta jina la mwanafunzi..."
+                    className="px-3 py-1.5 text-xs font-bold border border-slate-300 rounded-xl bg-slate-50 focus:bg-white outline-none w-full sm:w-64"
+                  />
+                </div>
+
+                {filteredStudentsForRoster.length === 0 ? (
+                  <div className="p-6 text-center bg-slate-50 rounded-xl border border-slate-200 text-xs text-slate-500 font-bold">
+                    Hakuna wanafunzi waliopatikana kwa utafutaji huu.
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-72 overflow-y-auto p-2 bg-slate-50 rounded-2xl border border-slate-200">
+                    {filteredStudentsForRoster.map((student, sIdx) => {
+                      const rec = currentAbsentList.find(item => String(item.id) === String(student.id));
+                      const currentStatus = rec ? rec.reason : 'PRESENT';
+                      return (
+                        <div
+                          key={student.id}
+                          className={`p-2.5 rounded-xl border flex flex-col justify-between gap-2 transition ${
+                            currentStatus === 'ABSENT'
+                              ? 'bg-rose-50 border-rose-300 shadow-2xs'
+                              : currentStatus === 'SICK'
+                              ? 'bg-amber-50 border-amber-300 shadow-2xs'
+                              : currentStatus === 'PERMITTED'
+                              ? 'bg-blue-50 border-blue-300 shadow-2xs'
+                              : 'bg-white border-slate-200 hover:border-blue-300'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-black text-slate-900 truncate">
+                              {sIdx + 1}. {student.name}
+                            </span>
+                            {student.regNo && (
+                              <span className="text-[9px] font-mono font-bold text-slate-400 shrink-0">
+                                {student.regNo}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="grid grid-cols-4 gap-1">
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudentAbsence(targetEntry, student, 'PRESENT')}
+                              className={`py-1 rounded text-[9px] font-black uppercase cursor-pointer transition ${
+                                currentStatus === 'PRESENT'
+                                  ? 'bg-emerald-600 text-white'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-emerald-50'
+                              }`}
+                            >
+                              Yupo
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudentAbsence(targetEntry, student, 'ABSENT')}
+                              className={`py-1 rounded text-[9px] font-black uppercase cursor-pointer transition ${
+                                currentStatus === 'ABSENT'
+                                  ? 'bg-rose-600 text-white'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-rose-100'
+                              }`}
+                            >
+                              Absent
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudentAbsence(targetEntry, student, 'SICK')}
+                              className={`py-1 rounded text-[9px] font-black uppercase cursor-pointer transition ${
+                                currentStatus === 'SICK'
+                                  ? 'bg-amber-500 text-slate-950'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-amber-100'
+                              }`}
+                            >
+                              Sick
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleToggleStudentAbsence(targetEntry, student, 'PERMITTED')}
+                              className={`py-1 rounded text-[9px] font-black uppercase cursor-pointer transition ${
+                                currentStatus === 'PERMITTED'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-slate-100 text-slate-600 hover:bg-blue-100'
+                              }`}
+                            >
+                              Ruhusa
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Bottom Display List of Absent Students across Periods */}
+              <div className="pt-3 border-t border-slate-200 space-y-3">
+                <h4 className="text-xs font-black uppercase text-rose-800 flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-600" />
+                  <span>2. Orodha ya Wanafunzi Wasiokuwepo Kwenye Vipindi (Absent / Sick / Permitted List per Period)</span>
+                </h4>
+
+                {displayedEntries.filter(e => (e.absentStudentsList && e.absentStudentsList.length > 0)).length === 0 ? (
+                  <div className="p-4 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span>Wanafunzi wote wapo darasani kwenye vipindi vinavyoonekana (Hakuna mwanafunzi aliyetikiwa kukosekana bado).</span>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {displayedEntries
+                      .filter(e => e.absentStudentsList && e.absentStudentsList.length > 0)
+                      .map(e => (
+                        <div key={`abs_card_${e.id}`} className="p-3.5 rounded-2xl bg-rose-50/50 border border-rose-200 space-y-2">
+                          <div className="flex items-center justify-between border-b border-rose-200/80 pb-2">
+                            <div>
+                              <span className="text-xs font-black text-slate-900 uppercase">
+                                {e.day} • {e.periodName} ({e.timeRange})
+                              </span>
+                              <span className="block text-[11px] font-bold text-blue-800">
+                                Somo: {e.scheduledSubject} ({e.scheduledTeacherName})
+                              </span>
+                            </div>
+                            <span className="px-2.5 py-1 rounded-full bg-rose-600 text-white text-[10px] font-black">
+                              Hawakuwepo: {e.absentStudentsList?.length || 0}
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5">
+                            {(e.absentStudentsList || []).map((st, idx) => (
+                              <span
+                                key={`${e.id}_${st.id}_${idx}`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                                  st.reason === 'SICK'
+                                    ? 'bg-amber-100 text-amber-900 border-amber-300'
+                                    : st.reason === 'PERMITTED'
+                                    ? 'bg-blue-100 text-blue-900 border-blue-300'
+                                    : 'bg-rose-100 text-rose-900 border-rose-300'
+                                }`}
+                              >
+                                <span>{idx + 1}. {st.name}</span>
+                                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-white/80">
+                                  {st.reason === 'SICK' ? 'Mgonjwa' : st.reason === 'PERMITTED' ? 'Ruhusa' : 'Absent'}
+                                </span>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+
       {/* ------------------------------------------------------------- */}
       {/* HIDDEN PRINTABLE CONTAINER FOR OFFICIAL EXPORT / PRINTING */}
       {/* ------------------------------------------------------------- */}
@@ -1109,7 +1623,7 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
                     <th className="p-2 border border-slate-900 w-44">Subject & Instructor</th>
                     <th className="p-2 border border-slate-900 w-24 text-center">Status</th>
                     <th className="p-2 border border-slate-900">Topic / Material Covered</th>
-                    <th className="p-2 border border-slate-900 w-20 text-center">Attd.</th>
+                    <th className="p-2 border border-slate-900 w-32 text-center">Attd (P/A/S/R)</th>
                     <th className="p-2 border border-slate-900 w-36">Teacher Sign</th>
                     <th className="p-2 border border-slate-900 w-36">Verification</th>
                   </tr>
@@ -1132,10 +1646,18 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
                          entry.status === 'NOT_TAUGHT' ? '✗ Not Taught' : '— Free'}
                       </td>
                       <td className="p-1 border border-slate-300 font-medium">
-                        {entry.topicTaught || '—'}
+                        <div>{entry.topicTaught || '—'}</div>
+                        {entry.absentStudentsList && entry.absentStudentsList.length > 0 && (
+                          <div className="text-[8px] text-rose-800 mt-0.5">
+                            <strong>Hawakuwepo:</strong> {entry.absentStudentsList.map(s => `${s.name} (${s.reason === 'SICK' ? 'Mgonjwa' : s.reason === 'PERMITTED' ? 'Ruhusa' : 'Absent'})`).join(', ')}
+                          </div>
+                        )}
                       </td>
                       <td className="p-1 border border-slate-300 text-center font-bold">
-                        {entry.studentsPresent} / {classStudentCount}
+                        <div>P:{entry.studentsPresent}/{classStudentCount}</div>
+                        <div className="text-[8px] text-slate-600">
+                          A:{entry.studentsAbsent || 0} S:{entry.studentsSick || 0} R:{entry.studentsPermitted || 0}
+                        </div>
                       </td>
                       <td className="p-1 border border-slate-300 font-bold">
                         {entry.teacherSignature ? (
@@ -1379,6 +1901,19 @@ export const ClassJournalTab: React.FC<ClassJournalTabProps> = ({
           </div>
         </div>
       )}
+      {/* Biometric Verification Modal */}
+      <FingerprintScanner
+        isOpen={isScannerOpen}
+        onClose={() => setIsScannerOpen(false)}
+        onVerified={handleVerified as any}
+        teachers={teachers}
+        schoolId={schoolId || currentUser?.schoolId || ''}
+        monitorId={currentUser?.id || 'monitor_1'}
+        className={selectedClass}
+        subject="General"
+        action={scannerAction}
+      />
     </div>
   );
 };
+

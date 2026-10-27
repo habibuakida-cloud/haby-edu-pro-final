@@ -8,6 +8,8 @@ export default defineConfig(() => {
     base: '/',
     build: {
       outDir: 'dist',
+      emptyOutDir: true,
+      reportCompressedSize: false,
       rollupOptions: {
         output: {
           manualChunks(id) {
@@ -39,6 +41,12 @@ export default defineConfig(() => {
               if (id.includes('react') || id.includes('react-dom')) {
                 return 'vendor-react';
               }
+            }
+            if (id.includes('/src/constants/')) {
+              return 'app-constants';
+            }
+            if (id.includes('/src/services/') || id.includes('/src/utils/')) {
+              return 'app-services';
             }
           }
         }

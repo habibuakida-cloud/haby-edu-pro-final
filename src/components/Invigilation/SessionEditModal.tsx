@@ -16,8 +16,19 @@ import { SUBJECT_NAMES_LIST, DEFAULT_CLASSES } from '../../constants/defaults';
 export const INVIGILATION_ALLOWED_SESSIONS = ['SESSION I', 'SESSION II', 'SESSION III'] as const;
 export type InvigilationSessionType = typeof INVIGILATION_ALLOWED_SESSIONS[number];
 
+export const PRESET_INVIGILATION_EXAM_TITLES = [
+  'Pre-National Examination 2026',
+  'Midterm I Examination 2026',
+  'Terminal Examination 2026',
+  'Midterm II Examination 2026',
+  'Annual Examination 2026',
+  'Mock Examination 2026',
+  'Joint Regional Examination 2026'
+] as const;
+
 interface SessionEditModalProps {
   initialSession?: InvigilationSession | null;
+  defaultExamTitle?: string;
   onSave: (sessionData: Omit<InvigilationSession, 'id'> & { id?: number }) => void;
   onClose: () => void;
 }
@@ -45,9 +56,13 @@ export function getDayAndFormattedDate(rawDateStr: string): { day: string; forma
 
 export const SessionEditModal: React.FC<SessionEditModalProps> = ({
   initialSession,
+  defaultExamTitle = 'Pre-National Examination 2026',
   onSave,
   onClose
 }) => {
+  const [examTitle, setExamTitle] = useState(
+    initialSession?.examTitle || defaultExamTitle || 'Pre-National Examination 2026'
+  );
   const [rawDate, setRawDate] = useState(initialSession?.rawDate || '2026-10-15');
   // Strictly SESSION I or SESSION II only
   const [sessionName, setSessionName] = useState<InvigilationSessionType>(
@@ -102,6 +117,7 @@ export const SessionEditModal: React.FC<SessionEditModalProps> = ({
 
     onSave({
       ...(initialSession ? { id: initialSession.id } : {}),
+      examTitle: examTitle.trim() || defaultExamTitle || 'Pre-National Examination 2026',
       rawDate,
       date: computedFormattedDate,
       day: computedDay,
@@ -120,9 +136,9 @@ export const SessionEditModal: React.FC<SessionEditModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
-      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[92vh]">
+      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="bg-gradient-to-r from-[#1f4d8b] to-[#153460] text-white px-6 py-4 flex items-center justify-between">
+        <div className="bg-gradient-to-r from-[#1f4d8b] to-[#153460] text-white px-6 py-4 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-2.5">
             <span className="p-2 rounded-xl bg-white/10 text-white">
               <Calendar className="w-5 h-5" />
@@ -132,7 +148,7 @@ export const SessionEditModal: React.FC<SessionEditModalProps> = ({
                 {initialSession ? 'Edit Examination Session' : 'Add Examination Session'}
               </h3>
               <p className="text-xs text-blue-200">
-                Configure exam date, day, session slot (Session I or Session II), and room capacity
+                Mtihani Husika: <strong className="text-amber-300">{examTitle}</strong>
               </p>
             </div>
           </div>
@@ -145,7 +161,38 @@ export const SessionEditModal: React.FC<SessionEditModalProps> = ({
         </div>
 
         {/* Form Body */}
-        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1">
+        <form onSubmit={handleSubmit} className="p-6 overflow-y-auto space-y-5 flex-1 min-h-0">
+          {/* 0. EXAMINATION TITLE (MTIHANI GANI) */}
+          <div className="p-3.5 bg-amber-50 border border-amber-300 rounded-xl space-y-2">
+            <label className="text-xs font-black text-amber-950 uppercase tracking-wider block">
+              Jina la Mtihani (Examination Title) *
+            </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <select
+                value={PRESET_INVIGILATION_EXAM_TITLES.includes(examTitle as any) ? examTitle : '__CUSTOM__'}
+                onChange={e => {
+                  if (e.target.value !== '__CUSTOM__') {
+                    setExamTitle(e.target.value);
+                  }
+                }}
+                className="w-full px-3 py-2 text-xs font-bold border border-amber-300 rounded-lg bg-white text-slate-900"
+              >
+                {PRESET_INVIGILATION_EXAM_TITLES.map(t => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+                <option value="__CUSTOM__">-- Andika Jina Jingine la Mtihani --</option>
+              </select>
+              <input
+                type="text"
+                value={examTitle}
+                onChange={e => setExamTitle(e.target.value)}
+                placeholder="Mfano: Pre-National Examination 2026"
+                className="w-full px-3 py-2 text-xs font-black border border-amber-300 rounded-lg bg-white text-blue-950"
+                required
+              />
+            </div>
+          </div>
+
           {/* 1. DATE & DYNAMIC DAY DISPLAY */}
           <div className="p-4 bg-blue-50/60 border border-blue-200 rounded-xl space-y-3">
             <div className="flex items-center justify-between">

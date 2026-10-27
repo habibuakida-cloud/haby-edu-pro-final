@@ -191,7 +191,7 @@ export function getGradeForScore(score: number, policy: NectaLevelPolicy): Necta
  * Calculate NECTA Division, Points, Grade, and Position for any class level
  */
 export function calculateNectaLevelResults(
-  marks: Record<string, number | undefined | null>,
+  marks: Record<string, number | string | undefined | null>,
   className: string
 ): {
   division: string;
@@ -216,13 +216,16 @@ export function calculateNectaLevelResults(
 
   const count = validEntries.length;
   if (count === 0) {
+    // Check if there are any 'ABS' marks specifically recorded
+    const isExplicitlyAbsent = Object.values(cleanedMarks || {}).some(v => String(v).toUpperCase() === 'ABS' || String(v).toUpperCase() === 'ABSENT' || String(v).toUpperCase() === 'X');
+    
     return {
-      division: '-',
+      division: isExplicitlyAbsent ? 'ABS' : 'INC',
       points: null,
-      overallGrade: 'F',
+      overallGrade: 'ABS',
       total: 0,
       average: 0,
-      remarks: 'No scores recorded',
+      remarks: isExplicitlyAbsent ? 'ABSENT' : 'No scores recorded',
       policy,
       isPrimary
     };

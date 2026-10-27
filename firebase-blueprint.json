@@ -19,7 +19,7 @@
     },
     "Teacher": {
       "title": "Teacher",
-      "description": "Teacher profile record",
+      "description": "Teacher profile record including biometric data",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
@@ -28,9 +28,43 @@
         "email": { "type": "string", "maxLength": 100 },
         "subject": { "type": "string", "maxLength": 100 },
         "schoolId": { "type": "string", "maxLength": 128 },
-        "createdAt": { "type": "string" }
+        "pinCode": { "type": "string", "maxLength": 100, "description": "Hashed 4-digit PIN" },
+        "fingerprintTemplate": { "type": "string", "description": "Base64 encoded fingerprint template" },
+        "hasBiometric": { "type": "boolean" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" }
       },
       "required": ["name", "schoolId"]
+    },
+    "ClassJournal": {
+      "title": "ClassJournal",
+      "description": "Log of teacher lesson attendance and topics taught",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "teacherId": { "type": "string", "maxLength": 128 },
+        "teacherName": { "type": "string", "maxLength": 150 },
+        "schoolId": { "type": "string", "maxLength": 128 },
+        "monitorId": { "type": "string", "maxLength": 128 },
+        "className": { "type": "string", "maxLength": 50 },
+        "stream": { "type": "string", "maxLength": 50 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "mainTopic": { "type": "string", "maxLength": 255 },
+        "subTopic": { "type": "string", "maxLength": 255 },
+        "period": { "type": "integer" },
+        "periodName": { "type": "string", "maxLength": 50 },
+        "timeIn": { "type": "string", "format": "date-time" },
+        "timeOut": { "type": "string", "format": "date-time" },
+        "verificationMethod": { "type": "string", "enum": ["usb_scanner", "phone_pin"] },
+        "presentCount": { "type": "integer" },
+        "absentCount": { "type": "integer" },
+        "sickCount": { "type": "integer" },
+        "permittedCount": { "type": "integer" },
+        "isOffline": { "type": "boolean" },
+        "date": { "type": "string", "description": "YYYY-MM-DD format" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["teacherId", "schoolId", "className", "subject", "timeIn", "verificationMethod", "date"]
     },
     "School": {
       "title": "School",
@@ -58,6 +92,53 @@
         "status": { "type": "string", "enum": ["PRESENT", "ABSENT"] }
       },
       "required": ["studentId", "teacherId", "timestamp", "schoolId", "status"]
+    },
+    "RemedialTimetable": {
+      "title": "RemedialTimetable",
+      "description": "Remedial session schedule and venue assignment",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "school_id": { "type": "string", "maxLength": 128 },
+        "class_name": { "type": "string", "maxLength": 50 },
+        "stream": { "type": "string", "maxLength": 50 },
+        "subject": { "type": "string", "maxLength": 100 },
+        "teacher_name": { "type": "string", "maxLength": 150 },
+        "day_of_week": { "type": "string", "maxLength": 30 },
+        "period_time": { "type": "string", "maxLength": 50 },
+        "room": { "type": "string", "maxLength": 100 },
+        "date": { "type": "string", "maxLength": 30 }
+      },
+      "required": ["school_id", "class_name", "subject", "teacher_name", "day_of_week", "period_time"]
+    },
+    "ElectionEvent": {
+      "title": "ElectionEvent",
+      "description": "Student Government Election event",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "school_id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 200 },
+        "academic_year": { "type": "string", "maxLength": 20 },
+        "status": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "school_id", "title"]
+    },
+    "RemedialTimeSlot": {
+      "title": "RemedialTimeSlot",
+      "description": "Remedial session time template per class",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "school_id": { "type": "string", "maxLength": 128 },
+        "class_name": { "type": "string", "maxLength": 50 },
+        "start_time": { "type": "string", "maxLength": 30 },
+        "end_time": { "type": "string", "maxLength": 30 },
+        "session_type": { "type": "string", "enum": ["Morning", "Evening", "Weekend"] },
+        "days": { "type": "array", "items": { "type": "string" } },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["school_id", "class_name", "start_time", "end_time", "session_type", "days"]
     }
   },
   "firestore": {
@@ -69,6 +150,10 @@
       "schema": "Teacher",
       "description": "Collection of school teachers"
     },
+    "/class_journals/{journalId}": {
+      "schema": "ClassJournal",
+      "description": "Logs of lesson attendance verified via biometric/PIN"
+    },
     "/schools/{schoolId}": {
       "schema": "School",
       "description": "School details document"
@@ -77,26 +162,30 @@
       "schema": "DailyAttendance",
       "description": "Collection of student attendance records"
     },
-    "/school_data/{schoolId}": {
-      "schema": "School",
-      "description": "Collection of full school data snapshots"
+    "/remedial_timetable/{docId}": {
+      "schema": "RemedialTimetable",
+      "description": "Remedial classes master schedule"
     },
-    "/environment_equipment/{equipmentId}": {
-      "schema": "School",
-      "description": "Environmental and agricultural equipment inventory"
+    "/remedial_time_slots/{docId}": {
+      "schema": "RemedialTimeSlot",
+      "description": "Remedial time templates per class"
     },
-    "/equipment_usage_log/{logId}": {
-      "schema": "School",
-      "description": "Equipment usage and checkout logs"
+    "/remedial_global_settings/{schoolId}": {
+      "title": "RemedialGlobalSettings",
+      "description": "Global settings for the remedial program (dates and default times)",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "defaultStartTime": { "type": "string" },
+        "defaultEndTime": { "type": "string" },
+        "updatedAt": { "type": "string" }
+      }
     },
-    "/environment_orders/{orderId}": {
-      "schema": "School",
-      "description": "Environmental equipment procurement orders"
-    },
-    "/school_purchased_equipment/{purchaseId}": {
-      "schema": "School",
-      "description": "Verified purchased equipment records"
+    "/election_events/{docId}": {
+      "schema": "ElectionEvent",
+      "description": "Student government election events"
     }
   }
 }
-

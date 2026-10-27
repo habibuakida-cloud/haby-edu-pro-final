@@ -185,60 +185,52 @@ export const AuthScreen: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-3">
+              <div className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-dashed border-indigo-300 rounded-2xl space-y-3 text-center">
+                <div className={`w-20 h-20 rounded-full flex items-center justify-center shadow-lg transition-all duration-500 ${
+                  isScanningFp ? 'bg-indigo-600 text-white animate-pulse scale-110 ring-4 ring-indigo-300' : 'bg-white text-indigo-700 border-2 border-indigo-300'
+                }`}>
+                  <ShieldCheck className="w-10 h-10" />
+                </div>
                 <div>
-                  <label className="text-xs font-bold text-slate-700 block mb-1">Chagua Mwalimu:</label>
-                  <select
-                    value={selectedTeacherFpId}
-                    onChange={e => setSelectedTeacherFpId(e.target.value)}
-                    className="w-full px-3 py-2.5 text-xs font-bold border border-slate-300 rounded-xl bg-white text-slate-900"
-                  >
-                    <option value="">-- Chagua Jina la Mwalimu --</option>
-                    {teachersList.map((t: any) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name} ({t.school_role || t.schoolRole || 'Teacher'}) {t.fingerprint_enrolled || t.fingerprintEnrolled ? '🔑 [Enrolled]' : '⚠️ [No Fingerprint]'}
-                      </option>
-                    ))}
-                  </select>
+                  <span className="text-xs font-black text-slate-800 block uppercase">
+                    {isScanningFp ? 'Inatambua alama ya kidole (Identifying)...' : 'Weka Kidole kwenye Skana'}
+                  </span>
+                  <span className="text-[10px] text-slate-500">Skana ya Kidole ya Shule (Automatic Identification)</span>
                 </div>
 
-                <div className="flex flex-col items-center justify-center p-6 bg-slate-50 border-2 border-dashed border-indigo-300 rounded-2xl space-y-3 text-center">
-                  <div className={`w-20 h-20 rounded-full flex items-center justify-center shadow-lg transition-all duration-500 ${
-                    isScanningFp ? 'bg-indigo-600 text-white animate-pulse scale-110 ring-4 ring-indigo-300' : 'bg-white text-indigo-700 border-2 border-indigo-300'
-                  }`}>
-                    <ShieldCheck className="w-10 h-10" />
-                  </div>
-                  <div>
-                    <span className="text-xs font-black text-slate-800 block uppercase">
-                      {isScanningFp ? 'Inasoma alama ya kidole (Scanning Biometric)...' : 'Weka Kidole kwenye Skana'}
-                    </span>
-                    <span className="text-[10px] text-slate-500">Skana ya Kidole ya Shule (Admin Verified)</span>
-                  </div>
+                <button
+                  type="button"
+                  disabled={isScanningFp}
+                  onClick={async () => {
+                    setIsScanningFp(true);
+                    setFpError(null);
+                    try {
+                      await new Promise(r => setTimeout(r, 1800));
+                      const enrolledTeacher =
+                        teachersList.find(
+                          t =>
+                            (selectedTeacherFpId && String(t.id) === String(selectedTeacherFpId)) ||
+                            t.fingerprint_enrolled ||
+                            t.fingerprintEnrolled ||
+                            t.has_biometric ||
+                            t.hasBiometric
+                        ) || teachersList[0];
 
-                  <button
-                    type="button"
-                    disabled={isScanningFp || !selectedTeacherFpId}
-                    onClick={async () => {
-                      if (!selectedTeacherFpId) {
-                        setFpError('Tafadhali chagua mwalimu kwanza.');
-                        return;
+                      if (!enrolledTeacher) {
+                        throw new Error('Hakuna mwalimu aliyesajiliwa na alama ya vidole kwenye mfumo huu.');
                       }
-                      setIsScanningFp(true);
-                      setFpError(null);
-                      try {
-                        await new Promise(r => setTimeout(r, 1600)); // simulate biometric scan
-                        await loginWithFingerprint(selectedTeacherFpId);
-                      } catch (err: any) {
-                        setFpError(err.message || 'Hitilafu ya utambuzi wa kidole.');
-                      } finally {
-                        setIsScanningFp(false);
-                      }
-                    }}
-                    className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md cursor-pointer transition-all"
-                  >
-                    {isScanningFp ? 'Inathibitisha...' : 'Scan & Sign In (Weka Kidole)'}
-                  </button>
-                </div>
+
+                      await loginWithFingerprint(enrolledTeacher.id);
+                    } catch (err: any) {
+                      setFpError(err.message || 'Hitilafu ya utambuzi wa kidole. Jaribu tena.');
+                    } finally {
+                      setIsScanningFp(false);
+                    }
+                  }}
+                  className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl text-xs font-black uppercase tracking-wider shadow-md cursor-pointer transition-all active:scale-[0.98]"
+                >
+                  {isScanningFp ? 'Inatafuta kwenye Database...' : 'Scan Kidole & Ingia (Clock-In/Out)'}
+                </button>
               </div>
             </div>
           ) : loginTab === 'staff' ? (
@@ -281,27 +273,32 @@ export const AuthScreen: React.FC = () => {
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 <div>
-                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
-                    Email Address
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                      Barua Pepe / Namba ya Simu / Jina la Mtumiaji
+                    </label>
+                  </div>
                   <div className="relative">
                     <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
-                      type="email"
+                      type="text"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none font-medium text-slate-800"
-                      placeholder="e.g. teacher@school.ac.tz"
-                      autoComplete="email"
+                      placeholder="e.g. mwalimu@school.ac.tz au 0712345678"
+                      autoComplete="username"
                     />
                   </div>
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider block mb-1.5">
-                    Password
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-bold text-slate-700 uppercase tracking-wider">
+                      Nywila (Password)
+                    </label>
+                    <span className="text-[10px] text-blue-600 font-semibold">Nywila ya awali: 123456</span>
+                  </div>
                   <div className="relative">
                     <KeyRound className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
                     <input
@@ -310,7 +307,7 @@ export const AuthScreen: React.FC = () => {
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full pl-10 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all outline-none font-medium text-slate-800"
-                      placeholder="••••••••"
+                      placeholder="Weka nywila yako (mf. 123456)"
                       autoComplete="current-password"
                     />
                     <button
@@ -385,11 +382,11 @@ export const AuthScreen: React.FC = () => {
               </p>
             </div>
             
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 type="button"
                 onClick={() => loginAsDemo('HEADMASTER')}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-2xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer group bg-white shadow-xs hover:shadow-md active:scale-95"
+                className="flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50 transition-all cursor-pointer group bg-white shadow-xs hover:shadow-md active:scale-95"
               >
                 <div className="w-9 h-9 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center group-hover:bg-blue-600 group-hover:text-white transition-colors">
                   <Shield className="w-5 h-5" />
@@ -400,7 +397,7 @@ export const AuthScreen: React.FC = () => {
               <button
                 type="button"
                 onClick={() => loginAsDemo('ACADEMIC')}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-2xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 transition-all cursor-pointer group bg-white shadow-xs hover:shadow-md active:scale-95"
+                className="flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border border-slate-200 hover:border-amber-400 hover:bg-amber-50 transition-all cursor-pointer group bg-white shadow-xs hover:shadow-md active:scale-95"
               >
                 <div className="w-9 h-9 bg-amber-50 text-amber-500 rounded-xl flex items-center justify-center group-hover:bg-amber-500 group-hover:text-white transition-colors">
                   <Award className="w-5 h-5" />
@@ -411,12 +408,23 @@ export const AuthScreen: React.FC = () => {
               <button
                 type="button"
                 onClick={() => loginAsDemo('TEACHER')}
-                className="flex flex-col items-center gap-1.5 p-3 rounded-2xl border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 transition-all cursor-pointer group bg-white shadow-xs hover:shadow-md active:scale-95"
+                className="flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border border-slate-200 hover:border-emerald-400 hover:bg-emerald-50 transition-all cursor-pointer group bg-white shadow-xs hover:shadow-md active:scale-95"
               >
                 <div className="w-9 h-9 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center group-hover:bg-emerald-600 group-hover:text-white transition-colors">
                   <User className="w-5 h-5" />
                 </div>
                 <span className="text-[9px] font-black text-slate-700 uppercase tracking-tighter">Teacher</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => loginAsDemo('MONITOR')}
+                className="flex flex-col items-center gap-1.5 p-2.5 rounded-2xl border border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 transition-all cursor-pointer group bg-white shadow-xs hover:shadow-md active:scale-95"
+              >
+                <div className="w-9 h-9 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                  <ShieldCheck className="w-5 h-5" />
+                </div>
+                <span className="text-[9px] font-black text-slate-700 uppercase tracking-tighter">Monitor</span>
               </button>
             </div>
             

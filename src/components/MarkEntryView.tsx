@@ -46,6 +46,7 @@ import {
   SECONDARY_CLASSES
 } from '../constants/defaults';
 import { calculateOLevelDivision, calculatePrimaryScoreResult, isPrimaryOrNursery, getPrimarySubjectGradeInfo, cleanAndFilterMarksForClass, isSameClass } from '../utils/reportCardUtils';
+import { isStudentEnrolledInSubject } from '../utils/classTeacherUtils';
 import { USALModal } from './USAL/USALModal';
 import { upsertRecord, getCurrentSchoolId } from '../lib/dbClient';
 
@@ -173,7 +174,45 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
   const isClassNursery = NURSERY_CLASSES.includes(selectedClass);
   const isClassLowerPrimary = selectedClass === 'Standard 1' || selectedClass === 'Standard 2';
 
-  // Subjects for appropriate school level, including all teacher subjects without limiting
+  // Check if current user is Admin / Headmaster / Academic Master / HOD
+  const isAdminOrHOD = useMemo(() => {
+    if (!currentUser) return true;
+    if (currentUser.isSuperAdmin) return true;
+    if (currentUser.role === 'SUPER_ADMIN' || currentUser.role === 'HEADMASTER' || currentUser.role === 'ACADEMIC') return true;
+    const roleName = (loggedInTeacher?.schoolRole || '').toLowerCase();
+    return (
+      roleName.includes('head of department') ||
+      roleName.includes('hod') ||
+      roleName.includes('academic master') ||
+      roleName.includes('academic mistress') ||
+      roleName.includes('headmaster') ||
+      roleName.includes('deputy') ||
+      roleName.includes('second master')
+    );
+  }, [currentUser, loggedInTeacher]);
+
+  // Teacher Profile: registered subjects & teaching streams
+  const teacherRegisteredSubjects = useMemo(() => {
+    return loggedInTeacher?.subjects || currentUser?.assignedSubjects || [];
+  }, [loggedInTeacher, currentUser]);
+
+  const teacherAssignedClasses = useMemo(() => {
+    const rawStreams = loggedInTeacher?.teachingStreams || [];
+    const classSet = new Set<string>();
+    rawStreams.forEach(str => {
+      const parts = str.split(/[-–—/]/);
+      const cls = (parts[0] || str).trim();
+      if (cls) classSet.add(cls);
+    });
+    return Array.from(classSet);
+  }, [loggedInTeacher]);
+
+  // HOD Override state in MarkEntryView
+  const [isHODOverrideActive, setIsHODOverrideActive] = useState<boolean>(false);
+  const [hodApprovedByName, setHodApprovedByName] = useState<string>('');
+  const [hodOverrideReason, setHodOverrideReason] = useState<string>('Uteuzi Maalum wa Mkuu wa Idara / Dharura ya Kusahihisha');
+
+  // Subjects for appropriate school level, with priority to assigned teacher subjects
   const availableSubjects = useMemo(() => {
     let baseList = [...SECONDARY_SUBJECTS];
     if (isClassNursery) {
@@ -184,25 +223,62 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
       baseList = [...UPPER_PRIMARY_SUBJECTS];
     }
 
-    // Teacher sees ALL subjects for this educational level plus any specific subjects they teach
-    const assigned = currentUser?.assignedSubjects || (loggedInTeacher?.subjects) || [];
+    if (isAdminOrHOD) {
+      return baseList;
+    }
+
+    // For regular teachers: ensure their assigned subjects appear at the top
+    const assigned = teacherRegisteredSubjects;
+    const combined: string[] = [];
     assigned.forEach(sub => {
-      if (!baseList.some(b => b.toLowerCase().trim() === sub.toLowerCase().trim())) {
-        baseList.push(sub);
-      }
+      if (!combined.includes(sub)) combined.push(sub);
+    });
+    baseList.forEach(sub => {
+      if (!combined.includes(sub)) combined.push(sub);
     });
 
-    return baseList;
-  }, [currentUser, loggedInTeacher, isClassNursery, isClassLowerPrimary, isClassPrimary]);
+    return combined;
+  }, [isAdminOrHOD, teacherRegisteredSubjects, isClassNursery, isClassLowerPrimary, isClassPrimary]);
 
-  const [selectedSubject, setSelectedSubject] = useState<string>(availableSubjects[0] || 'English Language');
+  const [selectedSubject, setSelectedSubject] = useState<string>(
+    teacherRegisteredSubjects[0] || availableSubjects[0] || 'English Language'
+  );
 
   // Keep selected subject in sync with available subjects
   useEffect(() => {
     if (availableSubjects.length > 0 && !availableSubjects.includes(selectedSubject)) {
-      setSelectedSubject(availableSubjects[0]);
+      setSelectedSubject(teacherRegisteredSubjects[0] || availableSubjects[0]);
     }
-  }, [availableSubjects, selectedSubject]);
+  }, [availableSubjects, selectedSubject, teacherRegisteredSubjects]);
+
+  // Cross-reference validation: does teacher teach selectedSubject?
+  const isSubjectAssigned = useMemo(() => {
+    if (isAdminOrHOD) return true;
+    if (teacherRegisteredSubjects.length === 0) return true;
+    const cleanSub = selectedSubject.toLowerCase().trim();
+    return teacherRegisteredSubjects.some(s => {
+      const cs = s.toLowerCase().trim();
+      return cs === cleanSub || cleanSub.includes(cs) || cs.includes(cleanSub);
+    });
+  }, [isAdminOrHOD, teacherRegisteredSubjects, selectedSubject]);
+
+  // Cross-reference validation: does teacher teach selectedClass?
+  const isClassAssigned = useMemo(() => {
+    if (isAdminOrHOD) return true;
+    if (teacherAssignedClasses.length === 0) return true;
+    const cleanClass = selectedClass.toLowerCase().trim();
+    return selectedClass === 'All' || teacherAssignedClasses.some(c => {
+      const cc = c.toLowerCase().trim();
+      return cc === cleanClass || cleanClass.includes(cc) || cc.includes(cleanClass);
+    });
+  }, [isAdminOrHOD, teacherAssignedClasses, selectedClass]);
+
+  // Is teacher authorized to enter marks for this class & subject?
+  const isAuthorizedToEnterMarks = useMemo(() => {
+    if (isAdminOrHOD) return true;
+    if (isSubjectAssigned && isClassAssigned) return true;
+    return isHODOverrideActive && hodApprovedByName.trim().length > 0;
+  }, [isAdminOrHOD, isSubjectAssigned, isClassAssigned, isHODOverrideActive, hodApprovedByName]);
 
   // Selected Exam Object & Lock Status
   const selectedExamObj = useMemo(() => {
@@ -280,6 +356,14 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
   };
 
   const handleScoreChange = (studentId: number, val: string) => {
+    if (isExamLocked) {
+      alert(`Mtihani wa "${selectedExam}" umefungwa na Msimamizi wa Taaluma. Huwezi kuingiza wala kuhariri alama.`);
+      return;
+    }
+    if (!isAuthorizedToEnterMarks) {
+      alert(`⛔ UZUIZI WA WASIFU:\nHuna ruhusa ya kuingiza alama za somo la "${selectedSubject}" darasa la "${selectedClass}".\nKulingana na wasifu wako, hili si somo au darasa ulilopangiwa. Weka alama ya "Kibali cha Mkuu wa Idara (HOD Override)" na uthibitishe kiongozi kuendelea.`);
+      return;
+    }
     if (val === '') {
       setLocalScores(prev => ({ ...prev, [studentId]: '' }));
       return;
@@ -344,6 +428,10 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
       alert(`Mtihani wa "${selectedExam}" umefungwa na Msimamizi wa Taaluma (Academic Master). Huwezi kuingiza wala kuhariri alama.`);
       return;
     }
+    if (!isAuthorizedToEnterMarks) {
+      alert(`⛔ UZUIZI WA WASIFU:\nHuwezi kuhifadhi alama za somo la "${selectedSubject}" kwa darasa la "${selectedClass}".\nWasifu wako haujapangiwa somo au darasa hili. Weka alama ya "Kibali cha Mkuu wa Idara (HOD Override)" na uthibitishe kiongozi aliyetoa kibali.`);
+      return;
+    }
 
     setIsSaving(true);
     const schoolId = currentUser?.schoolId || getCurrentSchoolId();
@@ -365,7 +453,7 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
 
       const isStudentPrimary = isPrimaryOrNursery(s.level, s.className || selectedClass);
       const cleanedMarks = cleanAndFilterMarksForClass(currentExamScores, s.className || selectedClass, s.level);
-      const markVals = Object.values(cleanedMarks);
+      const markVals = Object.values(cleanedMarks).filter(v => typeof v === 'number') as number[];
       const total = markVals.reduce((acc, curr) => acc + curr, 0);
       const avg = markVals.length > 0 ? (total / markVals.length).toFixed(1) : undefined;
 
@@ -395,7 +483,7 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
     });
 
     // 1. Instantly update state and show success confirmation
-    onUpdateStudents(updated);
+    onUpdateStudents(updated as Student[]);
     setLocalScores({});
     setSaveSuccessMsg(`Marks for ${selectedSubject} (${selectedClass} - ${selectedExam} | ${selectedYear} ${selectedTerm}) saved & published successfully!`);
     setIsSaving(false);
@@ -688,13 +776,22 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
                   className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 font-bold text-slate-800 focus:ring-2 focus:ring-blue-500"
                 >
                   <optgroup label="Pre-Primary / Nursery">
-                    {NURSERY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {NURSERY_CLASSES.map(c => {
+                      const isAssigned = teacherAssignedClasses.includes(c);
+                      return <option key={c} value={c}>{isAdminOrHOD ? c : (isAssigned ? `⭐ ${c} [Darasa Lako]` : c)}</option>;
+                    })}
                   </optgroup>
                   <optgroup label="Primary School (Std 1 - 7)">
-                    {PRIMARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {PRIMARY_CLASSES.map(c => {
+                      const isAssigned = teacherAssignedClasses.includes(c);
+                      return <option key={c} value={c}>{isAdminOrHOD ? c : (isAssigned ? `⭐ ${c} [Darasa Lako]` : c)}</option>;
+                    })}
                   </optgroup>
                   <optgroup label="Secondary School (Form 1 - 6)">
-                    {SECONDARY_CLASSES.map(c => <option key={c} value={c}>{c}</option>)}
+                    {SECONDARY_CLASSES.map(c => {
+                      const isAssigned = teacherAssignedClasses.includes(c);
+                      return <option key={c} value={c}>{isAdminOrHOD ? c : (isAssigned ? `⭐ ${c} [Darasa Lako]` : c)}</option>;
+                    })}
                   </optgroup>
                 </select>
               </div>
@@ -759,12 +856,27 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
                 <select
                   value={selectedSubject}
                   onChange={e => setSelectedSubject(e.target.value)}
-                  className="bg-blue-50 border border-blue-300 rounded-lg px-3 py-1.5 font-bold text-blue-900 focus:ring-2 focus:ring-blue-500"
+                  className={`border rounded-lg px-3 py-1.5 font-bold focus:ring-2 focus:ring-blue-500 ${
+                    !isAuthorizedToEnterMarks
+                      ? 'bg-rose-50 border-rose-300 text-rose-900'
+                      : 'bg-blue-50 border-blue-300 text-blue-900'
+                  }`}
                 >
-                  {availableSubjects.map(sub => (
-                    <option key={sub} value={sub}>{sub}</option>
-                  ))}
+                  {availableSubjects.map(sub => {
+                    const isAssigned = teacherRegisteredSubjects.some(s => s.toLowerCase().trim() === sub.toLowerCase().trim());
+                    return (
+                      <option key={sub} value={sub}>
+                        {isAdminOrHOD ? sub : (isAssigned ? `⭐ ${sub} [Somo Lako]` : `🔒 ${sub} [Kibali cha HOD]`)}
+                      </option>
+                    );
+                  })}
                 </select>
+                {!isAuthorizedToEnterMarks && (
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-100 text-amber-800 border border-amber-300 flex items-center gap-1 shrink-0" title="Kuingiza alama za somo hili kunahitaji kibali cha HOD">
+                    <ShieldCheck className="w-3 h-3 text-amber-600" />
+                    Inahitaji HOD
+                  </span>
+                )}
               </div>
             </div>
 
@@ -816,17 +928,25 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
 
               <button
                 type="button"
-                disabled={isExamLocked}
+                disabled={isExamLocked || !isAuthorizedToEnterMarks}
                 onClick={handleSaveAll}
                 className={`px-4 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-xs ${
-                  isExamLocked
+                  isExamLocked || !isAuthorizedToEnterMarks
                     ? 'bg-slate-300 text-slate-500 cursor-not-allowed border border-slate-300'
                     : 'bg-emerald-600 hover:bg-emerald-700 text-white cursor-pointer'
                 }`}
-                title={isExamLocked ? 'Mtihani umefungwa, huwezi kuhifadhi alama' : 'Hifadhi alama zote'}
+                title={
+                  isExamLocked
+                    ? 'Mtihani umefungwa, huwezi kuhifadhi alama'
+                    : (!isAuthorizedToEnterMarks ? 'Idhini ya HOD inahitajika kuingiza au kuhifadhi alama' : 'Hifadhi alama zote')
+                }
               >
-                {isExamLocked ? <Lock className="w-3.5 h-3.5 text-slate-500" /> : <Save className="w-3.5 h-3.5" />}
-                <span>{isExamLocked ? 'Mtihani Umefungwa (Locked)' : 'Save All Marks'}</span>
+                {isExamLocked ? <Lock className="w-3.5 h-3.5 text-slate-500" /> : (!isAuthorizedToEnterMarks ? <ShieldCheck className="w-3.5 h-3.5 text-amber-600" /> : <Save className="w-3.5 h-3.5" />)}
+                <span>
+                  {isExamLocked 
+                    ? 'Mtihani Umefungwa (Locked)' 
+                    : (!isAuthorizedToEnterMarks ? 'Idhini ya HOD Inahitajika' : 'Save All Marks')}
+                </span>
               </button>
             </div>
           </div>
@@ -920,6 +1040,105 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
             </div>
           )}
 
+          {/* TEACHER PROFILE ASSIGNMENT RESTRICTION BANNER */}
+          {!isAuthorizedToEnterMarks && (
+            <div className="bg-amber-50 border-2 border-amber-300 text-amber-950 rounded-2xl p-5 shadow-xs space-y-3.5 animate-in fade-in">
+              <div className="flex items-start gap-3.5">
+                <div className="w-11 h-11 rounded-2xl bg-amber-600 text-white flex items-center justify-center font-black shadow-md shrink-0 mt-0.5">
+                  <ShieldCheck className="w-6 h-6" />
+                </div>
+                <div className="flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h4 className="text-sm font-black text-amber-950 uppercase tracking-tight">
+                      UZUIZI WA WASIFU WA MWALIMU: Somo / Darasa Halijapangiwa Kwako
+                    </h4>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-200 text-amber-900 border border-amber-300">
+                      IDHINI YA HOD INAHITAJIKA
+                    </span>
+                  </div>
+                  <p className="text-xs text-amber-900 mt-1 leading-relaxed">
+                    Huruhusiwi kuingiza alama za somo la <strong className="underline text-blue-900 font-extrabold">{selectedSubject}</strong> darasa la <strong className="underline text-blue-900 font-extrabold">{selectedClass}</strong>. 
+                    Kulingana na usajili wa wasifu wako, umepangiwa kufundisha masomo ya <strong>[{teacherRegisteredSubjects.join(', ') || 'Hamna'}]</strong> katika madarasa ya <strong>[{teacherAssignedClasses.join(', ') || 'Hamna'}]</strong>.
+                  </p>
+                  <p className="text-xs text-amber-800 font-semibold mt-1">
+                    Ikiwa umekabidhiwa kazi hii na Mkuu wa Idara (HOD) au Mwalimu Mkuu wa Taaluma, weka alama ya idhini hapa chini ili kufungua jedwali la alama.
+                  </p>
+                </div>
+              </div>
+
+              {/* HOD Override Form */}
+              <div className="bg-white/80 border border-amber-300 rounded-xl p-3.5 space-y-3">
+                <label className="flex items-center gap-2 font-bold text-xs text-amber-950 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={isHODOverrideActive}
+                    onChange={e => {
+                      setIsHODOverrideActive(e.target.checked);
+                      if (e.target.checked && !hodApprovedByName && teachers.length > 0) {
+                        setHodApprovedByName(teachers[0].name);
+                      }
+                    }}
+                    className="w-4 h-4 rounded text-amber-600 focus:ring-amber-500 cursor-pointer"
+                  />
+                  <span>Thibitisha: Nimeidhinishwa na Mkuu wa Idara (HOD Override) kuingiza alama hizi</span>
+                </label>
+
+                {isHODOverrideActive && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-amber-200 text-xs animate-in fade-in">
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-950 uppercase mb-1">
+                        Aliyetoa Idhini (HOD / Academic Master) *
+                      </label>
+                      <select
+                        value={hodApprovedByName}
+                        onChange={e => setHodApprovedByName(e.target.value)}
+                        className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg font-bold text-slate-800"
+                      >
+                        <option value="">-- Chagua Kiongozi Aliyetoa Idhini --</option>
+                        {teachers.map(t => (
+                          <option key={t.id} value={t.name}>
+                            {t.name} {t.schoolRole ? `(${t.schoolRole})` : ''}
+                          </option>
+                        ))}
+                        <option value="Academic Master">Academic Master (Taaluma)</option>
+                        <option value="Headmaster / Headmistress">Headmaster / Headmistress</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-amber-950 uppercase mb-1">
+                        Sababu ya Uteuzi *
+                      </label>
+                      <input
+                        type="text"
+                        value={hodOverrideReason}
+                        onChange={e => setHodOverrideReason(e.target.value)}
+                        placeholder="e.g. Mwalimu mkuu hayupo / Dharura ya kusahihisha"
+                        className="w-full px-3 py-2 bg-white border border-amber-300 rounded-lg font-medium text-slate-800"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {isAuthorizedToEnterMarks && isHODOverrideActive && (
+            <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3 text-xs text-emerald-900 font-bold flex items-center justify-between shadow-2xs animate-in fade-in">
+              <span className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                <span>👑 Kibali cha HOD Kimethibitishwa: Unaingiza alama za {selectedSubject} ({selectedClass}) chini ya idhini ya {hodApprovedByName}.</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setIsHODOverrideActive(false)}
+                className="text-[11px] text-emerald-700 hover:text-emerald-900 underline cursor-pointer"
+              >
+                Funga Kibali
+              </button>
+            </div>
+          )}
+
           {/* Mark Entry Table */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
             <div className="p-4 border-b border-slate-200 bg-slate-50 flex items-center justify-between">
@@ -1010,16 +1229,20 @@ export const MarkEntryView: React.FC<MarkEntryViewProps> = ({
                                   type="number"
                                   min="0"
                                   max="100"
-                                  disabled={isExamLocked}
+                                  disabled={isExamLocked || !isAuthorizedToEnterMarks}
                                   value={currentScore}
                                   onChange={e => handleScoreChange(st.id, e.target.value)}
-                                  placeholder={isExamLocked ? "Locked" : "0-100"}
+                                  placeholder={isExamLocked ? "Locked" : (!isAuthorizedToEnterMarks ? "HOD" : "0-100")}
                                   className={`w-20 px-2.5 py-1 text-center font-bold text-sm rounded-lg outline-none transition ${
-                                    isExamLocked
+                                    isExamLocked || !isAuthorizedToEnterMarks
                                       ? 'bg-slate-100 text-slate-400 border border-slate-300 cursor-not-allowed opacity-80'
                                       : 'bg-white border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-blue-500'
                                   }`}
-                                  title={isExamLocked ? "Mtihani umefungwa, huwezi kuandika alama" : "Ingiza alama 0-100"}
+                                  title={
+                                    isExamLocked 
+                                      ? "Mtihani umefungwa, huwezi kuandika alama" 
+                                      : (!isAuthorizedToEnterMarks ? "Huna idhini ya HOD kuingiza alama za somo hili" : "Ingiza alama 0-100")
+                                  }
                                 />
                               </div>
                             ) : (

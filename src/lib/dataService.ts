@@ -174,3 +174,11 @@ export async function getPastPapers(schoolId: string) {
   if (!response.ok) return [];
   return await response.json();
 }
+/**
+ * Fetch class assigned to a monitor
+ */
+export async function getMonitorClass(schoolId: string, monitorId: string) {
+  const response = await fetch(`/api/classes/monitor?schoolId=${encodeURIComponent(schoolId)}&monitorId=${encodeURIComponent(monitorId)}`);
+  if (!response.ok) return null;
+  return await response.json();
+}

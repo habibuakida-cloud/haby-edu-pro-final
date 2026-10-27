@@ -14,8 +14,11 @@ import {
   RefreshCw,
   X,
   CheckCircle2,
-  Database
+  Database,
+  FileText
 } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { SchoolInfo, Student } from '../../types';
 import { downloadFile, escapeCSV } from '../../utils/export';
 
@@ -133,6 +136,9 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
 
   const [copiedText, setCopiedText] = useState<string | null>(null);
   const [isSavingToDb, setIsSavingToDb] = useState<boolean>(false);
+  const [isExportingCardsPDF, setIsExportingCardsPDF] = useState<boolean>(false);
+  const [isExportingListPDF, setIsExportingListPDF] = useState<boolean>(false);
+  const [pdfProgressText, setPdfProgressText] = useState<string | null>(null);
 
   // Available classes and streams from students
   const availableClasses = useMemo(() => {
@@ -482,6 +488,496 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
     setTimeout(() => setCopiedText(null), 4000);
   };
 
+  // Resolve student object for a generated NECTA number at index
+  const getStudentForNumber = (numStr: string, idx: number): Student | undefined => {
+    const explicitStudentId = assignments[numStr];
+    const autoStudent =
+      genMode === 'students' ? filteredSortedStudents[idx] : students.find(s => s.regNo === numStr);
+    return explicitStudentId
+      ? students.find(s => String(s.id) === String(explicitStudentId))
+      : autoStudent;
+  };
+
+  // Helper: Draw rounded rectangle on HTML5 2D Canvas
+  const drawRoundRect = (
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+    fillColor?: string | null,
+    strokeColor?: string | null,
+    lineWidth: number = 1
+  ) => {
+    const radius = Math.max(0, Math.min(r, w / 2, h / 2));
+    ctx.beginPath();
+    ctx.moveTo(x + radius, y);
+    ctx.lineTo(x + w - radius, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + radius);
+    ctx.lineTo(x + w, y + h - radius);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - radius, y + h);
+    ctx.lineTo(x + radius, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - radius);
+    ctx.lineTo(x, y + radius);
+    ctx.quadraticCurveTo(x, y, x + radius, y);
+    ctx.closePath();
+    if (fillColor) {
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+    }
+    if (strokeColor) {
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
+    }
+  };
+
+  // Export Official NECTA Candidate Registration / Index Numbers List Table as PDF
+  const handleExportListPDF = () => {
+    if (generatedNumbers.length === 0) return;
+    setIsExportingListPDF(true);
+    try {
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const pageW = doc.internal.pageSize.getWidth();
+      const schoolTitle = (schoolInfo?.name || 'TANZANIA SECONDARY SCHOOL').toUpperCase();
+      const classLabel =
+        genMode === 'students'
+          ? `${selectedClass === 'ALL' ? 'MADARASA YOTE' : selectedClass.toUpperCase()}${
+              selectedStream !== 'ALL' ? ` (STREAM ${selectedStream})` : ''
+            }`
+          : `KITUO: ${prefix}`;
+
+      // Tanzania National Flag Ribbon
+      doc.setFillColor(30, 181, 58);
+      doc.rect(14, 10, (pageW - 28) * 0.32, 2.2, 'F');
+      doc.setFillColor(252, 209, 22);
+      doc.rect(14 + (pageW - 28) * 0.32, 10, (pageW - 28) * 0.03, 2.2, 'F');
+      doc.setFillColor(0, 0, 0);
+      doc.rect(14 + (pageW - 28) * 0.35, 10, (pageW - 28) * 0.3, 2.2, 'F');
+      doc.setFillColor(252, 209, 22);
+      doc.rect(14 + (pageW - 28) * 0.65, 10, (pageW - 28) * 0.03, 2.2, 'F');
+      doc.setFillColor(0, 163, 221);
+      doc.rect(14 + (pageW - 28) * 0.68, 10, (pageW - 28) * 0.32, 2.2, 'F');
+
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9.5);
+      doc.setTextColor(71, 85, 105);
+      doc.text('JAMHURI YA MUUNGANO WA TANZANIA — BARAZA LA MITIHANI (NECTA)', pageW / 2, 17.5, {
+        align: 'center'
+      });
+
+      doc.setFontSize(13.5);
+      doc.setTextColor(15, 23, 42);
+      doc.text(schoolTitle, pageW / 2, 23.5, { align: 'center' });
+
+      doc.setFillColor(120, 53, 15);
+      doc.roundedRect(22, 26.5, pageW - 44, 7.5, 1.5, 1.5, 'F');
+      doc.setFontSize(9.5);
+      doc.setTextColor(255, 255, 255);
+      doc.text(
+        `ORODHA YA NAMBA ZA USAJILI NA MTIHANI ZA NECTA (${classLabel})`,
+        pageW / 2,
+        31.5,
+        { align: 'center' }
+      );
+
+      let girlsCount = 0;
+      let boysCount = 0;
+
+      const tableRows = generatedNumbers.map((numStr, idx) => {
+        const st = getStudentForNumber(numStr, idx);
+        const fullName = st ? (st.name || st.fullName || '').toUpperCase() : '— HAJAKABIDHIWA —';
+        const rawGender = st ? (st.gender || st.sex || '').toUpperCase() : '';
+        const isFemale = rawGender.startsWith('F') || rawGender === 'KE';
+        const isMale = rawGender.startsWith('M') || rawGender === 'ME';
+        if (isFemale) girlsCount++;
+        else if (isMale) boysCount++;
+
+        const genderLabel = isFemale ? 'F (KE)' : isMale ? 'M (ME)' : rawGender || '-';
+        const clsStream = st
+          ? `${st.className || ''}${st.stream ? ` - ${st.stream}` : ''}`.trim() || '-'
+          : selectedClass !== 'ALL'
+          ? selectedClass
+          : '-';
+
+        return [String(idx + 1), numStr, fullName, genderLabel, clsStream, ''];
+      });
+
+      // Summary Metadata Bar
+      doc.setFontSize(8.5);
+      doc.setTextColor(30, 41, 59);
+      const rangeStr = `${generatedNumbers[0]}  hadi  ${generatedNumbers[generatedNumbers.length - 1]}`;
+      doc.text(`Namba za Mtihani: ${rangeStr}`, 14, 40);
+      doc.text(
+        `Jumla ya Namba: ${generatedNumbers.length}   |   Wasichana (F): ${girlsCount}   |   Wavulana (M): ${boysCount}   |   Tarehe: ${new Date().toLocaleDateString('en-GB')}`,
+        pageW - 14,
+        40,
+        { align: 'right' }
+      );
+
+      autoTable(doc, {
+        startY: 43,
+        head: [
+          [
+            'S/N',
+            'NAMBA YA MTIHANI (NECTA NO)',
+            'JINA KAMILI LA MTAHINIWA',
+            'JINSIA',
+            'DARASA / MKONDO',
+            'SAHIHI YA MTAHINIWA'
+          ]
+        ],
+        body: tableRows,
+        theme: 'grid',
+        styles: {
+          fontSize: 8.5,
+          cellPadding: 2.3,
+          textColor: [15, 23, 42],
+          lineColor: [203, 213, 225],
+          lineWidth: 0.25
+        },
+        headStyles: {
+          fillColor: [30, 58, 138],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          halign: 'center'
+        },
+        columnStyles: {
+          0: { halign: 'center', cellWidth: 12, fontStyle: 'bold' },
+          1: { halign: 'center', cellWidth: 38, fontStyle: 'bold', font: 'courier', textColor: [120, 53, 15] },
+          2: { halign: 'left', cellWidth: 64, fontStyle: 'bold' },
+          3: { halign: 'center', cellWidth: 18 },
+          4: { halign: 'center', cellWidth: 28 },
+          5: { halign: 'center', cellWidth: 26 }
+        },
+        alternateRowStyles: {
+          fillColor: [248, 250, 252]
+        },
+        didDrawPage: (data) => {
+          const pageCount = (doc as any).internal.getNumberOfPages();
+          doc.setFontSize(7.5);
+          doc.setTextColor(100, 116, 139);
+          doc.text(
+            `${schoolTitle} — Orodha ya Namba za Mtihani (${prefix}) — Ukurasa ${data.pageNumber} kati ya ${pageCount}`,
+            pageW / 2,
+            290,
+            { align: 'center' }
+          );
+        }
+      });
+
+      const finalY = (doc as any).lastAutoTable?.finalY || 240;
+      if (finalY < 262) {
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(8.5);
+        doc.setTextColor(30, 41, 59);
+        doc.text('JINA LA MTAALUMA (ACADEMIC MASTER): ____________________________', 14, finalY + 12);
+        doc.text('SAHIHI: ___________________', pageW - 14, finalY + 12, { align: 'right' });
+        doc.text('JINA LA MKUU WA SHULE: ________________________________________', 14, finalY + 21);
+        doc.text('MHURI RASMI WA SHULE', pageW - 14, finalY + 21, { align: 'right' });
+      }
+
+      const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '_');
+      const fileName = `ORODHA_NAMBA_ZA_NECTA_${cleanPrefix}_${generatedNumbers.length}.pdf`;
+      doc.save(fileName);
+      setCopiedText(`PDF ya Orodha ya Namba za NECTA (${fileName}) imepakuliwa kikamilifu!`);
+      setTimeout(() => setCopiedText(null), 4500);
+    } catch (err) {
+      console.error('Export List PDF error:', err);
+      setCopiedText('Hitilafu imetokea wakati wa kuandaa PDF ya orodha. Tafadhali jaribu tena.');
+      setTimeout(() => setCopiedText(null), 4000);
+    } finally {
+      setIsExportingListPDF(false);
+    }
+  };
+
+  // Export Decorated NECTA Registration Number Cards (2 Columns per A4 Page with Styled Borders & Cutting Lines)
+  const handleExportCardsPDF = async () => {
+    if (generatedNumbers.length === 0) return;
+    setIsExportingCardsPDF(true);
+    setPdfProgressText('Inaandaa kadi za namba za NECTA...');
+
+    try {
+      const rowsPerPage = cardSize === 'compact' ? 5 : cardSize === 'large' ? 3 : 4;
+      const cardsPerPage = rowsPerPage * 2;
+      const totalPages = Math.ceil(generatedNumbers.length / cardsPerPage);
+
+      const pdf = new jsPDF({
+        orientation: 'portrait',
+        unit: 'mm',
+        format: 'a4',
+        compress: true
+      });
+
+      const pageW = 794; // A4 Portrait logical width at 96 DPI
+      const pageH = 1123; // A4 Portrait logical height at 96 DPI
+      const scale = 2.6; // Crisp high-DPI output
+
+      const canvasFontFamily =
+        fontFamily === 'font-mono' || fontFamily === 'font-courier'
+          ? 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Courier New", monospace'
+          : fontFamily === 'font-sans' || fontFamily === 'font-impact'
+          ? 'Inter, system-ui, -apple-system, Arial, sans-serif'
+          : 'Georgia, "Times New Roman", Times, serif';
+
+      const baseFontPx =
+        fontSize === 'text-2xl'
+          ? 24
+          : fontSize === 'text-3xl'
+          ? 29
+          : fontSize === 'text-5xl'
+          ? 40
+          : fontSize === 'text-6xl'
+          ? 46
+          : 34;
+
+      const schoolTitle = (schoolInfo?.name || 'TANZANIA SECONDARY SCHOOL').toUpperCase();
+
+      for (let pageIdx = 0; pageIdx < totalPages; pageIdx++) {
+        setPdfProgressText(
+          totalPages > 1
+            ? `Inatengeneza PDF ukurasa ${pageIdx + 1} kati ya ${totalPages}...`
+            : 'Inatengeneza PDF ya kadi za namba...'
+        );
+        await new Promise(resolve => setTimeout(resolve, 15));
+
+        if (pageIdx > 0) {
+          pdf.addPage('a4', 'portrait');
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(pageW * scale);
+        canvas.height = Math.round(pageH * scale);
+        const ctx = canvas.getContext('2d');
+        if (!ctx) continue;
+        ctx.scale(scale, scale);
+
+        // Page White Background
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, pageW, pageH);
+
+        const padX = 26;
+        const topHeaderY = 18;
+        const contentW = pageW - padX * 2;
+
+        // Top Page Header Bar
+        ctx.fillStyle = '#0f172a';
+        ctx.font = '900 12px Inter, Arial, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(
+          `${schoolTitle} — KADI ZA NAMBA ZA USAJILI / MTIHANI ZA NECTA (${prefix})`,
+          padX,
+          topHeaderY + 8
+        );
+
+        ctx.fillStyle = '#64748b';
+        ctx.font = '800 10px Inter, Arial, sans-serif';
+        ctx.textAlign = 'right';
+        ctx.fillText(
+          `Ukurasa ${pageIdx + 1} / ${totalPages}  (Jumla: ${generatedNumbers.length} Namba)`,
+          pageW - padX,
+          topHeaderY + 8
+        );
+
+        ctx.strokeStyle = '#cbd5e1';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(padX, topHeaderY + 20);
+        ctx.lineTo(pageW - padX, topHeaderY + 20);
+        ctx.stroke();
+
+        // Grid Geometry (2 Columns x rowsPerPage Rows)
+        const gridTop = topHeaderY + 30;
+        const gridBottom = pageH - 24;
+        const availH = gridBottom - gridTop;
+        const colGap = 18;
+        const rowGap = 16;
+        const cellW = (contentW - colGap) / 2;
+        const cellH = (availH - rowGap * (rowsPerPage - 1)) / rowsPerPage;
+
+        const sliceStart = pageIdx * cardsPerPage;
+        const pageNumbers = generatedNumbers.slice(sliceStart, sliceStart + cardsPerPage);
+
+        pageNumbers.forEach((numStr, localIdx) => {
+          const globalIdx = sliceStart + localIdx;
+          const col = localIdx % 2;
+          const row = Math.floor(localIdx / 2);
+
+          const cellX = padX + col * (cellW + colGap);
+          const cellY = gridTop + row * (cellH + rowGap);
+
+          // 1. Outer Dashed Cutting Line Box ("Kipande cha kukata")
+          ctx.save();
+          ctx.setLineDash([6, 4]);
+          drawRoundRect(ctx, cellX, cellY, cellW, cellH, 14, '#f8fafc', '#475569', 1.8);
+          ctx.restore();
+
+          // Inner Decorated Card Bounds
+          const inPad = 10;
+          const cardX = cellX + inPad;
+          const cardY = cellY + inPad;
+          const cardW = cellW - inPad * 2;
+          const cardH = cellH - inPad * 2;
+
+          // 2. Render Selected Border Style & Card Background
+          drawRoundRect(ctx, cardX, cardY, cardW, cardH, 12, cardBg || '#FFFDF9', null, 0);
+
+          if (borderStyle === 'report-card-tz' || borderStyle === 'tanzania-flag') {
+            const grad = ctx.createLinearGradient(cardX, cardY, cardX + cardW, cardY + cardH);
+            grad.addColorStop(0, '#1EB53A');
+            grad.addColorStop(0.32, '#1EB53A');
+            grad.addColorStop(0.37, '#FCD116');
+            grad.addColorStop(0.42, '#000000');
+            grad.addColorStop(0.58, '#000000');
+            grad.addColorStop(0.63, '#FCD116');
+            grad.addColorStop(0.68, '#00A3E0');
+            grad.addColorStop(1, '#00A3E0');
+            ctx.save();
+            ctx.strokeStyle = grad;
+            ctx.lineWidth = 6;
+            ctx.strokeRect(cardX + 3, cardY + 3, cardW - 6, cardH - 6);
+            ctx.strokeStyle = '#FCD116';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(cardX + 8, cardY + 8, cardW - 16, cardH - 16);
+            ctx.restore();
+          } else if (
+            borderStyle === 'report-card-navy' ||
+            borderStyle === 'report-card-certificate' ||
+            borderStyle === 'diamond-double'
+          ) {
+            drawRoundRect(ctx, cardX + 2, cardY + 2, cardW - 4, cardH - 4, 10, null, '#1f4d8b', 4);
+            drawRoundRect(ctx, cardX + 7, cardY + 7, cardW - 14, cardH - 14, 7, null, '#D4AF37', 2);
+          } else if (
+            borderStyle === 'gold-double' ||
+            borderStyle === 'double' ||
+            borderStyle === 'royal-ribbon'
+          ) {
+            const bCol = borderStyle === 'royal-ribbon' ? '#1EB53A' : borderColor || '#D4AF37';
+            drawRoundRect(ctx, cardX + 2, cardY + 2, cardW - 4, cardH - 4, 10, null, bCol, 3.5);
+            drawRoundRect(ctx, cardX + 7, cardY + 7, cardW - 14, cardH - 14, 7, null, bCol, 1.5);
+          } else if (borderStyle === 'dashed') {
+            ctx.save();
+            ctx.setLineDash([7, 4]);
+            drawRoundRect(
+              ctx,
+              cardX + 3,
+              cardY + 3,
+              cardW - 6,
+              cardH - 6,
+              10,
+              null,
+              borderColor || '#D4AF37',
+              Math.max(2, borderWidth)
+            );
+            ctx.restore();
+          } else if (borderStyle === 'dotted') {
+            ctx.save();
+            ctx.setLineDash([2.5, 3.5]);
+            drawRoundRect(
+              ctx,
+              cardX + 3,
+              cardY + 3,
+              cardW - 6,
+              cardH - 6,
+              10,
+              null,
+              borderColor || '#D4AF37',
+              Math.max(2.5, borderWidth)
+            );
+            ctx.restore();
+          } else {
+            drawRoundRect(
+              ctx,
+              cardX + 2.5,
+              cardY + 2.5,
+              cardW - 5,
+              cardH - 5,
+              10,
+              null,
+              borderColor || '#D4AF37',
+              Math.max(2.5, borderWidth)
+            );
+          }
+
+          // 3. Top Cutting Hint & Card Index Number (#1, #2, ...)
+          ctx.fillStyle = '#64748b';
+          ctx.font = '700 9px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+          ctx.textAlign = 'left';
+          ctx.fillText(`✂ Kata Hapa (#${globalIdx + 1})`, cardX + 14, cardY + 18);
+
+          ctx.fillStyle = '#334155';
+          ctx.font = '900 10.5px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+          ctx.textAlign = 'right';
+          ctx.fillText(`#${globalIdx + 1}`, cardX + cardW - 14, cardY + 18);
+
+          // 4. Center Candidate Registration Number (Auto-scaled so long numbers never clip)
+          const stObj = getStudentForNumber(numStr, globalIdx);
+          const hasStudentFooter = Boolean(stObj);
+          const numberCenterY = hasStudentFooter ? cardY + cardH * 0.46 : cardY + cardH * 0.54;
+
+          const weightStr = isBold ? '900' : '600';
+          const styleStr = isItalic ? 'italic ' : '';
+          let fittedFontPx = baseFontPx;
+          ctx.font = `${styleStr}${weightStr} ${fittedFontPx}px ${canvasFontFamily}`;
+          const maxTextW = cardW - 32;
+          while (ctx.measureText(numStr).width > maxTextW && fittedFontPx > 16) {
+            fittedFontPx -= 2;
+            ctx.font = `${styleStr}${weightStr} ${fittedFontPx}px ${canvasFontFamily}`;
+          }
+
+          ctx.fillStyle = textColor || '#1E293B';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(numStr, cardX + cardW / 2, numberCenterY);
+
+          // 5. Bottom Student Info Strip (if assigned) or School Subtitle
+          const footerLineY = cardY + cardH - 34;
+          ctx.strokeStyle = '#e2e8f0';
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(cardX + 16, footerLineY);
+          ctx.lineTo(cardX + cardW - 16, footerLineY);
+          ctx.stroke();
+
+          if (stObj) {
+            const stName = (stObj.name || stObj.fullName || '').toUpperCase();
+            const stMeta = `(${stObj.className || 'Form'}${
+              stObj.gender ? ` • ${stObj.gender.charAt(0).toUpperCase()}` : ''
+            })`;
+            ctx.fillStyle = '#0f172a';
+            ctx.font = '800 10.5px Inter, Arial, sans-serif';
+            const combinedText = `${stName} ${stMeta}`;
+            const clippedText =
+              combinedText.length > 42 ? combinedText.slice(0, 40) + '...' : combinedText;
+            ctx.fillText(clippedText, cardX + cardW / 2, footerLineY + 15);
+          } else {
+            ctx.fillStyle = '#64748b';
+            ctx.font = '700 9.5px Inter, Arial, sans-serif';
+            ctx.fillText(schoolTitle.slice(0, 42), cardX + cardW / 2, footerLineY + 15);
+          }
+        });
+
+        const imgData = canvas.toDataURL('image/png', 1.0);
+        pdf.addImage(imgData, 'PNG', 3, 3, 204, 291, undefined, 'FAST');
+      }
+
+      const cleanPrefix = prefix.replace(/[^a-zA-Z0-9]/g, '_');
+      const fileName = `KADI_ZA_NAMBA_ZA_NECTA_${cleanPrefix}_${generatedNumbers.length}.pdf`;
+      pdf.save(fileName);
+      setCopiedText(`PDF ya Kadi za Namba za NECTA (${fileName}) imepakuliwa kikamilifu!`);
+      setTimeout(() => setCopiedText(null), 4500);
+    } catch (err) {
+      console.error('Export Cards PDF error:', err);
+      setCopiedText('Hitilafu imetokea wakati wa kuandaa PDF ya kadi za namba.');
+      setTimeout(() => setCopiedText(null), 4000);
+    } finally {
+      setIsExportingCardsPDF(false);
+      setPdfProgressText(null);
+    }
+  };
+
   const borderOptions: { id: BorderStyleOption; label: string; desc: string }[] = [
     { id: 'report-card-tz', label: '🎓 Boda ya Ripoti za Wanafunzi (Official Flag Gradient)', desc: 'Boda halisi ya taifa inayotumika kwenye ripoti za matokeo za wanafunzi' },
     { id: 'report-card-navy', label: '📜 Boda ya Ripoti ya Kifalme (Royal Navy & Gold)', desc: 'Boda ya ripoti yenye bluu ya kifalme na mstari wa dhahabu' },
@@ -703,6 +1199,28 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
             </button>
             <button
               type="button"
+              onClick={handleExportCardsPDF}
+              disabled={isExportingCardsPDF}
+              className="px-4 py-2.5 bg-amber-400 hover:bg-amber-300 text-amber-950 rounded-xl font-black text-xs sm:text-sm flex items-center gap-2 transition shadow-lg cursor-pointer disabled:opacity-60"
+            >
+              <Download className="w-4 h-4" />
+              <span>
+                {isExportingCardsPDF
+                  ? pdfProgressText || 'Inaandaa PDF...'
+                  : 'Export PDF (Kadi za Namba)'}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportListPDF}
+              disabled={isExportingListPDF}
+              className="px-4 py-2.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-black text-xs sm:text-sm flex items-center gap-2 transition shadow-md cursor-pointer disabled:opacity-60"
+            >
+              <FileText className="w-4 h-4" />
+              <span>{isExportingListPDF ? 'Inaandaa Orodha...' : 'Export PDF (Orodha & Majina)'}</span>
+            </button>
+            <button
+              type="button"
               onClick={handleExportCSV}
               className="px-4 py-2.5 bg-amber-700/80 hover:bg-amber-600 text-white rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition shadow-md cursor-pointer"
             >
@@ -718,9 +1236,9 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
             <button
               type="button"
               onClick={handlePrint}
-              className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 text-amber-950 rounded-xl font-black text-xs sm:text-sm flex items-center gap-2 transition shadow-lg cursor-pointer"
+              className="px-4 py-2.5 bg-white/15 hover:bg-white/25 text-white border border-amber-300/40 rounded-xl font-bold text-xs sm:text-sm flex items-center gap-2 transition shadow-md cursor-pointer"
             >
-              <Printer className="w-4 h-4" /> Chapisha Kadi (A4)
+              <Printer className="w-4 h-4" /> Print (A4)
             </button>
           </div>
         </div>
@@ -1148,6 +1666,24 @@ export const NectaNumberStudio: React.FC<NectaNumberStudioProps> = ({
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 print:hidden">
+            <button
+              type="button"
+              onClick={handleExportCardsPDF}
+              disabled={isExportingCardsPDF}
+              className="px-3.5 py-1.5 bg-amber-500 hover:bg-amber-600 text-slate-950 rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer transition disabled:opacity-60"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>{isExportingCardsPDF ? 'Inaandaa PDF...' : 'Export PDF (Kadi za Namba)'}</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleExportListPDF}
+              disabled={isExportingListPDF}
+              className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black flex items-center gap-1.5 shadow-xs cursor-pointer transition disabled:opacity-60"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>{isExportingListPDF ? 'Inaandaa PDF...' : 'Export PDF (Orodha & Majina)'}</span>
+            </button>
             {Object.keys(assignments).length > 0 && onUpdateStudents && (
               <button
                 type="button"

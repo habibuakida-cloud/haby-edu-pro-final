@@ -27,7 +27,8 @@ import {
   Smartphone,
   Send,
   Trash2,
-  Trophy
+  Trophy,
+  BookOpen
 } from 'lucide-react';
 import { 
   ExaminationRecord, 
@@ -51,12 +52,16 @@ import { AutoPromotionModal } from './AutoPromotionModal';
 import { HistoryAuditModal } from './HistoryAuditModal';
 import { BulkWhatsAppModal } from './BulkWhatsAppModal';
 import { TopPerformersLeaderboard } from './TopPerformersLeaderboard';
+import { ExamMaterialFlowDashboard } from './ExamMaterialFlowDashboard';
 import { GenderSummary, formatGenderSummaryText } from '../common/GenderSummary';
 import { HabyEduProLogo } from '../common/HabyEduProLogo';
 import { PerformanceInsightModal } from './PerformanceInsightModal';
+import { NectaAnswerSheetGeneratorModal } from './NectaAnswerSheetGeneratorModal';
+import { Teacher } from '../../types';
 
 interface ExaminationRecordsViewProps {
   students: Student[];
+  teachers?: Teacher[];
   examinationRecords: ExaminationRecord[];
   promotionHistory: PromotionHistory[];
   transferHistory: TransferHistory[];
@@ -68,6 +73,7 @@ interface ExaminationRecordsViewProps {
   currentUserName?: string;
   onNavigateToSms?: (examType?: string, year?: string) => void;
   onNavigateToNectaAnalyzer?: () => void;
+  onNavigateToInvigilation?: () => void;
 }
 
 export type ViewToggleMode = 'marks' | 'grade' | 'both';
@@ -85,6 +91,7 @@ export type QuickGradeFilter = 'ALL' | 'A' | 'B' | 'C' | 'D' | 'F' | 'TOP_10' | 
 
 export const ExaminationRecordsView: React.FC<ExaminationRecordsViewProps> = ({
   students,
+  teachers = [],
   examinationRecords,
   promotionHistory,
   transferHistory,
@@ -95,10 +102,11 @@ export const ExaminationRecordsView: React.FC<ExaminationRecordsViewProps> = ({
   onUpdateTransferHistory,
   currentUserName = 'Academic Master',
   onNavigateToSms,
-  onNavigateToNectaAnalyzer
+  onNavigateToNectaAnalyzer,
+  onNavigateToInvigilation
 }) => {
   // Filters
-  const [activeSubView, setActiveSubView] = useState<'ledger' | 'leaderboard'>('ledger');
+  const [activeSubView, setActiveSubView] = useState<'ledger' | 'leaderboard' | 'flow'>('ledger');
   const [selectedYear, setSelectedYear] = useState<string>('2026');
   const [selectedClass, setSelectedClass] = useState<string>('All');
   const [selectedStream, setSelectedStream] = useState<string>('All');
@@ -158,6 +166,7 @@ export const ExaminationRecordsView: React.FC<ExaminationRecordsViewProps> = ({
   const [isBulkWhatsAppOpen, setIsBulkWhatsAppOpen] = useState<boolean>(false);
   const [isPdfExportModalOpen, setIsPdfExportModalOpen] = useState<boolean>(false);
   const [isInsightModalOpen, setIsInsightModalOpen] = useState<boolean>(false);
+  const [isNectaAnswerSheetOpen, setIsNectaAnswerSheetOpen] = useState<boolean>(false);
   const [performanceInsight, setPerformanceInsight] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
 
@@ -427,7 +436,7 @@ export const ExaminationRecordsView: React.FC<ExaminationRecordsViewProps> = ({
   const handleWhatsAppStudent = (rec: ExaminationRecord) => {
     const pointsStr = rec.points !== undefined && rec.points !== null ? String(rec.points) : '-';
     const divStr = rec.division || rec.overallGrade || '-';
-    const remarks = getGradeRemark(rec.overallGrade);
+    const remarks = getGradeRemark(rec.overallGrade as any);
 
     const subjectStrings: string[] = [];
     if (rec.subjects) {
@@ -524,6 +533,16 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
 
             <button
               type="button"
+              onClick={() => setIsNectaAnswerSheetOpen(true)}
+              className="px-4 py-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-600 hover:from-amber-600 hover:to-yellow-700 text-slate-950 font-black rounded-xl text-xs shadow-md flex items-center gap-2 transition cursor-pointer active:scale-[0.98] border border-amber-300"
+              title="Tengeneza karatasi rasmi za kujibia mitihani za NECTA (Answer Sheets for Form 4 & Form 6)"
+            >
+              <BookOpen className="w-4 h-4 text-slate-950" />
+              <span>📄 Karatasi za Kujibia (NECTA Answer Sheets)</span>
+            </button>
+
+            <button
+              type="button"
               onClick={() => setIsPdfExportModalOpen(true)}
               className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-700 hover:from-blue-700 hover:to-indigo-800 text-white font-black rounded-xl text-xs shadow-md flex items-center gap-2 transition cursor-pointer active:scale-[0.98] border border-blue-400"
               title="Export results ledger as clean, printable PDF with remarks and signatures"
@@ -577,7 +596,7 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
 
       {/* Sub-view switcher tabs (no-print) */}
       <div className="no-print flex items-center justify-between bg-white p-2 rounded-2xl border border-slate-200 shadow-xs flex-wrap gap-2">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <button
             type="button"
             onClick={() => setActiveSubView('ledger')}
@@ -590,6 +609,23 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
             <FileSpreadsheet className="w-4 h-4" />
             <span>Examination Broadsheet Ledger</span>
           </button>
+          
+          <button
+            type="button"
+            onClick={() => setActiveSubView('flow')}
+            className={`px-4 py-2 rounded-xl text-xs font-black transition cursor-pointer flex items-center gap-2 ${
+              activeSubView === 'flow'
+                ? 'bg-gradient-to-r from-indigo-600 to-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-indigo-400" />
+            <span>Exam Material Flow (Mtiririko wa Mitihani)</span>
+            <span className="px-1.5 py-0.5 rounded-full text-[9px] font-black bg-indigo-500 text-white">
+              SUMMARY
+            </span>
+          </button>
+
           <button
             type="button"
             onClick={() => setActiveSubView('leaderboard')}
@@ -607,16 +643,27 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
           </button>
         </div>
 
-        <div className="text-xs text-slate-500 font-medium px-2 hidden sm:block">
+        <div className="text-xs text-slate-500 font-medium px-2 hidden lg:block">
           {activeSubView === 'leaderboard' ? (
             <span className="text-amber-800 font-bold">Ubao wa Vinara na Nafasi za Masomo (Live Ranking)</span>
+          ) : activeSubView === 'flow' ? (
+            <span className="text-indigo-800 font-bold">Matrix ya Udhibiti wa Mitihani na Script za Watahiniwa</span>
           ) : (
             <span>Ledger ya Alama, Ufaulu na Madaraja ya NECTA</span>
           )}
         </div>
       </div>
 
-      {activeSubView === 'leaderboard' ? (
+      {activeSubView === 'flow' ? (
+        <ExamMaterialFlowDashboard
+          schoolId={typeof window !== 'undefined' ? (localStorage.getItem('currentSchoolId') || localStorage.getItem('schoolId') || 'DEMO_SCHOOL') : 'DEMO_SCHOOL'}
+          teachers={teachers}
+          schoolInfo={schoolInfo}
+          students={students}
+          examinationRecords={examinationRecords}
+          onNavigateToInvigilation={onNavigateToInvigilation}
+        />
+      ) : activeSubView === 'leaderboard' ? (
         <TopPerformersLeaderboard
           examinationRecords={examinationRecords}
           students={students}
@@ -1682,6 +1729,14 @@ Total: ${rec.totalMarks} Avg: ${rec.averageMarks}% Points: ${pointsStr} Div: ${d
         isOpen={isInsightModalOpen} 
         onClose={() => setIsInsightModalOpen(false)} 
         insight={performanceInsight} 
+      />
+
+      <NectaAnswerSheetGeneratorModal
+        isOpen={isNectaAnswerSheetOpen}
+        onClose={() => setIsNectaAnswerSheetOpen(false)}
+        schoolInfo={schoolInfo}
+        students={students}
+        selectedClass={selectedClass}
       />
     </div>
   );

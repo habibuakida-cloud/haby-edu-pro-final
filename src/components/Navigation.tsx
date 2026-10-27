@@ -30,11 +30,15 @@ import {
   Wifi,
   CheckCircle2,
   Copy,
-  ExternalLink
+  ExternalLink,
+  Sun,
+  Moon,
+  KeyRound
 } from 'lucide-react';
 import { SchoolInfo, UserAccount } from '../types';
 import { HabyEduProLogo } from './common/HabyEduProLogo';
 import { ThemeCustomizerModal } from './common/ThemeCustomizerModal';
+import { ChangePasswordModal } from './common/ChangePasswordModal';
 import { ActiveView, MAIN_MODULE_GROUPS, MainModuleGroup } from '../routes';
 import { getCurrentSchoolId, db, DEFAULT_PRIMARY_SCHOOL_ID } from '../lib/dbClient';
 import { INITIAL_STUDENTS, INITIAL_TEACHERS, INITIAL_EXAMS, INITIAL_EXAMINATION_RECORDS } from '../constants/defaults';
@@ -200,6 +204,8 @@ interface NavigationProps {
   onStartTour?: () => void;
   isSidebarCollapsed?: boolean;
   onToggleSidebar?: () => void;
+  isDarkMode?: boolean;
+  onToggleDarkMode?: () => void;
 }
 
 // Text Highlighter Helper Component
@@ -234,7 +240,9 @@ export const Navigation: React.FC<NavigationProps> = ({
   isSyncing = false,
   onStartTour,
   isSidebarCollapsed = false,
-  onToggleSidebar
+  onToggleSidebar,
+  isDarkMode = false,
+  onToggleDarkMode
 }) => {
   const isTeacher = currentUser?.role === 'TEACHER';
   const [searchQuery, setSearchQuery] = useState('');
@@ -242,6 +250,7 @@ export const Navigation: React.FC<NavigationProps> = ({
   const [showThemeMenu, setShowThemeMenu] = useState(false);
   const [isThemeStudioOpen, setIsThemeStudioOpen] = useState(false);
   const [showDatabaseModal, setShowDatabaseModal] = useState(false);
+  const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
   const [dbLatency, setDbLatency] = useState<number | null>(null);
   const [isTestingDb, setIsTestingDb] = useState(false);
   const [testFeedback, setTestFeedback] = useState<string | null>(null);
@@ -325,8 +334,9 @@ export const Navigation: React.FC<NavigationProps> = ({
   // Track expanded state for all 9 main collapsible modules
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>(() => {
     const initial: Record<string, boolean> = {
+      monitor_portal_group: true,
       people_management: true,
-      teaching: false,
+      teaching: true,
       academic_exams: true,
       timetable_invigilation: true,
       student_affairs: false,
@@ -367,25 +377,60 @@ export const Navigation: React.FC<NavigationProps> = ({
 
   // Real-time search filtering across module titles, sub-modules and descriptions
   const filteredModuleGroups = useMemo(() => {
-    if (isTeacher) {
+    const q = searchQuery.toLowerCase().trim();
+    
+    // Base groups starting with Teacher/Monitor portals if applicable
+    let baseGroups = [...MAIN_MODULE_GROUPS];
+
+    // Add Monitor & Monitress Portal at the top of sidebar for all Admins, Headmasters, Academic Masters, and Teachers
+    baseGroups = [
+      {
+        id: 'monitor_portal_group',
+        title: 'MONITOR & MONITRESS PORTAL',
+        icon: <LayoutDashboard className="w-4 h-4" />,
+        iconColor: 'text-emerald-400',
+        badgeBg: 'bg-emerald-100 text-emerald-800 border-emerald-200',
+        subModules: [
+          {
+            id: 'monitordashboard',
+            label: 'Usajili wa Monitor & Journal ya Darasa',
+            description: 'Sajili Monitor & Monitress wa kila darasa na kurekodi walimu kuingia/kutoka darasani',
+            badge: 'MONITOR'
+          },
+          {
+            id: 'journalreport',
+            label: 'Ripoti ya Vipindi (Journal Report)',
+            description: 'Ripoti ya mahudhurio ya walimu darasani na mada zilizofundishwa',
+            badge: 'REPORT'
+          }
+        ]
+      },
+      ...baseGroups
+    ];
+
+    if (currentUser?.role === 'MONITOR') {
       return [
         {
-          id: 'teacher_portal_group',
-          title: 'TEACHER PORTAL',
-          icon: <BookOpen className="w-4 h-4" />,
-          iconColor: 'text-amber-400',
-          badgeBg: 'bg-amber-100 text-amber-800 border-amber-200',
+          id: 'monitor_portal_group',
+          title: 'MONITOR & MONITRESS PORTAL',
+          icon: <LayoutDashboard className="w-4 h-4" />,
+          iconColor: 'text-emerald-400',
+          badgeBg: 'bg-emerald-100 text-emerald-800 border-emerald-200',
           subModules: [
-            { id: 'teacherportal', label: 'Sehemu ya Mwalimu (Teacher Hub)', description: 'Kuita majina, kuingiza marks, ripoti za darasa na ufuatiliaji wa vipindi', badge: 'MWALIMU' }
+            {
+              id: 'monitordashboard',
+              label: 'Journal ya Darasa & Monitor Portal',
+              description: 'Kurekodi mahudhurio ya walimu na mada zilizofundishwa',
+              badge: 'MONITOR'
+            }
           ]
         }
       ];
     }
 
-    if (!searchQuery.trim()) return MAIN_MODULE_GROUPS;
+    if (!searchQuery.trim()) return baseGroups;
 
-    const q = searchQuery.toLowerCase().trim();
-    return MAIN_MODULE_GROUPS.map(group => {
+    return baseGroups.map(group => {
       const groupTitleMatches = group.title.toLowerCase().includes(q);
 
       // If the group title matches, keep all submodules; otherwise filter submodules
@@ -401,7 +446,7 @@ export const Navigation: React.FC<NavigationProps> = ({
         subModules: matchingSub
       };
     }).filter(group => group.subModules.length > 0);
-  }, [searchQuery, isTeacher]);
+  }, [searchQuery, isTeacher, currentUser]);
 
   // Total matching submodules count
   const totalMatchingSubModules = useMemo(() => {
@@ -475,6 +520,25 @@ export const Navigation: React.FC<NavigationProps> = ({
                 Live
               </span>
             </button>
+
+            {/* Dark/Light Mode Theme Switcher */}
+            {onToggleDarkMode && (
+              <button
+                type="button"
+                onClick={onToggleDarkMode}
+                className="p-1.5 sm:px-2.5 sm:py-1.5 bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white rounded-xl transition cursor-pointer flex items-center gap-1.5 border border-white/15 shadow-2xs"
+                title={isDarkMode ? "Badilisha kwenda Light Mode" : "Badilisha kwenda Dark Mode"}
+              >
+                {isDarkMode ? (
+                  <Sun className="w-4 h-4 text-amber-300" />
+                ) : (
+                  <Moon className="w-4 h-4 text-blue-200" />
+                )}
+                <span className="text-[11px] font-bold hidden md:inline">
+                  {isDarkMode ? 'Light' : 'Dark'}
+                </span>
+              </button>
+            )}
 
             {/* Sidebar Color Theme Selector */}
             <div className="relative">
@@ -590,6 +654,17 @@ export const Navigation: React.FC<NavigationProps> = ({
                 <p className="text-[9px] text-blue-300 font-bold uppercase truncate leading-tight">{currentUser?.role || 'ACADEMIC'}</p>
               </div>
             </div>
+
+            {/* Change Password Button */}
+            <button
+              type="button"
+              onClick={() => setIsChangePasswordOpen(true)}
+              className="px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-xl transition cursor-pointer text-xs font-black flex items-center gap-1.5 shadow-md"
+              title="Badilisha Nywila (Change Password)"
+            >
+              <KeyRound className="w-3.5 h-3.5 text-slate-950" />
+              <span className="hidden md:inline">Badili Nywila</span>
+            </button>
 
             {/* Tour Button */}
             {onStartTour && (
@@ -1243,6 +1318,12 @@ export const Navigation: React.FC<NavigationProps> = ({
       <ThemeCustomizerModal 
         isOpen={isThemeStudioOpen} 
         onClose={() => setIsThemeStudioOpen(false)} 
+      />
+
+      <ChangePasswordModal
+        currentUser={currentUser || null}
+        isOpen={isChangePasswordOpen}
+        onClose={() => setIsChangePasswordOpen(false)}
       />
     </>
   );

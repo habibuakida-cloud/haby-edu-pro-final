@@ -29,7 +29,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Share2,
-  FileText
+  FileText,
+  Upload,
+  X,
+  PackageCheck
 } from 'lucide-react';
 import { 
   InvigilationSession, 
@@ -47,8 +50,11 @@ import { exportInvigilationPDF, exportTeacherInvigilationPDF, captureDomToPdf } 
 import { saveSchoolData } from '../lib/dataService';
 import { getCurrentSchoolId } from '../lib/dbBridge';
 import { AssignInvigilatorModal } from './Invigilation/AssignInvigilatorModal';
-import { SessionEditModal, getDayAndFormattedDate, INVIGILATION_ALLOWED_SESSIONS } from './Invigilation/SessionEditModal';
+import { SessionEditModal, getDayAndFormattedDate, INVIGILATION_ALLOWED_SESSIONS, PRESET_INVIGILATION_EXAM_TITLES } from './Invigilation/SessionEditModal';
 import { BulkEditInvigilationModal } from './Invigilation/BulkEditInvigilationModal';
+import { ImportExamTimetableModal, downloadExamTimetableSampleCSV } from './Invigilation/ImportExamTimetableModal';
+import { ExamControlLogForms } from './Invigilation/ExamControlLogForms';
+import { ScriptReturnEnvelopeView } from './Invigilation/ScriptReturnEnvelopeView';
 
 interface InvigilationContainerProps {
   sessions: InvigilationSession[];
@@ -61,8 +67,9 @@ interface InvigilationContainerProps {
   schoolInfo: SchoolInfo;
   dayThemes?: Record<string, string>;
   currentUser?: UserAccount | null;
-  initialTab?: 'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'teacher' | 'personal' | 'saved';
+  initialTab?: 'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'teacher' | 'personal' | 'saved' | 'control_logs' | 'envelope_cover';
   initialTeacherId?: number;
+  onUpdateTeacher?: (teacher: Teacher) => void;
   onUpdateSessions: (sessions: InvigilationSession[]) => void;
   onUpdateSupervisors: (supervisors: Supervisor[]) => void;
   onUpdateSelectedInvigilators: (ids: number[]) => void;
@@ -71,21 +78,23 @@ interface InvigilationContainerProps {
   onToggleRelease: () => void;
   onNavigateToSittingPlan?: () => void;
   onNavigateToCalendar?: () => void;
+  exams?: any[];
 }
 
 export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
-  sessions,
-  teachers,
-  supervisors,
-  selectedInvigilators,
-  invigilationAssignments,
+  sessions = [],
+  teachers = [],
+  supervisors = [],
+  selectedInvigilators = [],
+  invigilationAssignments = {},
   savedInvigilationRecords = [],
-  timetableReleased,
+  timetableReleased = false,
   schoolInfo,
   dayThemes,
   currentUser,
   initialTab,
   initialTeacherId,
+  onUpdateTeacher,
   onUpdateSessions,
   onUpdateSupervisors,
   onUpdateSelectedInvigilators,
@@ -99,23 +108,57 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
 
   const matchedTeacherId = useMemo(() => {
     if (initialTeacherId) return initialTeacherId;
-    if (currentUser?.fullName) {
+    if (currentUser?.fullName && Array.isArray(teachers)) {
       const match = teachers.find(t =>
         (currentUser.email && t.email && t.email.toLowerCase() === currentUser.email.toLowerCase()) ||
-        t.name.toLowerCase().includes(currentUser.fullName.toLowerCase()) ||
-        currentUser.fullName.toLowerCase().includes(t.name.toLowerCase())
+        (t.name && t.name.toLowerCase().includes(currentUser.fullName.toLowerCase())) ||
+        (t.name && currentUser.fullName.toLowerCase().includes(t.name.toLowerCase()))
       );
       if (match) return match.id;
     }
-    return teachers[0]?.id || 0;
+    return teachers?.[0]?.id || 0;
   }, [currentUser, teachers, initialTeacherId]);
 
   // Navigation tabs matching TimetableContainer aesthetic
-  const [activeTab, setActiveTab] = useState<'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'teacher' | 'personal' | 'saved'>(
-    initialTab || (isTeacherRole ? 'teacher' : 'general')
+  const [activeTab, setActiveTab] = useState<'general' | 'sessions' | 'invigilators' | 'supervisors' | 'class' | 'teacher' | 'personal' | 'saved' | 'control_logs' | 'envelope_cover'>(
+    () => {
+      const stored = typeof window !== 'undefined' ? localStorage.getItem('haby_invigilation_active_tab') : null;
+      if (stored && ['general', 'sessions', 'invigilators', 'supervisors', 'class', 'teacher', 'personal', 'saved', 'control_logs', 'envelope_cover'].includes(stored)) {
+        localStorage.removeItem('haby_invigilation_active_tab');
+        return stored as any;
+      }
+      return initialTab || (isTeacherRole ? 'teacher' : 'general');
+    }
   );
+
+  useEffect(() => {
+    if (initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [initialTab]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('haby_invigilation_active_tab');
+    if (stored && ['general', 'sessions', 'invigilators', 'supervisors', 'class', 'teacher', 'personal', 'saved', 'control_logs', 'envelope_cover'].includes(stored)) {
+      localStorage.removeItem('haby_invigilation_active_tab');
+      setActiveTab(stored as any);
+    }
+  }, []);
   const [saveModalOpen, setSaveModalOpen] = useState(false);
-  const [snapshotTitle, setSnapshotTitle] = useState('Midterm Examination Invigilation Timetable');
+  const [activeExamTitle, setActiveExamTitle] = useState<string>(() => {
+    const schoolId = getCurrentSchoolId();
+    const saved = typeof window !== 'undefined' ? localStorage.getItem(`haby_active_invigilation_exam_${schoolId}`) : null;
+    return saved || 'Pre-National Examination 2026';
+  });
+  const [isCustomExamTitle, setIsCustomExamTitle] = useState(false);
+  const [snapshotTitle, setSnapshotTitle] = useState(activeExamTitle);
+
+  useEffect(() => {
+    const schoolId = getCurrentSchoolId();
+    if (activeExamTitle.trim()) {
+      localStorage.setItem(`haby_active_invigilation_exam_${schoolId}`, activeExamTitle.trim());
+    }
+  }, [activeExamTitle]);
   
   // Layout view mode for General Timetable: 'cards' (Modern visual cards), 'matrix' (Traditional Exam Hall grid) or 'master' (One large master table)
   const [viewMode, setViewMode] = useState<'cards' | 'matrix' | 'master'>('cards');
@@ -128,7 +171,7 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
 
   // Teacher schedule states
   const [selectedTeacherForPersonal, setSelectedTeacherForPersonal] = useState<number>(matchedTeacherId);
-  const [teacherViewMode, setTeacherViewMode] = useState<'matrix' | 'table' | 'allTeachers'>('matrix');
+  const [teacherViewMode, setTeacherViewMode] = useState<'matrix' | 'cards' | 'master'>('matrix');
   const [teacherSearchTerm, setTeacherSearchTerm] = useState('');
   const [onlyTeachersWithDuties, setOnlyTeachersWithDuties] = useState(false);
 
@@ -139,13 +182,41 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
     }
   }, [matchedTeacherId]);
 
-  // Class invigilation selected class
+  // Class invigilation selected class & view mode ('cards' | 'matrix' | 'master')
   const [selectedClassForInvig, setSelectedClassForInvig] = useState('Form 1');
+  const [classViewMode, setClassViewMode] = useState<'cards' | 'matrix' | 'master'>('matrix');
+  const [controlInitialSubTab, setControlInitialSubTab] = useState<'dispatch' | 'setting' | 'scripts' | 'reams'>('dispatch');
 
   // Modal States
   const [sessionModalOpen, setSessionModalOpen] = useState(false);
   const [editingSession, setEditingSession] = useState<InvigilationSession | null>(null);
   const [bulkEditModalOpen, setBulkEditModalOpen] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+
+  const handleImportCSV = (
+    importedSessions: InvigilationSession[],
+    importedAssignments: Record<string, number>,
+    replaceExisting: boolean
+  ) => {
+    if (replaceExisting) {
+      onUpdateSessions(importedSessions);
+      onUpdateInvigilationAssignments(importedAssignments);
+      setAssignNotice({
+        type: 'success',
+        message: `✓ Ratiba ya Mitihani Imesasishwa (CSV): Zimeingizwa session ${importedSessions.length} na walimu ${Object.keys(importedAssignments).length} waliopangwa!`
+      });
+    } else {
+      const mergedSessions = [...sessions, ...importedSessions];
+      const mergedAssignments = { ...invigilationAssignments, ...importedAssignments };
+      onUpdateSessions(mergedSessions);
+      onUpdateInvigilationAssignments(mergedAssignments);
+      setAssignNotice({
+        type: 'success',
+        message: `✓ Ratiba ya Mitihani Imewekwa Pamoja (CSV): Zimeongezwa session ${importedSessions.length} mpya na walimu ${Object.keys(importedAssignments).length} waliopangwa!`
+      });
+    }
+    setTimeout(() => setAssignNotice(null), 6000);
+  };
 
   const [assignModalData, setAssignModalData] = useState<{
     session: InvigilationSession;
@@ -210,23 +281,37 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
   };
 
   // Filter available teachers
-  const availableTeachers = useMemo(() => teachers.filter(t => !t.excludeInvigilation), [teachers]);
-  const activeRoster = useMemo(() => teachers.filter(t => selectedInvigilators.includes(t.id)), [teachers, selectedInvigilators]);
+  const availableTeachers = useMemo(() => (Array.isArray(teachers) ? teachers : []).filter(t => t && !t.excludeInvigilation), [teachers]);
+  const activeRoster = useMemo(() => (Array.isArray(teachers) ? teachers : []).filter(t => t && (Array.isArray(selectedInvigilators) ? selectedInvigilators : []).includes(t.id)), [teachers, selectedInvigilators]);
   const effectivePool = activeRoster.length > 0 ? activeRoster : availableTeachers;
 
-  // Normalize existing sessions to ensure session is strictly SESSION I or SESSION II
+  // Normalize existing sessions to ensure session is strictly SESSION I or SESSION II and filter by activeExamTitle if session has an examTitle
   const normalizedSessions = useMemo(() => {
-    return sessions.map(s => {
-      let validSession = s.session;
+    const safeSessions = Array.isArray(sessions) ? sessions : [];
+    const allNormalized = safeSessions.filter(Boolean).map(s => {
+      let validSession = s.session || 'SESSION I';
       if (!INVIGILATION_ALLOWED_SESSIONS.includes(validSession as any)) {
         validSession = /II|2|afternoon/i.test(validSession) ? 'SESSION II' : 'SESSION I';
       }
       return {
         ...s,
-        session: validSession
+        rawDate: s.rawDate || s.date || '',
+        date: s.date || s.rawDate || '',
+        day: s.day || '',
+        subject: s.subject || '',
+        className: s.className || '',
+        stream: s.stream || '',
+        rooms: Number(s.rooms || 1),
+        session: validSession,
+        examTitle: s.examTitle || activeExamTitle
       };
     });
-  }, [sessions]);
+    // Filter to sessions belonging to the active exam title (or untitled legacy sessions that default to activeExamTitle)
+    const matching = allNormalized.filter(
+      s => !s.examTitle || s.examTitle.toLowerCase().trim() === (activeExamTitle || '').toLowerCase().trim()
+    );
+    return matching.length > 0 ? matching : allNormalized;
+  }, [sessions, activeExamTitle]);
 
   // Conflict Detection: check if any teacher is double-booked across different rooms at the exact same Date & Session
   const conflicts = useMemo(() => {
@@ -294,11 +379,12 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
   const uniqueDates = useMemo(() => {
     const map = new Map<string, { rawDate: string; date: string; day: string }>();
     normalizedSessions.forEach(s => {
-      if (!map.has(s.rawDate)) {
-        map.set(s.rawDate, { rawDate: s.rawDate, date: s.date, day: s.day });
+      const rDate = s.rawDate || '';
+      if (!map.has(rDate)) {
+        map.set(rDate, { rawDate: rDate, date: s.date || '', day: s.day || '' });
       }
     });
-    return Array.from(map.values()).sort((a, b) => a.rawDate.localeCompare(b.rawDate));
+    return Array.from(map.values()).sort((a, b) => String(a.rawDate || '').localeCompare(String(b.rawDate || '')));
   }, [normalizedSessions]);
 
   // Filtered Sessions
@@ -310,16 +396,16 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
       if (selectedSessionFilter !== 'ALL' && s.session !== selectedSessionFilter) {
         return false;
       }
-      if (selectedClassFilter !== 'ALL' && s.className.toLowerCase() !== selectedClassFilter.toLowerCase()) {
+      if (selectedClassFilter !== 'ALL' && String(s.className || '').toLowerCase() !== selectedClassFilter.toLowerCase()) {
         return false;
       }
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
-        const matchSub = s.subject.toLowerCase().includes(q);
-        const matchClass = s.className.toLowerCase().includes(q);
-        const matchStream = s.stream.toLowerCase().includes(q);
-        const matchDay = s.day.toLowerCase().includes(q);
-        const matchDate = s.date.toLowerCase().includes(q);
+        const matchSub = String(s.subject || '').toLowerCase().includes(q);
+        const matchClass = String(s.className || '').toLowerCase().includes(q);
+        const matchStream = String(s.stream || '').toLowerCase().includes(q);
+        const matchDay = String(s.day || '').toLowerCase().includes(q);
+        const matchDate = String(s.date || '').toLowerCase().includes(q);
         if (!matchSub && !matchClass && !matchStream && !matchDay && !matchDate) return false;
       }
       return true;
@@ -339,17 +425,21 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
 
   // Session CRUD handlers
   const handleSaveSessionData = (sessionData: Omit<InvigilationSession, 'id'> & { id?: number }) => {
-    if (sessionData.id) {
+    const withTitle = {
+      ...sessionData,
+      examTitle: sessionData.examTitle || activeExamTitle
+    };
+    if (withTitle.id) {
       // Edit
-      const updated = normalizedSessions.map(s => s.id === sessionData.id ? { ...s, ...sessionData } as InvigilationSession : s);
+      const updated = sessions.map(s => s.id === withTitle.id ? { ...s, ...withTitle } as InvigilationSession : s);
       onUpdateSessions(updated);
     } else {
       // Add
       const newSession: InvigilationSession = {
-        ...sessionData,
+        ...withTitle,
         id: Date.now()
       };
-      onUpdateSessions([...normalizedSessions, newSession]);
+      onUpdateSessions([...sessions, newSession]);
     }
   };
 
@@ -474,6 +564,59 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
     setTimeout(() => setAssignNotice(null), 6000);
   };
 
+  // Re-auto assign invigilation from scratch with fresh randomized clash-free allocation
+  const handleReAutoAssignAll = () => {
+    const activeTeachers = teachers.filter(t => 
+      !t.excludeInvigilation && (selectedInvigilators.length === 0 || selectedInvigilators.includes(t.id))
+    );
+
+    if (activeTeachers.length === 0) {
+      setAssignNotice({
+        type: 'warning',
+        message: 'Hakuna walimu wanaoweza kusimamia. Tafadhali ruhusu walimu kwenye tab ya Invigilators kwanza.'
+      });
+      setTimeout(() => setAssignNotice(null), 5000);
+      return;
+    }
+
+    // Shuffle active teachers to create a fresh random balanced rotation
+    const shuffledTeachers = [...activeTeachers].sort(() => Math.random() - 0.5);
+
+    const freshAssignments: Record<string, number> = {};
+    const dutyCount: Record<number, number> = {};
+    shuffledTeachers.forEach(t => { dutyCount[t.id] = 0; });
+
+    const occupiedSlots: Record<string, Set<number>> = {};
+    let assignedCount = 0;
+
+    normalizedSessions.forEach(s => {
+      const slotKey = `${s.rawDate}_${s.session}`;
+      if (!occupiedSlots[slotKey]) occupiedSlots[slotKey] = new Set();
+
+      for (let r = 0; r < s.rooms; r++) {
+        const key = `${s.id}_room${r}`;
+        const available = shuffledTeachers.filter(t => !occupiedSlots[slotKey].has(t.id));
+
+        if (available.length > 0) {
+          available.sort((a, b) => (dutyCount[a.id] || 0) - (dutyCount[b.id] || 0));
+          const chosen = available[0];
+
+          freshAssignments[key] = chosen.id;
+          occupiedSlots[slotKey].add(chosen.id);
+          dutyCount[chosen.id] = (dutyCount[chosen.id] || 0) + 1;
+          assignedCount++;
+        }
+      }
+    });
+
+    onUpdateInvigilationAssignments(freshAssignments);
+    setAssignNotice({
+      type: 'success',
+      message: `✓ Ratiba Imepangwa Upya Kiatomatiki: Jumla ya nafasi ${assignedCount} za usimamizi zimegawanywa upya kwa usawa na bila migongano (clash-free) kwa walimu ${activeTeachers.length}!`
+    });
+    setTimeout(() => setAssignNotice(null), 6000);
+  };
+
   return (
     <div className="space-y-6">
       {/* Notice Banner */}
@@ -496,6 +639,97 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
           </button>
         </div>
       )}
+
+      {/* 0. ACTIVE EXAMINATION CONTEXT BANNER (MTIHANI GANI UNAOPANGIWA RATIBA & UFUATILIAJI) */}
+      <div className="bg-gradient-to-r from-[#0f2948] via-[#1f4d8b] to-[#153460] text-white p-4 sm:p-5 rounded-2xl shadow-md border border-blue-800">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 text-[10px] font-black uppercase tracking-wider">
+                MTIHANI UNAOPANGIWA SASA (ACTIVE EXAM)
+              </span>
+              <span className="text-xs text-blue-200 font-semibold">
+                Kila mtihani una Ratiba yake ya Usimamizi na Ufuatiliaji wake binafsi
+              </span>
+            </div>
+            <h2 className="text-lg sm:text-xl font-black text-white tracking-wide flex items-center gap-2">
+              <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
+              <span>RATIBA YA USIMAMIZI & UFUATILIAJI: <u className="decoration-amber-400 underline-offset-4">{activeExamTitle}</u></span>
+            </h2>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5 bg-white/10 p-2.5 rounded-xl border border-white/15">
+            <div className="flex flex-col">
+              <label className="text-[10px] font-black uppercase text-amber-300 mb-1">
+                Chagua Mtihani (Select Exam Title):
+              </label>
+              <div className="flex flex-wrap items-center gap-2">
+                <select
+                  value={PRESET_INVIGILATION_EXAM_TITLES.includes(activeExamTitle as any) && !isCustomExamTitle ? activeExamTitle : '__CUSTOM__'}
+                  onChange={e => {
+                    if (e.target.value === '__CUSTOM__') {
+                      setIsCustomExamTitle(true);
+                    } else {
+                      setIsCustomExamTitle(false);
+                      setActiveExamTitle(e.target.value);
+                    }
+                  }}
+                  className="px-3 py-2 text-xs font-black rounded-lg bg-white text-slate-900 border border-amber-300 shadow-2xs focus:outline-hidden"
+                >
+                  {PRESET_INVIGILATION_EXAM_TITLES.map(title => (
+                    <option key={title} value={title}>{title}</option>
+                  ))}
+                  <option value="__CUSTOM__">+ Andika Jina Jingine la Mtihani...</option>
+                </select>
+
+                {(isCustomExamTitle || !PRESET_INVIGILATION_EXAM_TITLES.includes(activeExamTitle as any)) && (
+                  <input
+                    type="text"
+                    value={activeExamTitle}
+                    onChange={e => setActiveExamTitle(e.target.value)}
+                    placeholder="Andika Jina la Mtihani hapa..."
+                    className="px-3 py-2 text-xs font-black rounded-lg bg-white text-blue-950 border-2 border-amber-400 w-56 focus:outline-hidden"
+                  />
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const updated = sessions.map(s => ({ ...s, examTitle: activeExamTitle }));
+                    onUpdateSessions(updated);
+                    setAssignNotice({
+                      type: 'success',
+                      message: `✓ Vipindi vyote vya ratiba hii sasa vimefungamanishwa rasmi na mtihani wa "${activeExamTitle}"!`
+                    });
+                    setTimeout(() => setAssignNotice(null), 4500);
+                  }}
+                  className="px-3 py-2 text-xs font-black bg-amber-400 hover:bg-amber-300 text-slate-950 rounded-lg shadow-xs cursor-pointer transition active:scale-95"
+                  title="Thibitisha vipindi vya ratiba hii viwe chini ya mtihani huu uliochaguliwa"
+                >
+                  ✓ Husisha Ratiba na Mtihani Huu
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveTab('envelope_cover');
+                    window.scrollTo({ top: 0, behavior: 'smooth' });
+                  }}
+                  className={`px-3.5 py-2 text-xs font-black rounded-lg shadow-xs cursor-pointer transition flex items-center gap-1.5 ${
+                    activeTab === 'envelope_cover'
+                      ? 'bg-white text-slate-950 ring-2 ring-amber-400'
+                      : 'bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400'
+                  }`}
+                  title="Fungua Fomu Rasmi ya Bahasha ya Scripts za Majibu ya Wanafunzi (NECTA Script Return Envelope Cover Form)"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>✉️ Fungua Fomu ya Bahasha (Envelope Cover)</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       {/* 1. TOP SUB-NAVIGATION TABS (Matching TimetableContainer) */}
       <div className="bg-white border border-slate-200 rounded-xl p-1.5 shadow-xs flex flex-wrap gap-1">
@@ -573,6 +807,54 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
           </span>
         </button>
 
+        <button
+          onClick={() => {
+            setControlInitialSubTab('dispatch');
+            setActiveTab('control_logs');
+          }}
+          className={`px-4 py-2.5 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
+            activeTab === 'control_logs' && controlInitialSubTab !== 'reams'
+              ? 'bg-[#1f4d8b] text-white shadow-xs ring-2 ring-amber-400 font-extrabold'
+              : 'text-amber-900 bg-amber-50 hover:bg-amber-100 border border-amber-300'
+          }`}
+          title="Usimamizi wa Kupokea & Kurudisha Mitihani (Check-in/Check-out), Utungaji na Script za Kusahihisha"
+        >
+          <PackageCheck className="w-4 h-4 text-amber-600" />
+          <span>📋 Check-in/Check-out & Udhibiti</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setControlInitialSubTab('reams');
+            setActiveTab('control_logs');
+          }}
+          className={`px-4 py-2.5 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
+            activeTab === 'control_logs' && controlInitialSubTab === 'reams'
+              ? 'bg-emerald-800 text-white shadow-xs ring-2 ring-amber-400 font-extrabold'
+              : 'text-emerald-950 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300'
+          }`}
+          title="Mfumo wa Makadirio ya Ream na Karatasi za Urudufishaji wa Mitihani kwa Kila Kidato na Somo"
+        >
+          <FileText className="w-4 h-4 text-emerald-700" />
+          <span>🖨️ Makadirio ya Ream (Urudufishaji)</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setActiveTab('envelope_cover');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+          className={`px-4 py-2.5 rounded-lg text-xs sm:text-sm font-black transition-all flex items-center gap-2 cursor-pointer ${
+            activeTab === 'envelope_cover'
+              ? 'bg-slate-900 text-white shadow-xs ring-2 ring-amber-400 font-extrabold'
+              : 'text-indigo-950 bg-indigo-50 hover:bg-indigo-100 border border-indigo-300'
+          }`}
+          title="Fomu Rasmi ya Kubandika Juu ya Bahasha ya Scripts za Majibu ya Wanafunzi (NECTA Script Return Envelope Cover Form)"
+        >
+          <Printer className="w-4 h-4 text-indigo-700" />
+          <span>✉️ Fomu ya Bahasha ya Script (Envelope Cover)</span>
+        </button>
+
         <div className="ml-auto flex items-center gap-2">
           {onNavigateToCalendar && (
             <button
@@ -598,55 +880,57 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
         </div>
       </div>
 
-      {/* 2. SUMMARY METRICS CARDS (Just like Timetable stats) */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
-          <div className="p-2.5 bg-blue-50 text-[#1f4d8b] rounded-xl shrink-0">
-            <Calendar className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-xl font-black text-slate-800">{normalizedSessions.length}</div>
-            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Exam Sessions</div>
-          </div>
-        </div>
-
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
-          <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-xl shrink-0">
-            <Building className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-xl font-black text-slate-800">{totalSlotsNeeded}</div>
-            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Room Duties Needed</div>
-          </div>
-        </div>
-
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
-          <div className={`p-2.5 rounded-xl shrink-0 ${unassignedSlotsCount === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
-            <UserCheck className="w-5 h-5" />
-          </div>
-          <div>
-            <div className="text-xl font-black text-slate-800">
-              {assignedSlotsCount} <span className="text-xs text-slate-400 font-normal">/ {totalSlotsNeeded}</span>
+      {/* 2. SUMMARY METRICS CARDS (Only on Timetable Views, hidden on Envelope Cover & Control Logs) */}
+      {activeTab !== 'envelope_cover' && activeTab !== 'control_logs' && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="p-2.5 bg-blue-50 text-[#1f4d8b] rounded-xl shrink-0">
+              <Calendar className="w-5 h-5" />
             </div>
-            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              {unassignedSlotsCount === 0 ? '100% Assigned' : `${unassignedSlotsCount} Unassigned`}
+            <div>
+              <div className="text-xl font-black text-slate-800">{normalizedSessions.length}</div>
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Exam Sessions</div>
             </div>
           </div>
-        </div>
 
-        <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
-          <div className="p-2.5 bg-purple-50 text-purple-700 rounded-xl shrink-0">
-            <ShieldCheck className="w-5 h-5" />
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-50 text-indigo-700 rounded-xl shrink-0">
+              <Building className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xl font-black text-slate-800">{totalSlotsNeeded}</div>
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Room Duties Needed</div>
+            </div>
           </div>
-          <div>
-            <div className="text-xl font-black text-slate-800">{activeRoster.length || availableTeachers.length}</div>
-            <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Active Invigilators</div>
+
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className={`p-2.5 rounded-xl shrink-0 ${unassignedSlotsCount === 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'}`}>
+              <UserCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xl font-black text-slate-800">
+                {assignedSlotsCount} <span className="text-xs text-slate-400 font-normal">/ {totalSlotsNeeded}</span>
+              </div>
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                {unassignedSlotsCount === 0 ? '100% Assigned' : `${unassignedSlotsCount} Unassigned`}
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs flex items-center gap-3">
+            <div className="p-2.5 bg-purple-50 text-purple-700 rounded-xl shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="text-xl font-black text-slate-800">{activeRoster.length || availableTeachers.length}</div>
+              <div className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Active Invigilators</div>
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
-      {/* 3. CLASH & CONFLICT ALERT BAR (Just like TimetableContainer) */}
-      {conflicts.length > 0 && (
+      {/* 3. CLASH & CONFLICT ALERT BAR (Only on Timetable Views) */}
+      {activeTab !== 'envelope_cover' && activeTab !== 'control_logs' && conflicts.length > 0 && (
         <div className="p-4 bg-rose-50 border border-rose-300 rounded-xl text-rose-950 shadow-xs space-y-2">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -702,6 +986,15 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                 >
                   <Zap className="w-3.5 h-3.5 text-amber-600 fill-amber-500" />
                   Auto-Assign Invigilators
+                </button>
+
+                <button
+                  onClick={handleReAutoAssignAll}
+                  className="px-3.5 py-2 text-xs font-black bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white border border-amber-400 rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                  title="Panga Upya Kiatomatiki: Futia kazi zote za zamani na upange upya kwa walimu wote wenye fursa"
+                >
+                  <Sparkles className="w-3.5 h-3.5 text-yellow-200 animate-pulse" />
+                  <span>Re-Auto Assign Invigilation</span>
                 </button>
 
                 <button
@@ -796,8 +1089,19 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                 </button>
 
                 <button
+                  type="button"
+                  onClick={() => setImportModalOpen(true)}
+                  className="px-3.5 py-2 text-xs font-black bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-800 hover:to-indigo-800 text-white rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                  title="Import Examination Timetable & Invigilator Directory from CSV File"
+                >
+                  <Upload className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Import CSV (Leta CSV)</span>
+                </button>
+
+                <button
                   onClick={() => exportInvigilationToCSV(normalizedSessions, teachers, invigilationAssignments)}
                   className="px-3 py-2 text-xs font-bold bg-white text-slate-700 border border-slate-300 rounded-lg hover:bg-slate-50 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  title="Export Examination Directory to CSV"
                 >
                   <Download className="w-3.5 h-3.5 text-blue-600" />
                   Export CSV
@@ -810,21 +1114,33 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                     sessions: normalizedSessions,
                     teachers,
                     invigilationAssignments,
-                    schoolInfo
+                    schoolInfo,
+                    examTitle: activeExamTitle,
+                    mode: 'download'
                   })}
                   className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
                   title="Download Examination Invigilation Timetable as formatted A4 Landscape PDF"
                 >
                   <Download className="w-3.5 h-3.5 text-white" />
-                  <span>Download PDF (A4)</span>
+                  <span>Pakua PDF (A4)</span>
                 </button>
 
                 <button
-                  onClick={() => printFormattedSection('general-invig-print', 'Master Examination Invigilation Timetable', schoolInfo.name, { orientation: 'landscape' })}
+                  type="button"
+                  onClick={() => exportInvigilationPDF({
+                    schoolName: schoolInfo.name,
+                    sessions: normalizedSessions,
+                    teachers,
+                    invigilationAssignments,
+                    schoolInfo,
+                    examTitle: activeExamTitle,
+                    mode: 'print'
+                  })}
                   className="px-3 py-2 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  title="Chapisha Moja kwa Moja Ratiba ya Usimamizi (Printable A4 PDF)"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  Print / PDF (Landscape)
+                  <span>Chapisha PDF (Print)</span>
                 </button>
               </div>
             </div>
@@ -1687,16 +2003,38 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                 </p>
               </div>
 
-              <button
-                onClick={() => {
-                  setEditingSession(null);
-                  setSessionModalOpen(true);
-                }}
-                className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer shrink-0"
-              >
-                <Plus className="w-4 h-4" />
-                + Add Examination Session
-              </button>
+              <div className="flex flex-wrap items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={downloadExamTimetableSampleCSV}
+                  className="px-3 py-2 text-xs font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer"
+                  title="Download Example CSV Template for Examination Schedule"
+                >
+                  <Download className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>CSV Template</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setImportModalOpen(true)}
+                  className="px-3.5 py-2 text-xs font-black bg-gradient-to-r from-blue-700 to-indigo-700 hover:from-blue-800 hover:to-indigo-800 text-white rounded-lg flex items-center gap-1.5 shadow-xs cursor-pointer transition-all active:scale-95"
+                  title="Import Examination Timetable & Invigilator Directory from CSV File"
+                >
+                  <Upload className="w-3.5 h-3.5 text-emerald-300" />
+                  <span>Import CSV (Leta CSV)</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setEditingSession(null);
+                    setSessionModalOpen(true);
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  + Add Examination Session
+                </button>
+              </div>
             </div>
 
             {/* List of Sessions */}
@@ -1910,19 +2248,34 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                       </td>
 
                       <td className="p-3 text-center">
-                        {t.excludeInvigilation ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-800">
-                            Excluded
-                          </span>
-                        ) : isSelected ? (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-800">
-                            Active in Roster
-                          </span>
-                        ) : (
-                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
-                            Standby
-                          </span>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (onUpdateTeacher) {
+                              onUpdateTeacher({ ...t, excludeInvigilation: !t.excludeInvigilation });
+                            }
+                          }}
+                          className={`px-2.5 py-1 text-[11px] font-black rounded-xl border transition-all cursor-pointer inline-flex items-center gap-1 shadow-2xs hover:scale-105 active:scale-95 ${
+                            t.excludeInvigilation
+                              ? 'bg-rose-50 text-rose-700 border-rose-300 hover:bg-rose-100'
+                              : isSelected
+                              ? 'bg-emerald-50 text-emerald-800 border-emerald-300 hover:bg-emerald-100'
+                              : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
+                          }`}
+                          title={t.excludeInvigilation ? 'Mwalimu HUYU HASIMAMII mitihani. Bofya kubadilisha awe anasimamia.' : 'Mwalimu HUYU ANASIMAMIA mitihani. Bofya kubadilisha asisimamie.'}
+                        >
+                          {t.excludeInvigilation ? (
+                            <>
+                              <X className="w-3.5 h-3.5 text-rose-600 shrink-0 font-bold" />
+                              <span>Hasimamii</span>
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                              <span>Anasimamia</span>
+                            </>
+                          )}
+                        </button>
                       </td>
                     </tr>
                   );
@@ -2020,63 +2373,411 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
       {/* ======================================================== */}
       {/* TAB 5: CLASS INVIGILATION TIMETABLE                      */}
       {/* ======================================================== */}
-      {activeTab === 'class' && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-blue-50 text-blue-700 rounded-xl">
-                <Layers className="w-5 h-5" />
+      {activeTab === 'class' && (() => {
+        const classFilteredSessions = normalizedSessions.filter(s =>
+          selectedClassForInvig === 'ALL' || s.className.toLowerCase() === selectedClassForInvig.toLowerCase()
+        );
+
+        // Group class sessions by date for Matrix View & Master Table View
+        const classSessionsByDate: Record<string, InvigilationSession[]> = {};
+        classFilteredSessions.forEach(s => {
+          const key = `${s.rawDate}__${s.day}__${s.date}`;
+          if (!classSessionsByDate[key]) classSessionsByDate[key] = [];
+          classSessionsByDate[key].push(s);
+        });
+
+        return (
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-blue-50 text-blue-700 rounded-xl">
+                  <Layers className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 uppercase">
+                    Class Examination & Invigilation Schedule ({selectedClassForInvig === 'ALL' ? 'All Classes' : selectedClassForInvig})
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Ratiba ya mtihani na wasimamizi kwa darasa ({activeExamTitle}) — Chagua Examination Hall Matrix, Master Table, au Card View
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-black text-slate-900 uppercase">Class Examination & Invigilation Schedule</h3>
-                <p className="text-xs text-slate-500 font-medium">Ratiba ya mtihani na wasimamizi kwa kila darasa na mkondo</p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Class Selector */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-bold text-slate-600 uppercase">Darasa (Class):</label>
+                  <select
+                    value={selectedClassForInvig}
+                    onChange={e => setSelectedClassForInvig(e.target.value)}
+                    className="px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white shadow-2xs outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="ALL">Madarasa Yote (All Classes)</option>
+                    {DEFAULT_CLASSES.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* View Mode Toggle: Exam Hall Matrix, Master Table, Card Grid */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-slate-500 uppercase">View:</span>
+                  <div className="inline-flex rounded-xl border border-slate-300 bg-slate-100 p-1 text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setClassViewMode('matrix')}
+                      className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        classViewMode === 'matrix' ? 'bg-[#0f2948] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Grid className="w-3.5 h-3.5" />
+                      <span>Examination Hall Matrix</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClassViewMode('master')}
+                      className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        classViewMode === 'master' ? 'bg-[#0f2948] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Table className="w-3.5 h-3.5" />
+                      <span>Master Table View</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setClassViewMode('cards')}
+                      className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        classViewMode === 'cards' ? 'bg-[#0f2948] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Card View</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* PDF Download & Print Buttons */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => exportInvigilationPDF({
+                      schoolName: schoolInfo.name,
+                      sessions: classFilteredSessions,
+                      teachers,
+                      invigilationAssignments,
+                      schoolInfo,
+                      examTitle: `${activeExamTitle} — ${selectedClassForInvig === 'ALL' ? 'MADARASA YOTE' : selectedClassForInvig.toUpperCase()}`,
+                      mode: 'download'
+                    })}
+                    className="px-3.5 py-2 text-xs font-bold bg-rose-600 hover:bg-rose-700 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Pakua PDF</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => exportInvigilationPDF({
+                      schoolName: schoolInfo.name,
+                      sessions: classFilteredSessions,
+                      teachers,
+                      invigilationAssignments,
+                      schoolInfo,
+                      examTitle: `${activeExamTitle} — ${selectedClassForInvig === 'ALL' ? 'MADARASA YOTE' : selectedClassForInvig.toUpperCase()}`,
+                      mode: 'print'
+                    })}
+                    className="px-3.5 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Chapisha PDF (Print)</span>
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-slate-600 uppercase">Select Class:</label>
-                <select
-                  value={selectedClassForInvig}
-                  onChange={e => setSelectedClassForInvig(e.target.value)}
-                  className="px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white shadow-2xs outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {DEFAULT_CLASSES.map(c => (
-                    <option key={c} value={c}>{c}</option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => printFormattedSection('class-invig-print', `${selectedClassForInvig} Examination & Invigilation Schedule`, schoolInfo.name)}
-                  className="px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                >
-                  <Download className="w-4 h-4" />
-                  <span>Download PDF</span>
-                </button>
-                <button
-                  onClick={() => printFormattedSection('class-invig-print', `${selectedClassForInvig} Examination & Invigilation Schedule`, schoolInfo.name)}
-                  className="px-3.5 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-900 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Print</span>
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div id="class-invig-print" className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {normalizedSessions.filter(s => s.className.toLowerCase() === selectedClassForInvig.toLowerCase()).length === 0 ? (
-                <div className="col-span-full py-16 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+            <div id="class-invig-print" className="space-y-6">
+              {classFilteredSessions.length === 0 ? (
+                <div className="py-16 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200">
                   <Calendar className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-                  <p className="text-slate-500 font-bold text-sm">No examination sessions scheduled for {selectedClassForInvig}.</p>
+                  <p className="text-slate-600 font-bold text-sm">
+                    Hakuna vipindi vya mtihani vilivyopangwa kwa {selectedClassForInvig === 'ALL' ? 'madarasa yote' : selectedClassForInvig}.
+                  </p>
+                </div>
+              ) : classViewMode === 'master' ? (
+                /* VIEW 1: MASTER TABLE VIEW (ONE COMPREHENSIVE MASTER TABLE FOR THE CLASS) */
+                <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+                  <div className="bg-[#0f2948] p-4 text-white flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm sm:text-base font-black uppercase tracking-wide">
+                        Master Examination & Invigilation Table — {selectedClassForInvig === 'ALL' ? 'All Classes' : selectedClassForInvig} ({activeExamTitle})
+                      </h3>
+                      <p className="text-[11px] text-slate-300 font-medium">
+                        Jedwali kuu la mitihani yote, tarehe, vipindi na wasimamizi wa vyumba (Bofya chumba kubadilisha msimamizi)
+                      </p>
+                    </div>
+                    <span className="px-3 py-1 rounded-lg bg-white/15 text-amber-300 text-xs font-black">
+                      {classFilteredSessions.length} Vipindi vya Mtihani
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="bg-slate-100 border-b border-slate-300 text-[10px] text-slate-700 font-black uppercase tracking-wider">
+                          <th className="p-3 border-r border-slate-200 w-36">Tarehe & Siku</th>
+                          <th className="p-3 border-r border-slate-200 w-28">Kipindi & Muda</th>
+                          <th className="p-3 border-r border-slate-200 w-48">Somo la Mtihani & Darasa</th>
+                          {[1, 2, 3, 4, 5, 6, 7].map(r => (
+                            <th key={r} className="p-3 border-r border-slate-200 text-center min-w-[100px]">Chumba / Room {r}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {Object.entries(classSessionsByDate).map(([dateKey, daySessions]) => {
+                          const [_rawDate, dayName, formattedDate] = dateKey.split('__');
+                          const dayTheme = getDayTheme(dayName, dayThemes);
+
+                          return daySessions.map((session, sIdx) => {
+                            const subCol = getSubjectColor(session.subject);
+                            return (
+                              <tr key={session.id} className={`border-b border-slate-100 hover:bg-slate-50/80 ${sIdx === 0 ? 'border-t-2 border-t-slate-200' : ''}`}>
+                                {sIdx === 0 && (
+                                  <td
+                                    rowSpan={daySessions.length}
+                                    className="p-3 border-r border-slate-200 font-black text-slate-900 bg-slate-50/60 align-top"
+                                    style={{ borderLeft: `4px solid ${dayTheme.border}` }}
+                                  >
+                                    <div className="text-xs uppercase">{dayName}</div>
+                                    <div className="text-[10px] text-slate-500 font-bold mt-0.5">{formattedDate}</div>
+                                  </td>
+                                )}
+                                <td className="p-3 border-r border-slate-200">
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${
+                                    session.session === 'SESSION I'
+                                      ? 'bg-blue-100 text-blue-900 border-blue-200'
+                                      : session.session === 'SESSION II'
+                                      ? 'bg-indigo-100 text-indigo-900 border-indigo-200'
+                                      : 'bg-purple-100 text-purple-900 border-purple-200'
+                                  }`}>
+                                    {session.session}
+                                  </span>
+                                  <div className="text-[10px] text-slate-500 mt-1 font-mono font-bold">{session.start} - {session.end}</div>
+                                </td>
+                                <td className="p-3 border-r border-slate-200">
+                                  <span
+                                    style={{ backgroundColor: subCol.bg, color: subCol.text, borderColor: subCol.border }}
+                                    className="px-2 py-0.5 rounded-md border font-black text-[11px] inline-block mb-1"
+                                  >
+                                    {session.subject}
+                                  </span>
+                                  <div className="text-[10px] font-bold text-slate-600">{session.className} • {session.stream}</div>
+                                </td>
+                                {[0, 1, 2, 3, 4, 5, 6].map(roomIndex => {
+                                  const isRequired = roomIndex < session.rooms;
+                                  const assignmentKey = `${session.id}_room${roomIndex}`;
+                                  const assignedId = invigilationAssignments[assignmentKey];
+                                  const assignedTeacher = assignedId ? teachers.find(t => t.id === assignedId) : undefined;
+                                  const tCol = assignedTeacher ? getTeacherColor(assignedTeacher.id) : null;
+
+                                  return (
+                                    <td key={roomIndex} className="p-1.5 border-r border-slate-200 text-center">
+                                      {isRequired ? (
+                                        <div
+                                          onClick={() => setAssignModalData({ session, roomIndex, currentTeacherId: assignedId })}
+                                          className={`p-1.5 rounded-lg border text-[10px] cursor-pointer min-h-[46px] flex flex-col justify-center items-center transition-all ${
+                                            assignedTeacher
+                                              ? 'bg-blue-50/70 border-blue-200 hover:bg-blue-100'
+                                              : 'bg-amber-50/60 border-dashed border-amber-300 hover:bg-amber-100'
+                                          }`}
+                                          title={assignedTeacher ? `Msimamizi: ${assignedTeacher.name} (Bofya kubadilisha)` : 'Bofya kupanga msimamizi'}
+                                        >
+                                          {assignedTeacher ? (
+                                            <>
+                                              <span
+                                                className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-white mb-0.5 shadow-2xs"
+                                                style={{ backgroundColor: assignedTeacher.color || tCol?.hex || '#1e40af' }}
+                                              >
+                                                {assignedTeacher.initial}
+                                              </span>
+                                              <span className="font-black text-slate-800 leading-none truncate max-w-[82px]">
+                                                {assignedTeacher.name.split(' ')[0]}
+                                              </span>
+                                            </>
+                                          ) : (
+                                            <span className="font-bold text-amber-700">+ Assign</span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span className="text-slate-300">—</span>
+                                      )}
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            );
+                          });
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              ) : classViewMode === 'matrix' ? (
+                /* VIEW 2: EXAMINATION HALL MATRIX VIEW (GROUPED BY DAY WITH HALL ROOM COLUMNS) */
+                <div className="space-y-6">
+                  {Object.entries(classSessionsByDate).map(([dateKey, daySessions], dayIdx) => {
+                    const [_rawDate, dayName, formattedDate] = dateKey.split('__');
+                    const dayTheme = getDayTheme(dayName, dayThemes);
+                    const supervisor = supervisors[dayIdx % Math.max(supervisors.length, 1)];
+
+                    return (
+                      <div
+                        key={dateKey}
+                        style={{ borderColor: dayTheme.border }}
+                        className="bg-white border rounded-2xl shadow-xs overflow-hidden"
+                      >
+                        <div
+                          style={{ backgroundColor: dayTheme.headerBg }}
+                          className="px-5 py-3 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="p-1.5 rounded-lg bg-white/20 text-white">
+                              <Calendar className="w-4 h-4" />
+                            </span>
+                            <div>
+                              <div className="text-sm font-black tracking-wide uppercase flex items-center gap-2">
+                                <span>{dayName}</span>
+                                <span className="text-xs px-2.5 py-0.5 rounded-full bg-white/20 font-bold">
+                                  {formattedDate}
+                                </span>
+                              </div>
+                              <span className="text-[11px] text-white/80 font-medium">
+                                {selectedClassForInvig === 'ALL' ? 'Madarasa Yote' : selectedClassForInvig} • {daySessions.length} Kipindi / Masomo
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-xs font-semibold bg-white/20 px-3 py-1 rounded-xl flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-amber-300" />
+                            <span>SUPERVISOR:</span>
+                            <strong className="text-white">
+                              {supervisor ? `${supervisor.name} (${supervisor.initial})` : 'To Be Appointed'}
+                            </strong>
+                          </div>
+                        </div>
+
+                        <div className="overflow-x-auto p-4">
+                          <table className="w-full text-left border-collapse text-xs bg-white rounded-xl overflow-hidden border border-slate-200">
+                            <thead>
+                              <tr className="bg-[#0f2948] text-white font-bold uppercase text-[11px] tracking-wider">
+                                <th className="p-2.5 border-r border-slate-700 w-32">Session Slot</th>
+                                <th className="p-2.5 border-r border-slate-700 w-28">Time</th>
+                                <th className="p-2.5 border-r border-slate-700">Exam Subject</th>
+                                <th className="p-2.5 border-r border-slate-700 w-36">Class & Stream</th>
+                                {[1, 2, 3, 4, 5, 6, 7].map(r => (
+                                  <th key={r} className="p-2.5 border-r border-slate-700 text-center min-w-[90px]">
+                                    Room {r}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {daySessions.map(session => {
+                                const subCol = getSubjectColor(session.subject);
+                                return (
+                                  <tr key={session.id} className="border-b border-slate-100 hover:bg-slate-50/80">
+                                    <td className="p-2.5 border-r border-slate-200 font-bold">
+                                      <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                                        session.session === 'SESSION I'
+                                          ? 'bg-blue-100 text-blue-900 border border-blue-200'
+                                          : session.session === 'SESSION II'
+                                          ? 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                                          : 'bg-purple-100 text-purple-900 border border-purple-200'
+                                      }`}>
+                                        {session.session}
+                                      </span>
+                                    </td>
+
+                                    <td className="p-2.5 border-r border-slate-200 font-mono text-slate-600">
+                                      {session.start} - {session.end}
+                                    </td>
+
+                                    <td className="p-2.5 border-r border-slate-200">
+                                      <span
+                                        style={{ backgroundColor: subCol.bg, color: subCol.text, borderColor: subCol.border }}
+                                        className="px-2 py-0.5 rounded-md border font-bold text-[11px] inline-block"
+                                      >
+                                        {session.subject}
+                                      </span>
+                                    </td>
+
+                                    <td className="p-2.5 border-r border-slate-200 font-bold text-slate-800">
+                                      <div>{session.className}</div>
+                                      <span className="text-[10px] font-semibold text-blue-700">
+                                        {session.stream}
+                                      </span>
+                                    </td>
+
+                                    {[0, 1, 2, 3, 4, 5, 6].map(roomIndex => {
+                                      const assignmentKey = `${session.id}_room${roomIndex}`;
+                                      const isRequired = roomIndex < session.rooms;
+                                      const assignedId = invigilationAssignments[assignmentKey];
+                                      const assignedTeacher = assignedId ? teachers.find(t => t.id === assignedId) : undefined;
+                                      const tCol = assignedTeacher ? getTeacherColor(assignedTeacher.id) : null;
+
+                                      return (
+                                        <td
+                                          key={roomIndex}
+                                          className="p-2 border-r border-slate-200 text-center align-middle"
+                                        >
+                                          {isRequired ? (
+                                            <div
+                                              onClick={() => setAssignModalData({
+                                                session,
+                                                roomIndex,
+                                                currentTeacherId: assignedId
+                                              })}
+                                              className={`p-1.5 rounded-lg border text-xs cursor-pointer transition-all ${
+                                                assignedTeacher
+                                                  ? 'bg-blue-50/50 border-blue-200 hover:border-blue-400 hover:bg-blue-100/50'
+                                                  : 'bg-amber-50/70 border-dashed border-amber-300 hover:bg-amber-100'
+                                              }`}
+                                            >
+                                              {assignedTeacher ? (
+                                                <div className="flex items-center justify-center gap-1.5" title={assignedTeacher.name}>
+                                                  <span
+                                                    style={{ backgroundColor: assignedTeacher.color || tCol?.hex, color: '#ffffff' }}
+                                                    className="w-6 h-6 rounded-full inline-flex items-center justify-center font-bold text-[10px] shadow-2xs"
+                                                  >
+                                                    {assignedTeacher.initial}
+                                                  </span>
+                                                  <span className="font-bold text-slate-800 text-[10px] truncate max-w-[65px]">
+                                                    {assignedTeacher.name.split(' ')[0]}
+                                                  </span>
+                                                </div>
+                                              ) : (
+                                                <span className="text-[10px] font-bold text-amber-700">
+                                                  + Assign
+                                                </span>
+                                              )}
+                                            </div>
+                                          ) : (
+                                            <span className="text-slate-300 font-light">—</span>
+                                          )}
+                                        </td>
+                                      );
+                                    })}
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (
-                normalizedSessions
-                  .filter(s => s.className.toLowerCase() === selectedClassForInvig.toLowerCase())
-                  .map(s => {
+                /* VIEW 3: CARD GRID VIEW */
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {classFilteredSessions.map(s => {
                     const subCol = getSubjectColor(s.subject);
                     return (
                       <div key={s.id} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-xs space-y-3 hover:shadow-md transition-all">
@@ -2104,21 +2805,25 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                         </div>
 
                         <div className="flex items-center justify-between text-xs font-bold text-slate-700 bg-slate-50 p-2.5 rounded-xl">
-                          <span>Stream: <strong className="text-blue-700">{s.stream}</strong></span>
+                          <span>Class/Stream: <strong className="text-blue-700">{s.className} ({s.stream})</strong></span>
                           <span>Rooms: <strong className="text-indigo-700">{s.rooms} Exam Halls</strong></span>
                         </div>
 
                         <div className="space-y-1 pt-1 border-t border-slate-100">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Assigned Invigilators</span>
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">Assigned Invigilators (Click to change)</span>
                           <div className="space-y-1">
                             {Array.from({ length: s.rooms }).map((_, r) => {
                               const tid = invigilationAssignments[`${s.id}_room${r}`];
                               const tObj = teachers.find(t => t.id === tid);
                               return (
-                                <div key={r} className="text-xs font-semibold text-slate-700 flex items-center justify-between bg-slate-50/60 px-2.5 py-1.5 rounded-lg">
+                                <div
+                                  key={r}
+                                  onClick={() => setAssignModalData({ session: s, roomIndex: r, currentTeacherId: tid })}
+                                  className="text-xs font-semibold text-slate-700 flex items-center justify-between bg-slate-50/60 hover:bg-blue-50 px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors"
+                                >
                                   <span>Room {r + 1}:</span>
                                   <span className={tObj ? 'text-indigo-700 font-bold' : 'text-amber-600 italic'}>
-                                    {tObj ? tObj.name : 'Unassigned'}
+                                    {tObj ? tObj.name : '+ Assign Invigilator'}
                                   </span>
                                 </div>
                               );
@@ -2127,218 +2832,756 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                         </div>
                       </div>
                     );
-                  })
+                  })}
+                </div>
               )}
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ======================================================== */}
       {/* TAB 6: TEACHER INVIGILATION TIMETABLE                    */}
       {/* ======================================================== */}
-      {(activeTab === 'teacher' || activeTab === 'personal') && (
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            <div className="flex items-center gap-3">
-              <div className="p-3 bg-blue-50 text-blue-700 rounded-xl">
-                <Users className="w-5 h-5" />
+      {(activeTab === 'teacher' || activeTab === 'personal') && (() => {
+        const isAllTeachersSelected = selectedTeacherForPersonal === 0;
+        const currentT = isAllTeachersSelected
+          ? undefined
+          : teachers.find(t => t.id === selectedTeacherForPersonal) || teachers[0];
+
+        const isSupervisor = currentT
+          ? supervisors.some(s =>
+              Number(s.teacherId) === Number(currentT.id) ||
+              (s.name && currentT.name && s.name.toLowerCase().includes(currentT.name.toLowerCase()))
+            )
+          : false;
+
+        // Collect all duties for the selected teacher (or all assigned duties if All Teachers selected)
+        const duties: { session: InvigilationSession; room: number; roomIndex: number; teacher?: Teacher }[] = [];
+        const teacherSessionsList: InvigilationSession[] = [];
+
+        normalizedSessions.forEach(sess => {
+          let hasTeacherInSession = false;
+          for (let r = 0; r < sess.rooms; r++) {
+            const key = `${sess.id}_room${r}`;
+            const assignedId = invigilationAssignments[key];
+            if (isAllTeachersSelected) {
+              if (assignedId) {
+                const tObj = teachers.find(t => t.id === assignedId);
+                duties.push({ session: sess, room: r + 1, roomIndex: r, teacher: tObj });
+              }
+              hasTeacherInSession = true;
+            } else if (currentT && Number(assignedId) === Number(currentT.id)) {
+              duties.push({ session: sess, room: r + 1, roomIndex: r, teacher: currentT });
+              hasTeacherInSession = true;
+            }
+          }
+          if (hasTeacherInSession || !onlyTeachersWithDuties) {
+            if (isAllTeachersSelected || hasTeacherInSession) {
+              teacherSessionsList.push(sess);
+            }
+          }
+        });
+
+        // Sessions to display in Matrix / Master / Card views:
+        // When a specific teacher is selected, by default show sessions where that teacher is assigned (or all sessions if toggle is enabled)
+        const displaySessions = onlyTeachersWithDuties
+          ? normalizedSessions
+          : teacherSessionsList;
+
+        // Group displaySessions by date for Examination Hall Matrix & Matrix Master Table
+        const teacherSessionsByDate: Record<string, InvigilationSession[]> = {};
+        displaySessions.forEach(s => {
+          const key = `${s.rawDate}__${s.day}__${s.date}`;
+          if (!teacherSessionsByDate[key]) teacherSessionsByDate[key] = [];
+          teacherSessionsByDate[key].push(s);
+        });
+
+        const morningDuties = duties.filter(d => d.session.session === 'SESSION I').length;
+        const afternoonDuties = duties.filter(d => d.session.session === 'SESSION II').length;
+        const eveningDuties = duties.filter(d => d.session.session === 'SESSION III').length;
+        const uniqueDatesCount = new Set(duties.map(d => d.session.rawDate)).size;
+
+        return (
+          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm space-y-6">
+            <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+              <div className="flex items-center gap-3">
+                <div className="p-3 bg-blue-50 text-blue-700 rounded-xl">
+                  <Users className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-black text-slate-900 uppercase">
+                    Teacher Invigilation Timetable ({isAllTeachersSelected ? 'All Teachers / Walimu Wote' : currentT?.name})
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium">
+                    Ratiba ya usimamizi wa mitihani ({activeExamTitle}) — Chagua Examination Hall Matrix, Matrix Master Table, au Card View
+                  </p>
+                </div>
               </div>
-              <div>
-                <h3 className="text-base font-black text-slate-900 uppercase">Teacher Invigilation Schedule (Ratiba ya Mwalimu)</h3>
-                <p className="text-xs text-slate-500 font-medium">Tazama na upakue ratiba binafsi ya usimamizi wa mitihani kwa kila mwalimu</p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                {/* Teacher Selector */}
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-bold text-slate-600 uppercase">Mwalimu (Teacher):</label>
+                  <select
+                    value={selectedTeacherForPersonal}
+                    onChange={e => setSelectedTeacherForPersonal(Number(e.target.value))}
+                    className="px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white shadow-2xs outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value={0}>👥 Walimu Wote (All Teachers Matrix)</option>
+                    {teachers.map(t => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} ({t.initial || '--'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Scope Filter when single teacher is selected */}
+                {!isAllTeachersSelected && (
+                  <button
+                    type="button"
+                    onClick={() => setOnlyTeachersWithDuties(prev => !prev)}
+                    className={`px-3 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer ${
+                      onlyTeachersWithDuties
+                        ? 'bg-indigo-50 text-indigo-900 border-indigo-300'
+                        : 'bg-emerald-50 text-emerald-900 border-emerald-300'
+                    }`}
+                    title="Badilisha kati ya kuonyesha vipindi vya mwalimu huyu pekee au vipindi vyote vya mtihani"
+                  >
+                    {onlyTeachersWithDuties ? '📅 Vipindi Vyote vya Mtihani' : '🎯 Vipindi vya Mwalimu Huyu Pekee'}
+                  </button>
+                )}
+
+                {/* View Mode Toggle: Examination Hall Matrix, Matrix Master Table, Card View */}
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs font-bold text-slate-500 uppercase">View:</span>
+                  <div className="inline-flex rounded-xl border border-slate-300 bg-slate-100 p-1 text-xs font-bold">
+                    <button
+                      type="button"
+                      onClick={() => setTeacherViewMode('matrix')}
+                      className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        teacherViewMode === 'matrix' ? 'bg-[#0f2948] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Grid className="w-3.5 h-3.5" />
+                      <span>Examination Hall Matrix</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTeacherViewMode('master')}
+                      className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        teacherViewMode === 'master' ? 'bg-[#0f2948] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Table className="w-3.5 h-3.5" />
+                      <span>Matrix Master Table</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTeacherViewMode('cards')}
+                      className={`px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer ${
+                        teacherViewMode === 'cards' ? 'bg-[#0f2948] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Card View</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Export PDF / Excel / Print Buttons */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isAllTeachersSelected || !currentT) {
+                        exportInvigilationPDF({
+                          schoolName: schoolInfo.name,
+                          sessions: normalizedSessions,
+                          teachers,
+                          invigilationAssignments,
+                          schoolInfo,
+                          examTitle: `${activeExamTitle} — RATIBA YA WALIMU WOTE`,
+                          mode: 'download'
+                        });
+                        return;
+                      }
+                      exportTeacherInvigilationPDF({
+                        schoolName: schoolInfo.name,
+                        teacher: currentT,
+                        sessions: normalizedSessions,
+                        invigilationAssignments,
+                        schoolInfo,
+                        examTitle: activeExamTitle,
+                        mode: 'download'
+                      });
+                    }}
+                    className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                    title="Pakua Ratiba ya Mwalimu kama PDF ya A4"
+                  >
+                    <Download className="w-4 h-4 text-white" />
+                    <span>Pakua PDF</span>
+                  </button>
+
+                  {!isAllTeachersSelected && currentT && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        exportTeacherInvigilationExcel({
+                          schoolName: schoolInfo.name,
+                          teacher: currentT,
+                          sessions: normalizedSessions,
+                          invigilationAssignments,
+                          schoolInfo
+                        });
+                      }}
+                      className="px-3.5 py-2 text-xs font-bold bg-white text-emerald-800 border border-emerald-300 rounded-xl hover:bg-emerald-50 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                      title="Pakua Ratiba Binafsi ya Mwalimu kama Excel (.xlsx)"
+                    >
+                      <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                      <span>Excel</span>
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (isAllTeachersSelected || !currentT) {
+                        exportInvigilationPDF({
+                          schoolName: schoolInfo.name,
+                          sessions: normalizedSessions,
+                          teachers,
+                          invigilationAssignments,
+                          schoolInfo,
+                          examTitle: `${activeExamTitle} — RATIBA YA WALIMU WOTE`,
+                          mode: 'print'
+                        });
+                        return;
+                      }
+                      exportTeacherInvigilationPDF({
+                        schoolName: schoolInfo.name,
+                        teacher: currentT,
+                        sessions: normalizedSessions,
+                        invigilationAssignments,
+                        schoolInfo,
+                        examTitle: activeExamTitle,
+                        mode: 'print'
+                      });
+                    }}
+                    className="px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
+                  >
+                    <Printer className="w-4 h-4" />
+                    <span>Chapisha PDF</span>
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <label className="text-xs font-bold text-slate-600 uppercase">Select Teacher:</label>
-                <select
-                  value={selectedTeacherForPersonal}
-                  onChange={e => setSelectedTeacherForPersonal(Number(e.target.value))}
-                  className="px-3 py-2 text-xs font-bold border border-slate-300 rounded-xl bg-white shadow-2xs outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  {teachers.map(t => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} ({t.initial || '--'})
-                    </option>
-                  ))}
-                </select>
+            {/* Supervisor Banner & Summary Metrics */}
+            <div className="space-y-6">
+              {isSupervisor && currentT && (
+                <div className="bg-gradient-to-r from-amber-950 via-slate-900 to-indigo-950 text-white p-5 rounded-2xl border border-amber-400/50 shadow-md space-y-2 animate-in fade-in">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="p-3 bg-amber-400 text-slate-950 rounded-2xl font-black shrink-0 shadow-sm">
+                        <ShieldCheck className="w-6 h-6" />
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-base font-black text-amber-300 uppercase tracking-tight">
+                            🛡️ WEWE NI MSIMAMIZI MKUU (CENTER EXAM SUPERVISOR)
+                          </h3>
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase bg-amber-400 text-slate-950">
+                            OFFICIAL SUPERVISOR
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-200 font-medium mt-0.5">
+                          Mwalimu <strong className="text-white">{currentT.name}</strong>, umesajiliwa na kupangiwa kama Msimamizi Mkuu wa Mitihani katika kituo hiki cha mtihani. Unawajibika kusimamia uendeshaji mzima wa mitihani, ufunguzi wa bahasha na kuongoza wasimamizi wote wa vyumba.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-2xl text-center shadow-2xs">
+                  <div className="text-2xl font-black text-[#1d4182]">{duties.length}</div>
+                  <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Total Duty Slots</div>
+                </div>
+
+                <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-center shadow-2xs">
+                  <div className="text-2xl font-black text-[#065f46]">{morningDuties}</div>
+                  <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Session I (Morning)</div>
+                </div>
+
+                <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-2xl text-center shadow-2xs">
+                  <div className="text-2xl font-black text-[#92400e]">{afternoonDuties}</div>
+                  <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Session II (Afternoon)</div>
+                </div>
+
+                <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-2xl text-center shadow-2xs">
+                  <div className="text-2xl font-black text-[#5b21b6]">{eveningDuties}</div>
+                  <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Session III (Evening)</div>
+                </div>
+
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-center shadow-2xs">
+                  <div className="text-2xl font-black text-slate-700">{uniqueDatesCount}</div>
+                  <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Exam Days Active</div>
+                </div>
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => {
-                    const currentT = teachers.find(t => t.id === selectedTeacherForPersonal);
-                    if (!currentT) return;
-                    exportTeacherInvigilationPDF({
-                      schoolName: schoolInfo.name,
-                      teacher: currentT,
-                      sessions: normalizedSessions,
-                      invigilationAssignments,
-                      schoolInfo
-                    });
-                  }}
-                  className="px-3.5 py-2 text-xs font-bold bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-700 hover:to-rose-700 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                  title="Pakua Ratiba Binafsi ya Mwalimu kama PDF ya A4"
-                >
-                  <Download className="w-4 h-4 text-white" />
-                  <span>Download PDF</span>
-                </button>
+              <div id="personal-invig-print" className="space-y-6">
+                {displaySessions.length === 0 ? (
+                  <div className="p-12 text-center bg-slate-50 rounded-2xl border border-dashed border-slate-200 space-y-3">
+                    <Calendar className="w-10 h-10 text-slate-300 mx-auto" />
+                    <div className="text-slate-600 font-bold text-sm">
+                      {isAllTeachersSelected
+                        ? 'Hakuna vipindi vya mtihani vilivyopangwa bado.'
+                        : `Mwalimu ${currentT?.name} hajapangiwa chumba chochote cha kusimamia mtihani huu bado.`}
+                    </div>
+                    {!isAllTeachersSelected && (
+                      <button
+                        type="button"
+                        onClick={() => setOnlyTeachersWithDuties(true)}
+                        className="px-4 py-2 text-xs font-bold bg-[#1f4d8b] text-white rounded-xl hover:bg-blue-800 cursor-pointer shadow-xs"
+                      >
+                        Onyesha Vipindi Vyote vya Mtihani ili Umpangie Chumba
+                      </button>
+                    )}
+                  </div>
+                ) : teacherViewMode === 'master' ? (
+                  /* ================================================================== */
+                  /* VIEW 1: MATRIX MASTER TABLE (UNIFIED MASTER TABLE WITH HALL MATRIX)*/
+                  /* ================================================================== */
+                  <div className="bg-white border border-slate-200 rounded-2xl shadow-xs overflow-hidden">
+                    <div className="bg-[#0f2948] p-4 text-white flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm sm:text-base font-black uppercase tracking-wide">
+                          Teacher Matrix Master Table — {isAllTeachersSelected ? 'All Teachers' : `${currentT?.name} (${currentT?.initial})`} ({activeExamTitle})
+                        </h3>
+                        <p className="text-[11px] text-slate-300 font-medium">
+                          Jedwali kuu la usimamizi wa mitihani likionyesha chumba cha mwalimu pamoja na Matrix ya Vyumba vyote (Room 1 – Room 7)
+                        </p>
+                      </div>
+                      <span className="px-3 py-1 rounded-lg bg-white/15 text-amber-300 text-xs font-black">
+                        {duties.length} Zamu za Usimamizi • {displaySessions.length} Vipindi
+                      </span>
+                    </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const currentT = teachers.find(t => t.id === selectedTeacherForPersonal);
-                    if (!currentT) return;
-                    exportTeacherInvigilationExcel({
-                      schoolName: schoolInfo.name,
-                      teacher: currentT,
-                      sessions: normalizedSessions,
-                      invigilationAssignments,
-                      schoolInfo
-                    });
-                  }}
-                  className="px-3.5 py-2 text-xs font-bold bg-white text-emerald-800 border border-emerald-300 rounded-xl hover:bg-emerald-50 flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                  title="Pakua Ratiba Binafsi ya Mwalimu kama Excel (.xlsx)"
-                >
-                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
-                  <span>Excel</span>
-                </button>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-100 border-b border-slate-300 text-[10px] text-slate-700 font-black uppercase tracking-wider">
+                            <th className="p-3 border-r border-slate-200 w-36">Tarehe & Siku</th>
+                            <th className="p-3 border-r border-slate-200 w-28">Kipindi & Muda</th>
+                            <th className="p-3 border-r border-slate-200 w-44">Somo & Darasa</th>
+                            {!isAllTeachersSelected && (
+                              <th className="p-3 border-r border-slate-200 text-center w-32 bg-amber-50 text-amber-950">
+                                Chumba cha {currentT?.initial || 'Mwalimu'}
+                              </th>
+                            )}
+                            {[1, 2, 3, 4, 5, 6, 7].map(r => (
+                              <th key={r} className="p-3 border-r border-slate-200 text-center min-w-[95px]">
+                                Room {r}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {Object.entries(teacherSessionsByDate).map(([dateKey, daySessions]) => {
+                            const [_rawDate, dayName, formattedDate] = dateKey.split('__');
+                            const dayTheme = getDayTheme(dayName, dayThemes);
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const t = teachers.find(item => item.id === selectedTeacherForPersonal);
-                    printFormattedSection('personal-invig-print', `Personal Invigilation Duty Schedule - ${t?.name}`, schoolInfo.name);
-                  }}
-                  className="px-3.5 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-xl flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-                >
-                  <Printer className="w-4 h-4" />
-                  <span>Print</span>
-                </button>
+                            return daySessions.map((session, sIdx) => {
+                              const subCol = getSubjectColor(session.subject);
+                              // Find rooms assigned to selected teacher in this session
+                              const myRooms: number[] = [];
+                              if (!isAllTeachersSelected && currentT) {
+                                for (let r = 0; r < session.rooms; r++) {
+                                  if (Number(invigilationAssignments[`${session.id}_room${r}`]) === Number(currentT.id)) {
+                                    myRooms.push(r + 1);
+                                  }
+                                }
+                              }
+
+                              return (
+                                <tr key={session.id} className={`border-b border-slate-100 hover:bg-slate-50/80 ${sIdx === 0 ? 'border-t-2 border-t-slate-200' : ''}`}>
+                                  {sIdx === 0 && (
+                                    <td
+                                      rowSpan={daySessions.length}
+                                      className="p-3 border-r border-slate-200 font-black text-slate-900 bg-slate-50/60 align-top"
+                                      style={{ borderLeft: `4px solid ${dayTheme.border}` }}
+                                    >
+                                      <div className="text-xs uppercase">{dayName}</div>
+                                      <div className="text-[10px] text-slate-500 font-bold mt-0.5">{formattedDate}</div>
+                                    </td>
+                                  )}
+                                  <td className="p-3 border-r border-slate-200">
+                                    <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${
+                                      session.session === 'SESSION I'
+                                        ? 'bg-blue-100 text-blue-900 border-blue-200'
+                                        : session.session === 'SESSION II'
+                                        ? 'bg-indigo-100 text-indigo-900 border-indigo-200'
+                                        : 'bg-purple-100 text-purple-900 border-purple-200'
+                                    }`}>
+                                      {session.session}
+                                    </span>
+                                    <div className="text-[10px] text-slate-500 mt-1 font-mono font-bold">
+                                      {session.start} - {session.end}
+                                    </div>
+                                  </td>
+                                  <td className="p-3 border-r border-slate-200">
+                                    <span
+                                      style={{ backgroundColor: subCol.bg, color: subCol.text, borderColor: subCol.border }}
+                                      className="px-2 py-0.5 rounded-md border font-black text-[11px] inline-block mb-1"
+                                    >
+                                      {session.subject}
+                                    </span>
+                                    <div className="text-[10px] font-bold text-slate-600">
+                                      {session.className} • {session.stream}
+                                    </div>
+                                  </td>
+                                  {!isAllTeachersSelected && (
+                                    <td className="p-2 border-r border-slate-200 text-center bg-amber-50/30">
+                                      {myRooms.length > 0 ? (
+                                        <div className="flex flex-wrap items-center justify-center gap-1">
+                                          {myRooms.map(rm => (
+                                            <span
+                                              key={rm}
+                                              className="px-2.5 py-1 rounded-lg bg-emerald-600 text-white font-black text-[11px] shadow-2xs"
+                                            >
+                                              ROOM {rm}
+                                            </span>
+                                          ))}
+                                        </div>
+                                      ) : (
+                                        <span className="text-[10px] font-semibold text-slate-400">Hajapangiwa</span>
+                                      )}
+                                    </td>
+                                  )}
+                                  {[0, 1, 2, 3, 4, 5, 6].map(roomIndex => {
+                                    const isRequired = roomIndex < session.rooms;
+                                    const assignmentKey = `${session.id}_room${roomIndex}`;
+                                    const assignedId = invigilationAssignments[assignmentKey];
+                                    const assignedTeacher = assignedId ? teachers.find(t => t.id === assignedId) : undefined;
+                                    const isSelectedTeacherRoom = !isAllTeachersSelected && currentT && Number(assignedId) === Number(currentT.id);
+                                    const tCol = assignedTeacher ? getTeacherColor(assignedTeacher.id) : null;
+
+                                    return (
+                                      <td key={roomIndex} className="p-1.5 border-r border-slate-200 text-center">
+                                        {isRequired ? (
+                                          <div
+                                            onClick={() => setAssignModalData({ session, roomIndex, currentTeacherId: assignedId })}
+                                            className={`p-1.5 rounded-lg border text-[10px] cursor-pointer min-h-[46px] flex flex-col justify-center items-center transition-all ${
+                                              isSelectedTeacherRoom
+                                                ? 'bg-emerald-600 text-white border-emerald-700 ring-2 ring-amber-400 shadow-sm'
+                                                : assignedTeacher
+                                                ? 'bg-blue-50/70 border-blue-200 hover:bg-blue-100'
+                                                : 'bg-amber-50/60 border-dashed border-amber-300 hover:bg-amber-100'
+                                            }`}
+                                            title={assignedTeacher ? `Msimamizi: ${assignedTeacher.name} (Bofya kubadilisha)` : 'Bofya kupanga msimamizi'}
+                                          >
+                                            {assignedTeacher ? (
+                                              <>
+                                                <span
+                                                  className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-white mb-0.5 shadow-2xs"
+                                                  style={{
+                                                    backgroundColor: isSelectedTeacherRoom
+                                                      ? '#f59e0b'
+                                                      : assignedTeacher.color || tCol?.hex || '#1e40af',
+                                                    color: isSelectedTeacherRoom ? '#0f172a' : '#ffffff'
+                                                  }}
+                                                >
+                                                  {assignedTeacher.initial}
+                                                </span>
+                                                <span className={`font-black leading-none truncate max-w-[82px] ${isSelectedTeacherRoom ? 'text-white' : 'text-slate-800'}`}>
+                                                  {assignedTeacher.name.split(' ')[0]}
+                                                </span>
+                                              </>
+                                            ) : (
+                                              <span className="font-bold text-amber-700">+ Assign</span>
+                                            )}
+                                          </div>
+                                        ) : (
+                                          <span className="text-slate-300">—</span>
+                                        )}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            });
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                ) : teacherViewMode === 'matrix' ? (
+                  /* ================================================================== */
+                  /* VIEW 2: EXAMINATION HALL MATRIX (GROUPED BY DAY WITH ROOM COLUMNS) */
+                  /* ================================================================== */
+                  <div className="space-y-6">
+                    {Object.entries(teacherSessionsByDate).map(([dateKey, daySessions], dayIdx) => {
+                      const [_rawDate, dayName, formattedDate] = dateKey.split('__');
+                      const dayTheme = getDayTheme(dayName, dayThemes);
+                      const supervisor = supervisors[dayIdx % Math.max(supervisors.length, 1)];
+
+                      return (
+                        <div
+                          key={dateKey}
+                          style={{ borderColor: dayTheme.border }}
+                          className="bg-white border rounded-2xl shadow-xs overflow-hidden"
+                        >
+                          <div
+                            style={{ backgroundColor: dayTheme.headerBg }}
+                            className="px-5 py-3 text-white flex flex-col sm:flex-row sm:items-center justify-between gap-2"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="p-1.5 rounded-lg bg-white/20 text-white">
+                                <Calendar className="w-4 h-4" />
+                              </span>
+                              <div>
+                                <div className="text-sm font-black tracking-wide uppercase flex items-center gap-2">
+                                  <span>{dayName}</span>
+                                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-white/20 font-bold">
+                                    {formattedDate}
+                                  </span>
+                                </div>
+                                <span className="text-[11px] text-white/80 font-medium">
+                                  {isAllTeachersSelected ? 'Walimu Wote' : currentT?.name} • {daySessions.length} Kipindi / Masomo
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="text-xs font-semibold bg-white/20 px-3 py-1 rounded-xl flex items-center gap-1.5">
+                              <ShieldCheck className="w-3.5 h-3.5 text-amber-300" />
+                              <span>SUPERVISOR:</span>
+                              <strong className="text-white">
+                                {supervisor ? `${supervisor.name} (${supervisor.initial})` : 'To Be Appointed'}
+                              </strong>
+                            </div>
+                          </div>
+
+                          <div className="overflow-x-auto p-4">
+                            <table className="w-full text-left border-collapse text-xs bg-white rounded-xl overflow-hidden border border-slate-200">
+                              <thead>
+                                <tr className="bg-[#0f2948] text-white font-bold uppercase text-[11px] tracking-wider">
+                                  <th className="p-2.5 border-r border-slate-700 w-32">Session Slot</th>
+                                  <th className="p-2.5 border-r border-slate-700 w-28">Time</th>
+                                  <th className="p-2.5 border-r border-slate-700">Exam Subject</th>
+                                  <th className="p-2.5 border-r border-slate-700 w-36">Class & Stream</th>
+                                  {[1, 2, 3, 4, 5, 6, 7].map(r => (
+                                    <th key={r} className="p-2.5 border-r border-slate-700 text-center min-w-[95px]">
+                                      Room {r}
+                                    </th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {daySessions.map(session => {
+                                  const subCol = getSubjectColor(session.subject);
+                                  return (
+                                    <tr key={session.id} className="border-b border-slate-100 hover:bg-slate-50/80">
+                                      <td className="p-2.5 border-r border-slate-200 font-bold">
+                                        <span className={`px-2 py-0.5 rounded-md text-[10px] font-black ${
+                                          session.session === 'SESSION I'
+                                            ? 'bg-blue-100 text-blue-900 border border-blue-200'
+                                            : session.session === 'SESSION II'
+                                            ? 'bg-indigo-100 text-indigo-900 border border-indigo-200'
+                                            : 'bg-purple-100 text-purple-900 border border-purple-200'
+                                        }`}>
+                                          {session.session}
+                                        </span>
+                                      </td>
+
+                                      <td className="p-2.5 border-r border-slate-200 font-mono text-slate-600">
+                                        {session.start} - {session.end}
+                                      </td>
+
+                                      <td className="p-2.5 border-r border-slate-200">
+                                        <span
+                                          style={{ backgroundColor: subCol.bg, color: subCol.text, borderColor: subCol.border }}
+                                          className="px-2 py-0.5 rounded-md border font-bold text-[11px] inline-block"
+                                        >
+                                          {session.subject}
+                                        </span>
+                                      </td>
+
+                                      <td className="p-2.5 border-r border-slate-200 font-bold text-slate-800">
+                                        <div>{session.className}</div>
+                                        <span className="text-[10px] font-semibold text-blue-700">
+                                          {session.stream}
+                                        </span>
+                                      </td>
+
+                                      {[0, 1, 2, 3, 4, 5, 6].map(roomIndex => {
+                                        const assignmentKey = `${session.id}_room${roomIndex}`;
+                                        const isRequired = roomIndex < session.rooms;
+                                        const assignedId = invigilationAssignments[assignmentKey];
+                                        const assignedTeacher = assignedId ? teachers.find(t => t.id === assignedId) : undefined;
+                                        const isSelectedTeacherRoom = !isAllTeachersSelected && currentT && Number(assignedId) === Number(currentT.id);
+                                        const tCol = assignedTeacher ? getTeacherColor(assignedTeacher.id) : null;
+
+                                        return (
+                                          <td
+                                            key={roomIndex}
+                                            className="p-2 border-r border-slate-200 text-center align-middle"
+                                          >
+                                            {isRequired ? (
+                                              <div
+                                                onClick={() => setAssignModalData({
+                                                  session,
+                                                  roomIndex,
+                                                  currentTeacherId: assignedId
+                                                })}
+                                                className={`p-1.5 rounded-lg border text-xs cursor-pointer transition-all ${
+                                                  isSelectedTeacherRoom
+                                                    ? 'bg-emerald-600 text-white border-emerald-700 ring-2 ring-amber-400 shadow-sm'
+                                                    : assignedTeacher
+                                                    ? 'bg-blue-50/50 border-blue-200 hover:border-blue-400 hover:bg-blue-100/50'
+                                                    : 'bg-amber-50/70 border-dashed border-amber-300 hover:bg-amber-100'
+                                                }`}
+                                              >
+                                                {assignedTeacher ? (
+                                                  <div className="flex items-center justify-center gap-1.5" title={assignedTeacher.name}>
+                                                    <span
+                                                      style={{
+                                                        backgroundColor: isSelectedTeacherRoom
+                                                          ? '#f59e0b'
+                                                          : assignedTeacher.color || tCol?.hex,
+                                                        color: isSelectedTeacherRoom ? '#0f172a' : '#ffffff'
+                                                      }}
+                                                      className="w-6 h-6 rounded-full inline-flex items-center justify-center font-bold text-[10px] shadow-2xs"
+                                                    >
+                                                      {assignedTeacher.initial}
+                                                    </span>
+                                                    <span className={`font-bold text-[10px] truncate max-w-[65px] ${isSelectedTeacherRoom ? 'text-white font-black' : 'text-slate-800'}`}>
+                                                      {assignedTeacher.name.split(' ')[0]}
+                                                    </span>
+                                                  </div>
+                                                ) : (
+                                                  <span className="text-[10px] font-bold text-amber-700">
+                                                    + Assign
+                                                  </span>
+                                                )}
+                                              </div>
+                                            ) : (
+                                              <span className="text-slate-300 font-light">—</span>
+                                            )}
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  /* ================================================================== */
+                  /* VIEW 3: CARD VIEW (MODERN VISUAL INVIGILATION DUTY CARDS)          */
+                  /* ================================================================== */
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {displaySessions.map(s => {
+                      const subCol = getSubjectColor(s.subject);
+                      const teacherRoomsInSession: number[] = [];
+                      if (!isAllTeachersSelected && currentT) {
+                        for (let r = 0; r < s.rooms; r++) {
+                          if (Number(invigilationAssignments[`${s.id}_room${r}`]) === Number(currentT.id)) {
+                            teacherRoomsInSession.push(r + 1);
+                          }
+                        }
+                      }
+
+                      return (
+                        <div
+                          key={s.id}
+                          className={`bg-white border rounded-2xl p-5 shadow-xs space-y-3 hover:shadow-md transition-all ${
+                            teacherRoomsInSession.length > 0
+                              ? 'border-emerald-400 ring-1 ring-emerald-200'
+                              : 'border-slate-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                            <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black uppercase ${
+                              s.session === 'SESSION I' ? 'bg-blue-100 text-blue-900' :
+                              s.session === 'SESSION II' ? 'bg-indigo-100 text-indigo-900' :
+                              'bg-purple-100 text-purple-900'
+                            }`}>
+                              {s.session}
+                            </span>
+                            <span className="text-xs font-mono font-bold text-slate-600">{s.time || `${s.start} - ${s.end}`}</span>
+                          </div>
+
+                          <div className="flex items-start justify-between gap-2">
+                            <div>
+                              <div className="text-xs font-bold text-slate-400 uppercase tracking-wider">{s.day} • {s.date}</div>
+                              <h4 className="text-base font-black text-slate-900 mt-1 flex items-center gap-2">
+                                <span
+                                  style={{ backgroundColor: subCol.bg, color: subCol.text, borderColor: subCol.border }}
+                                  className="px-2.5 py-1 rounded-lg border text-xs font-bold"
+                                >
+                                  {s.subject}
+                                </span>
+                              </h4>
+                            </div>
+
+                            {teacherRoomsInSession.length > 0 && (
+                              <span className="px-2.5 py-1 rounded-xl bg-emerald-600 text-white text-[11px] font-black shadow-xs shrink-0">
+                                {teacherRoomsInSession.map(rm => `ROOM ${rm}`).join(', ')}
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center justify-between text-xs font-bold text-slate-700 bg-slate-50 p-2.5 rounded-xl">
+                            <span>Class/Stream: <strong className="text-blue-700">{s.className} ({s.stream})</strong></span>
+                            <span>Rooms: <strong className="text-indigo-700">{s.rooms} Exam Halls</strong></span>
+                          </div>
+
+                          <div className="space-y-1 pt-1 border-t border-slate-100">
+                            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest block">
+                              Assigned Invigilators (Click room to change)
+                            </span>
+                            <div className="space-y-1">
+                              {Array.from({ length: s.rooms }).map((_, r) => {
+                                const tid = invigilationAssignments[`${s.id}_room${r}`];
+                                const tObj = teachers.find(t => t.id === tid);
+                                const isMyRoom = !isAllTeachersSelected && currentT && Number(tid) === Number(currentT.id);
+                                return (
+                                  <div
+                                    key={r}
+                                    onClick={() => setAssignModalData({ session: s, roomIndex: r, currentTeacherId: tid })}
+                                    className={`text-xs font-semibold flex items-center justify-between px-2.5 py-1.5 rounded-lg cursor-pointer transition-colors ${
+                                      isMyRoom
+                                        ? 'bg-emerald-600 text-white font-black shadow-2xs'
+                                        : 'text-slate-700 bg-slate-50/60 hover:bg-blue-50'
+                                    }`}
+                                  >
+                                    <span>Room {r + 1}:</span>
+                                    <span className={isMyRoom ? 'text-amber-300 font-black' : tObj ? 'text-indigo-700 font-bold' : 'text-amber-600 italic'}>
+                                      {tObj ? `${tObj.name} (${tObj.initial})` : '+ Assign Invigilator'}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
             </div>
           </div>
-
-          {/* Teacher Summary Metrics */}
-          {(() => {
-            const currentT = teachers.find(t => t.id === selectedTeacherForPersonal);
-            if (!currentT) return null;
-
-            // Find all sessions assigned to this teacher
-            const duties: { session: InvigilationSession; room: number }[] = [];
-            normalizedSessions.forEach(sess => {
-              for (let r = 0; r < sess.rooms; r++) {
-                const key = `${sess.id}_room${r}`;
-                const assignedId = invigilationAssignments[key];
-                if (assignedId === currentT.id) {
-                  duties.push({ session: sess, room: r + 1 });
-                }
-              }
-            });
-
-            const morningDuties = duties.filter(d => d.session.session === 'SESSION I').length;
-            const afternoonDuties = duties.filter(d => d.session.session === 'SESSION II').length;
-            const eveningDuties = duties.filter(d => d.session.session === 'SESSION III').length;
-            const uniqueDatesCount = new Set(duties.map(d => d.session.rawDate)).size;
-
-            return (
-              <div className="space-y-6">
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-                  <div className="p-3.5 bg-blue-50/70 border border-blue-200 rounded-2xl text-center shadow-2xs">
-                    <div className="text-2xl font-black text-[#1d4182]">{duties.length}</div>
-                    <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Total Duty Slots</div>
-                  </div>
-
-                  <div className="p-3.5 bg-emerald-50/70 border border-emerald-200 rounded-2xl text-center shadow-2xs">
-                    <div className="text-2xl font-black text-[#065f46]">{morningDuties}</div>
-                    <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Session I (Morning)</div>
-                  </div>
-
-                  <div className="p-3.5 bg-amber-50/70 border border-amber-200 rounded-2xl text-center shadow-2xs">
-                    <div className="text-2xl font-black text-[#92400e]">{afternoonDuties}</div>
-                    <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Session II (Afternoon)</div>
-                  </div>
-
-                  <div className="p-3.5 bg-purple-50/70 border border-purple-200 rounded-2xl text-center shadow-2xs">
-                    <div className="text-2xl font-black text-[#5b21b6]">{eveningDuties}</div>
-                    <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Session III (Evening)</div>
-                  </div>
-
-                  <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-center shadow-2xs">
-                    <div className="text-2xl font-black text-slate-700">{uniqueDatesCount}</div>
-                    <div className="text-[10px] font-bold text-slate-600 uppercase mt-0.5">Exam Days Active</div>
-                  </div>
-                </div>
-
-                <div id="personal-invig-print" className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
-                  <div className="hidden print:block p-4 border-b border-slate-900 mb-2">
-                    <h2 className="text-lg font-black uppercase text-slate-900">{schoolInfo.name}</h2>
-                    <p className="text-xs font-bold text-blue-900">RATIBI BINAFSI YA USIMAMIZI WA MITIHANI — MWL. {currentT.name.toUpperCase()} ({currentT.initial || '--'})</p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200 text-[11px] text-slate-600 font-bold uppercase">
-                          <th className="p-3 border-r border-slate-200">Date & Day of Week</th>
-                          <th className="p-3 border-r border-slate-200">Session Slot</th>
-                          <th className="p-3 border-r border-slate-200">Time Range</th>
-                          <th className="p-3 border-r border-slate-200">Exam Subject</th>
-                          <th className="p-3 border-r border-slate-200">Class & Stream</th>
-                          <th className="p-3 text-center">Assigned Exam Hall / Room</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {duties.length === 0 ? (
-                          <tr>
-                            <td colSpan={6} className="p-12 text-center text-slate-400">
-                              No invigilation sessions assigned to {currentT.name} yet. Click on any room slot in the Master Timetable to assign them.
-                            </td>
-                          </tr>
-                        ) : (
-                          duties.map((d, i) => (
-                            <tr key={i} className="border-b border-slate-100 hover:bg-slate-50">
-                              <td className="p-3 border-r border-slate-200 font-bold">
-                                <div>{d.session.day}</div>
-                                <span className="text-[11px] text-slate-500 font-normal">{d.session.date}</span>
-                              </td>
-                              <td className="p-3 border-r border-slate-200">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-black ${
-                                  d.session.session === 'SESSION I'
-                                    ? 'bg-blue-100 text-blue-900'
-                                    : d.session.session === 'SESSION II'
-                                    ? 'bg-indigo-100 text-indigo-900'
-                                    : 'bg-purple-100 text-purple-900'
-                                }`}>
-                                  {d.session.session}
-                                </span>
-                              </td>
-                              <td className="p-3 border-r border-slate-200 font-mono text-slate-600 font-semibold">
-                                {d.session.time}
-                              </td>
-                              <td className="p-3 border-r border-slate-200 font-bold text-blue-900">
-                                {d.session.subject}
-                              </td>
-                              <td className="p-3 border-r border-slate-200">
-                                {d.session.className} • {d.session.stream}
-                              </td>
-                              <td className="p-3 text-center font-black text-blue-800 bg-blue-50/50">
-                                ROOM {d.room}
-                              </td>
-                            </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
-        </div>
-      )}
+        );
+      })()}
 
       {/* ======================================================== */}
       {/* MODAL: ASSIGN INVIGILATOR                                */}
@@ -2459,11 +3702,48 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
       )}
 
       {/* ======================================================== */}
+      {/* TAB: EXAM CONTROL LOGS & FORMS                           */}
+      {/* ======================================================== */}
+      {activeTab === 'control_logs' && (
+        <ExamControlLogForms
+          schoolId={getCurrentSchoolId()}
+          teachers={teachers}
+          schoolInfo={schoolInfo}
+          currentUser={currentUser}
+          sessions={normalizedSessions}
+          invigilationAssignments={invigilationAssignments}
+          activeExamTitle={activeExamTitle}
+          onChangeExamTitle={setActiveExamTitle}
+          initialSubTab={controlInitialSubTab}
+          onOpenEnvelopeCoverForm={() => setActiveTab('envelope_cover')}
+        />
+      )}
+
+      {/* ======================================================== */}
+      {/* TAB: SCRIPT RETURN ENVELOPE COVER FORM (NECTA FORMAT)    */}
+      {/* ======================================================== */}
+      {activeTab === 'envelope_cover' && (
+        <ScriptReturnEnvelopeView
+          schoolInfo={schoolInfo}
+          sessions={normalizedSessions}
+          teachers={teachers}
+          supervisors={supervisors}
+          invigilationAssignments={invigilationAssignments}
+          activeExamTitle={activeExamTitle}
+          onBack={() => {
+            setActiveTab('general');
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+          }}
+        />
+      )}
+
+      {/* ======================================================== */}
       {/* MODAL: ADD / EDIT EXAMINATION SESSION                    */}
       {/* ======================================================== */}
       {sessionModalOpen && (
         <SessionEditModal
           initialSession={editingSession}
+          defaultExamTitle={activeExamTitle}
           onSave={handleSaveSessionData}
           onClose={() => {
             setSessionModalOpen(false);
@@ -2554,6 +3834,7 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
                     onUpdateSavedInvigilationRecords(updated);
                   }
                   setSaveModalOpen(false);
+                  setActiveTab('saved');
                   alert(`Invigilation timetable "${snapshotTitle}" saved successfully!`);
                 }}
                 className="px-5 py-2.5 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs cursor-pointer flex items-center gap-2"
@@ -2564,6 +3845,14 @@ export const InvigilationContainer: React.FC<InvigilationContainerProps> = ({
             </div>
           </div>
         </div>
+      )}
+      {/* CSV Import Modal */}
+      {importModalOpen && (
+        <ImportExamTimetableModal
+          existingTeachers={teachers}
+          onImport={handleImportCSV}
+          onClose={() => setImportModalOpen(false)}
+        />
       )}
     </div>
   );

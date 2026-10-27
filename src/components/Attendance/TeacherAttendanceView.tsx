@@ -169,21 +169,34 @@ export const TeacherAttendanceView: React.FC<TeacherAttendanceViewProps> = ({
     return Array.from(roles).sort();
   }, [teachers]);
 
-  // Filtered teachers for Daily Roll Call
+  // Filtered teachers for Daily Roll Call (Sorted: Female A-Z first, then Male A-Z)
   const filteredTeachers = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return teachers.filter(t => {
-      const entry = currentDayRecords[t.id];
-      const matchesQuery =
-        !q ||
-        t.name.toLowerCase().includes(q) ||
-        (t.initial || '').toLowerCase().includes(q) ||
-        (t.phone || '').toLowerCase().includes(q) ||
-        (t.subjects || []).some(s => s.toLowerCase().includes(q));
-      const matchesRole = selectedRole === 'ALL' || (t.schoolRole || 'Subject Teacher') === selectedRole;
-      const matchesStatus = statusFilter === 'ALL' || entry?.status === statusFilter;
-      return matchesQuery && matchesRole && matchesStatus;
-    });
+    const isFem = (t: Teacher) => {
+      const g = (t.gender || '').toLowerCase().trim();
+      if (g.startsWith('f') || g === 'ke' || g === 'girl' || g === 'mwanamke' || g === 'g') return true;
+      const r = (t.schoolRole || '').toLowerCase();
+      return r.includes('mistress') || r.includes('matron');
+    };
+    return teachers
+      .filter(t => {
+        const entry = currentDayRecords[t.id];
+        const matchesQuery =
+          !q ||
+          t.name.toLowerCase().includes(q) ||
+          (t.initial || '').toLowerCase().includes(q) ||
+          (t.phone || '').toLowerCase().includes(q) ||
+          (t.subjects || []).some(s => s.toLowerCase().includes(q));
+        const matchesRole = selectedRole === 'ALL' || (t.schoolRole || 'Subject Teacher') === selectedRole;
+        const matchesStatus = statusFilter === 'ALL' || entry?.status === statusFilter;
+        return matchesQuery && matchesRole && matchesStatus;
+      })
+      .sort((a, b) => {
+        const aF = isFem(a);
+        const bF = isFem(b);
+        if (aF !== bF) return aF ? -1 : 1;
+        return (a.name || '').localeCompare(b.name || '');
+      });
   }, [teachers, currentDayRecords, searchQuery, selectedRole, statusFilter]);
 
   // Update a single teacher's entry for selectedDate

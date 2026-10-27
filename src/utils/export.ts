@@ -101,42 +101,127 @@ export function exportClassTimetableGridToCSV(
   downloadFile(`${className.replace(/\s+/g, '_')}_${stream.replace(/\s+/g, '_')}_Timetable.csv`, csvContent);
 }
 
+
 /**
- * Export Invigilation Timetable to CSV
+ * RFC 4180 compliant CSV text parser
+ */
+export function parseCSVLines(csvText: string): string[][] {
+  const result: string[][] = [];
+  let curRow: string[] = [];
+  let curVal = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < csvText.length; i++) {
+    const char = csvText[i];
+    const nextChar = csvText[i + 1];
+
+    if (inQuotes) {
+      if (char === '"' && nextChar === '"') {
+        curVal += '"';
+        i++;
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        curVal += char;
+      }
+    } else {
+      if (char === '"') {
+        inQuotes = true;
+      } else if (char === ',' || char === '\t' || char === ';') {
+        curRow.push(curVal.trim());
+        curVal = '';
+      } else if (char === '\r') {
+        // ignore CR
+      } else if (char === '\n') {
+        curRow.push(curVal.trim());
+        if (curRow.some(cell => cell.length > 0)) {
+          result.push(curRow);
+        }
+        curRow = [];
+        curVal = '';
+      } else {
+        curVal += char;
+      }
+    }
+  }
+
+  if (curVal.length > 0 || curRow.length > 0) {
+    curRow.push(curVal.trim());
+    if (curRow.some(cell => cell.length > 0)) {
+      result.push(curRow);
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Export Invigilation & Examination Session Directory to CSV
  */
 export function exportInvigilationToCSV(
   sessions: InvigilationSession[],
   teachers: Teacher[],
   assignments: Record<string, number>,
-  filename: string = 'Invigilation_Schedule.csv'
+  filename: string = 'Examination_Session_Directory.csv'
 ) {
-  const headers = ['Date', 'Day', 'Session', 'Time', 'Exam Title / Subject', 'Class / Form', 'Stream', 'Rooms', 'Assigned Invigilators'];
+  const headers = [
+    'Date', 
+    'Day', 
+    'Session', 
+    'Start Time', 
+    'End Time', 
+    'Time Duration',
+    'Exam Paper / Subject', 
+    'Class / Form', 
+    'Stream', 
+    'Level',
+    'Allocated Rooms', 
+    'Assigned Invigilators',
+    'Session Status'
+  ];
 
   const rows = sessions.map(session => {
     const invigilators: string[] = [];
+    let assignedCount = 0;
+
     for (let r = 0; r < session.rooms; r++) {
       const key = `${session.id}_room${r}`;
       const teacherId = assignments[key];
       const teacher = teachers.find(t => t.id === teacherId);
-      invigilators.push(`Room ${r + 1}: ${teacher ? `${teacher.name} (${teacher.initial})` : 'Unassigned'}`);
+      if (teacher) assignedCount++;
+      invigilators.push(`Room ${r + 1}: ${teacher ? `${teacher.name} (${teacher.initial || 'T'})` : 'Unassigned'}`);
     }
+
+    const status = assignedCount === session.rooms ? 'FULL' : assignedCount > 0 ? 'PARTIAL' : 'PENDING';
 
     return [
       escapeCSV(session.date),
       escapeCSV(session.day),
       escapeCSV(session.session),
+      escapeCSV(session.start),
+      escapeCSV(session.end),
       escapeCSV(`${session.start} - ${session.end}`),
       escapeCSV(session.subject),
       escapeCSV(session.className),
       escapeCSV(session.stream),
+      escapeCSV(session.level || 'CSEE'),
       escapeCSV(session.rooms),
-      escapeCSV(invigilators.join('; '))
+      escapeCSV(invigilators.join('; ')),
+      escapeCSV(status)
     ].join(',');
   });
 
-  const csvContent = [headers.join(','), ...rows].join('\n');
+  const csvContent = [
+    escapeCSV('EXAMINATION TIMETABLE & SESSION DIRECTORY'),
+    escapeCSV(`Generated on ${new Date().toLocaleString()}`),
+    '',
+    headers.join(','), 
+    ...rows
+  ].join('\n');
+
   downloadFile(filename, csvContent);
 }
+
 
 /**
  * Export Timetable to iCalendar (.ics / iCal) format

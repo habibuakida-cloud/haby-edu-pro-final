@@ -490,20 +490,27 @@ export const DutyRosterSystem: React.FC<DutyRosterSystemProps> = ({
 
       if (Array.isArray(students) && students.length > 0) {
         const computedStreams = computeStreamsFromRegisteredStudents(students);
-        if (computedStreams.length > nextStreams.length) {
-          nextStreams = computedStreams;
-          changed = true;
-        } else {
-          const enriched = nextStreams.map(s => ensureStreamGenderFields(s, students));
-          const diff = enriched.some(
-            (s, i) =>
-              s.registeredBoys !== nextStreams[i]?.registeredBoys ||
-              s.registeredGirls !== nextStreams[i]?.registeredGirls ||
-              s.totalStudents !== nextStreams[i]?.totalStudents
-          );
-          if (diff) {
-            nextStreams = enriched;
+        if (computedStreams.length > 0) {
+          const existingNames = new Set(nextStreams.map(s => s.name.toLowerCase().replace(/\s+/g, '')));
+          const missing = computedStreams.filter(cs => !existingNames.has(cs.name.toLowerCase().replace(/\s+/g, '')));
+          if (missing.length > 0) {
+            nextStreams = [...nextStreams, ...missing].map(s => ensureStreamGenderFields(s, students));
             changed = true;
+          } else if (computedStreams.length > nextStreams.length) {
+            nextStreams = computedStreams;
+            changed = true;
+          } else {
+            const enriched = nextStreams.map(s => ensureStreamGenderFields(s, students));
+            const diff = enriched.some(
+              (s, i) =>
+                s.registeredBoys !== nextStreams[i]?.registeredBoys ||
+                s.registeredGirls !== nextStreams[i]?.registeredGirls ||
+                s.totalStudents !== nextStreams[i]?.totalStudents
+            );
+            if (diff) {
+              nextStreams = enriched;
+              changed = true;
+            }
           }
         }
       }
@@ -615,12 +622,37 @@ export const DutyRosterSystem: React.FC<DutyRosterSystemProps> = ({
     return String(firstAssigned ?? rosterState.teachers[0]?.id ?? '1001');
   });
 
-  const [activeTab, setActiveTab] = useState<'MASTER_VIEW' | 'DUTY_DASHBOARD' | 'SETUP'>(
+  const [activeTab, setActiveTab] = useState<'MASTER_VIEW' | 'DUTY_DASHBOARD' | 'SETUP' | 'VISUAL_CALENDAR'>(
     isDefaultAdmin ? 'MASTER_VIEW' : 'DUTY_DASHBOARD'
   );
 
+  // Visual Duty Calendar State
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string>(new Date().toISOString().slice(0, 10));
+  const [dailyDutiesMap, setDailyDutiesMap] = useState<Record<string, {
+    assemblyMonitorId?: string;
+    assemblyMonitorName?: string;
+    disciplinePatrolId?: string;
+    disciplinePatrolName?: string;
+    gateMonitorId?: string;
+    gateMonitorName?: string;
+    diningSupervisorId?: string;
+    diningSupervisorName?: string;
+    groundsSupervisorId?: string;
+    groundsSupervisorName?: string;
+    notes?: string;
+  }>>(() => {
+    try {
+      const cached = localStorage.getItem(`haby_daily_duties_map_${schoolId || 'default'}`);
+      return cached ? JSON.parse(cached) : {};
+    } catch {
+      return {};
+    }
+  });
+  const [dutyAssignModalOpen, setDutyAssignModalOpen] = useState(false);
+
   useEffect(() => {
-    if (activeRoleMode === 'TEACHER_ON_DUTY') {
+    if (activeRoleMode === 'TEACHER_ON_DUTY' && activeTab !== 'VISUAL_CALENDAR') {
       setActiveTab('DUTY_DASHBOARD');
     }
   }, [activeRoleMode]);
@@ -2044,6 +2076,18 @@ export const DutyRosterSystem: React.FC<DutyRosterSystemProps> = ({
               </button>
               <button
                 type="button"
+                onClick={() => setActiveTab('VISUAL_CALENDAR')}
+                className={`px-3.5 py-2 rounded-md text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer ${
+                  activeTab === 'VISUAL_CALENDAR'
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                <Calendar className="w-4 h-4 text-purple-400" />
+                <span>Kalenda ya Zamu za Kila Siku (Visual Duty Calendar)</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setActiveTab('SETUP')}
                 className={`px-3.5 py-2 rounded-md text-xs font-bold flex items-center gap-2 transition-colors cursor-pointer ${
                   activeTab === 'SETUP'
@@ -3457,6 +3501,335 @@ export const DutyRosterSystem: React.FC<DutyRosterSystemProps> = ({
                 </tbody>
               </table>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==========================================================================
+          VIEW 4: VISUAL DUTY CALENDAR (MONTH & WEEK DUTY ROSTER GRID)
+          ========================================================================== */}
+      {activeTab === 'VISUAL_CALENDAR' && (
+        <div className="space-y-5 bg-white border border-slate-200 rounded-2xl p-5 shadow-xs">
+          {/* Header Bar */}
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-200 pb-4">
+            <div>
+              <h3 className="text-lg font-black text-[#1f4d8b] flex items-center gap-2">
+                <Calendar className="w-5 h-5 text-purple-600" />
+                <span>Kalenda ya Zamu za Kila Siku (Daily School Duty Calendar)</span>
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Panga na kutazama majukumu ya kila siku (Assembly Patrol, Discipline Patrol, Gate Duty, Dining, na Usafi) kwa muundo wa kalenda.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  const prev = new Date(calendarMonth);
+                  prev.setMonth(prev.getMonth() - 1);
+                  setCalendarMonth(prev);
+                }}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold cursor-pointer transition"
+              >
+                ← Mwezi Uliopita
+              </button>
+              <span className="font-black text-xs text-slate-900 px-3 py-1.5 bg-purple-50 border border-purple-200 rounded-xl">
+                {calendarMonth.toLocaleDateString('sw-TZ', { month: 'long', year: 'numeric' }).toUpperCase()}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  const next = new Date(calendarMonth);
+                  next.setMonth(next.getMonth() + 1);
+                  setCalendarMonth(next);
+                }}
+                className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-800 rounded-xl text-xs font-bold cursor-pointer transition"
+              >
+                Mwezi Ujao →
+              </button>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-xs"
+              >
+                <Printer className="w-3.5 h-3.5 text-purple-300" />
+                <span>Print Kalenda</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Calendar Month Grid */}
+          <div className="overflow-x-auto">
+            <div className="min-w-[750px]">
+              {/* Header Days */}
+              <div className="grid grid-cols-7 gap-1 bg-slate-900 text-white p-2.5 rounded-t-xl text-center text-xs font-bold uppercase tracking-wider">
+                <div>Jumatatu</div>
+                <div>Jumanne</div>
+                <div>Jumatano</div>
+                <div>Alhamisi</div>
+                <div>Ijumaa</div>
+                <div>Jumamosi</div>
+                <div>Jumapili</div>
+              </div>
+
+              {/* Days Grid */}
+              <div className="grid grid-cols-7 gap-1.5 bg-slate-100 p-1.5 rounded-b-xl border border-slate-200 text-xs">
+                {(() => {
+                  const year = calendarMonth.getFullYear();
+                  const month = calendarMonth.getMonth();
+                  const firstDay = new Date(year, month, 1);
+                  const lastDay = new Date(year, month + 1, 0);
+                  
+                  // Monday-first indexing: 0 = Mon, 6 = Sun
+                  let startDayIdx = firstDay.getDay() - 1;
+                  if (startDayIdx === -1) startDayIdx = 6;
+
+                  const daysInMonth = lastDay.getDate();
+                  const cells = [];
+
+                  // Empty padded cells before month start
+                  for (let i = 0; i < startDayIdx; i++) {
+                    cells.push(
+                      <div key={`empty-prev-${i}`} className="bg-slate-50/50 p-2 min-h-[110px] rounded-lg border border-dashed border-slate-200 opacity-40"></div>
+                    );
+                  }
+
+                  // Active month days
+                  for (let d = 1; d <= daysInMonth; d++) {
+                    const dateObj = new Date(year, month, d);
+                    const isoDate = dateObj.toISOString().slice(0, 10);
+                    const isToday = isoDate === new Date().toISOString().slice(0, 10);
+
+                    // Find matching weekly duty assignment
+                    const weekAssignment = rosterState.weeklyAssignments.find(
+                      w => isoDate >= w.weekStart && isoDate <= w.weekEnd
+                    );
+
+                    const duties = dailyDutiesMap[isoDate] || {};
+
+                    cells.push(
+                      <div
+                        key={isoDate}
+                        onClick={() => {
+                          setSelectedCalendarDate(isoDate);
+                          setDutyAssignModalOpen(true);
+                        }}
+                        className={`p-2 min-h-[115px] rounded-xl border transition-all cursor-pointer flex flex-col justify-between group ${
+                          isToday 
+                            ? 'bg-purple-50/90 border-purple-400 ring-2 ring-purple-300 shadow-2xs' 
+                            : 'bg-white border-slate-200 hover:border-purple-300 hover:shadow-2xs'
+                        }`}
+                      >
+                        <div>
+                          <div className="flex items-center justify-between border-b border-slate-100 pb-1 mb-1.5">
+                            <span className={`text-xs font-black px-1.5 py-0.5 rounded-md ${
+                              isToday ? 'bg-purple-600 text-white' : 'text-slate-800 group-hover:text-purple-700'
+                            }`}>
+                              {d}
+                            </span>
+                            {weekAssignment && (
+                              <span className="text-[9px] font-bold text-slate-400 truncate max-w-[80px]">
+                                {weekAssignment.teacherNames[0] || 'Zamu'}
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Duty Badges */}
+                          <div className="space-y-1 text-[9.5px]">
+                            {duties.assemblyMonitorName && (
+                              <div className="bg-blue-50 text-blue-900 border border-blue-200 px-1.5 py-0.5 rounded font-bold truncate flex items-center gap-1">
+                                <span>🏫 Paredi:</span>
+                                <span className="font-extrabold">{duties.assemblyMonitorName}</span>
+                              </div>
+                            )}
+                            {duties.disciplinePatrolName && (
+                              <div className="bg-rose-50 text-rose-900 border border-rose-200 px-1.5 py-0.5 rounded font-bold truncate flex items-center gap-1">
+                                <span>🛡️ Patrol:</span>
+                                <span className="font-extrabold">{duties.disciplinePatrolName}</span>
+                              </div>
+                            )}
+                            {duties.gateMonitorName && (
+                              <div className="bg-amber-50 text-amber-900 border border-amber-200 px-1.5 py-0.5 rounded font-bold truncate flex items-center gap-1">
+                                <span>🚪 Getini:</span>
+                                <span className="font-extrabold">{duties.gateMonitorName}</span>
+                              </div>
+                            )}
+                            {duties.diningSupervisorName && (
+                              <div className="bg-emerald-50 text-emerald-900 border border-emerald-200 px-1.5 py-0.5 rounded font-bold truncate flex items-center gap-1">
+                                <span>🍲 Chakula:</span>
+                                <span className="font-extrabold">{duties.diningSupervisorName}</span>
+                              </div>
+                            )}
+                            {!duties.assemblyMonitorName && !duties.disciplinePatrolName && weekAssignment && (
+                              <div className="text-[9px] text-slate-400 italic">
+                                Walimu: {weekAssignment.teacherNames.slice(0, 2).join(', ')}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="pt-1 text-[9px] font-bold text-purple-600 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                          <Plus className="w-2.5 h-2.5" />
+                          <span>Assign Duties</span>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return cells;
+                })()}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Assign Daily Duty Assignments (Assembly, Patrol, Gate, Dining) */}
+      {dutyAssignModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 space-y-5 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h3 className="text-base font-black text-[#1f4d8b] flex items-center gap-2">
+                  <ShieldCheck className="w-5 h-5 text-purple-600" />
+                  <span>Assign Daily Duty Roles: {selectedCalendarDate}</span>
+                </h3>
+                <p className="text-xs text-slate-500">Panga walimu wa zamu wa kusimamia paredi, patrol, geti na chakula</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDutyAssignModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {(() => {
+              const currentDuties = dailyDutiesMap[selectedCalendarDate] || {};
+              return (
+                <div className="space-y-3 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">🏫 Assembly &amp; Parade Monitor (Ukaguzi wa Paredi &amp; Sare)</label>
+                    <select
+                      value={currentDuties.assemblyMonitorId || ''}
+                      onChange={e => {
+                        const val = e.target.value;
+                        const tObj = rosterState.teachers.find(t => String(t.id) === val);
+                        const updated = {
+                          ...dailyDutiesMap,
+                          [selectedCalendarDate]: {
+                            ...currentDuties,
+                            assemblyMonitorId: val,
+                            assemblyMonitorName: tObj?.name || ''
+                          }
+                        };
+                        setDailyDutiesMap(updated);
+                        try { localStorage.setItem(`haby_daily_duties_map_${schoolId || 'default'}`, JSON.stringify(updated)); } catch {}
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-slate-50 font-medium"
+                    >
+                      <option value="">-- Chagua Mwalimu wa Paredi --</option>
+                      {rosterState.teachers.map(t => (
+                        <option key={t.id} value={String(t.id)}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">🛡️ Discipline Patrol Duty (Doria ya Nidhamu &amp; Sare)</label>
+                    <select
+                      value={currentDuties.disciplinePatrolId || ''}
+                      onChange={e => {
+                        const val = e.target.value;
+                        const tObj = rosterState.teachers.find(t => String(t.id) === val);
+                        const updated = {
+                          ...dailyDutiesMap,
+                          [selectedCalendarDate]: {
+                            ...currentDuties,
+                            disciplinePatrolId: val,
+                            disciplinePatrolName: tObj?.name || ''
+                          }
+                        };
+                        setDailyDutiesMap(updated);
+                        try { localStorage.setItem(`haby_daily_duties_map_${schoolId || 'default'}`, JSON.stringify(updated)); } catch {}
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-slate-50 font-medium"
+                    >
+                      <option value="">-- Chagua Mwalimu wa Patrol --</option>
+                      {rosterState.teachers.map(t => (
+                        <option key={t.id} value={String(t.id)}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">🚪 Gate &amp; Entry Monitor (Getini &amp; Mahudhurio ya Asubuhi)</label>
+                    <select
+                      value={currentDuties.gateMonitorId || ''}
+                      onChange={e => {
+                        const val = e.target.value;
+                        const tObj = rosterState.teachers.find(t => String(t.id) === val);
+                        const updated = {
+                          ...dailyDutiesMap,
+                          [selectedCalendarDate]: {
+                            ...currentDuties,
+                            gateMonitorId: val,
+                            gateMonitorName: tObj?.name || ''
+                          }
+                        };
+                        setDailyDutiesMap(updated);
+                        try { localStorage.setItem(`haby_daily_duties_map_${schoolId || 'default'}`, JSON.stringify(updated)); } catch {}
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-slate-50 font-medium"
+                    >
+                      <option value="">-- Chagua Mwalimu wa Geti --</option>
+                      {rosterState.teachers.map(t => (
+                        <option key={t.id} value={String(t.id)}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">🍲 Dining &amp; Lunch Supervisor (Chakula cha Mchana)</label>
+                    <select
+                      value={currentDuties.diningSupervisorId || ''}
+                      onChange={e => {
+                        const val = e.target.value;
+                        const tObj = rosterState.teachers.find(t => String(t.id) === val);
+                        const updated = {
+                          ...dailyDutiesMap,
+                          [selectedCalendarDate]: {
+                            ...currentDuties,
+                            diningSupervisorId: val,
+                            diningSupervisorName: tObj?.name || ''
+                          }
+                        };
+                        setDailyDutiesMap(updated);
+                        try { localStorage.setItem(`haby_daily_duties_map_${schoolId || 'default'}`, JSON.stringify(updated)); } catch {}
+                      }}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-xl bg-slate-50 font-medium"
+                    >
+                      <option value="">-- Chagua Mwalimu wa Ukaguzi wa Chakula --</option>
+                      {rosterState.teachers.map(t => (
+                        <option key={t.id} value={String(t.id)}>{t.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+                    <button
+                      type="button"
+                      onClick={() => setDutyAssignModalOpen(false)}
+                      className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl font-bold cursor-pointer shadow-xs"
+                    >
+                      Hifadhi Majukumu ya Siku
+                    </button>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}

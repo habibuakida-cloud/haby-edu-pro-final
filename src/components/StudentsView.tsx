@@ -470,7 +470,12 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
         'PGK': ['Physics', 'Geography', 'Kiswahili'],
         'HGL': ['History', 'Geography', 'English Language'],
         'HGK': ['History', 'Geography', 'Kiswahili'],
-        'KLF': ['Kiswahili', 'English Language', 'Fine Art']
+        'KLF': ['Kiswahili', 'English Language', 'Fine Art'],
+        'KFA': ['Kiswahili', 'French', 'Fine Art'],
+        'EFA': ['Economics', 'French', 'Fine Art'],
+        'HFA': ['History', 'French', 'Fine Art'],
+        'GFA': ['Geography', 'French', 'Fine Art'],
+        'KCA': ['Kiswahili', 'Computer Studies', 'Fine Art']
       };
       const compulsory = SubjectRegistry.getCompulsoryAlevel();
       const specific = comboMap[(combo || 'PCM').toUpperCase()] || ['Physics', 'Chemistry', 'Advanced Mathematics'];
@@ -820,15 +825,83 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     reader.readAsDataURL(file);
   };
 
+  const [duplicateStudentModal, setDuplicateStudentModal] = useState<{
+    existingMatches: Student[];
+    pendingStudent: Student;
+    activeStream: string;
+  } | null>(null);
+  const [allowDuplicateStudentPermission, setAllowDuplicateStudentPermission] = useState(false);
+  const [studentFormError, setStudentFormError] = useState<string | null>(null);
+
+  const normalizePersonName = (val: string) =>
+    String(val || '')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ');
+
+  const matchingExistingStudentsByName = useMemo(() => {
+    const target = normalizePersonName(name);
+    if (!target || target.length < 3) return [];
+    return students.filter(s => normalizePersonName(s.name) === target);
+  }, [name, students]);
+
+  const commitStudentRegistration = (newStudent: Student, activeStream: string) => {
+    if (parentPhone.trim()) {
+      saveParentPin(parentPhone.trim(), parentPin.trim() || DEFAULT_PARENT_PIN);
+    }
+
+    onAddStudent(newStudent);
+
+    // Auto-sync class and stream into streamSettings registry
+    if (onUpdateStreamSettings) {
+      const { updatedSettings, wasChanged } = syncClassAndStreamToSettings(
+        newStudent.className,
+        activeStream,
+        streamSettings
+      );
+      if (wasChanged) {
+        onUpdateStreamSettings(updatedSettings);
+      }
+    }
+
+    setName('');
+    setCustomRegNo('');
+    setParentPhone('');
+    setParentName('');
+    setParentPin(DEFAULT_PARENT_PIN);
+    setPassportPhoto('');
+    setDuplicateStudentModal(null);
+    setAllowDuplicateStudentPermission(false);
+    setStudentFormError(null);
+    setActiveTab('register_list');
+    setStudentCreatedNotice(`Mwanafunzi ${newStudent.name} (${newStudent.regNo}) amesajiliwa kikamilifu kwenye darasa la ${newStudent.className} (${activeStream})!`);
+    setTimeout(() => setStudentCreatedNotice(null), 6000);
+  };
+
   const handleRegister = (e: React.FormEvent) => {
     e.preventDefault();
+    setStudentFormError(null);
+
     if (!name.trim()) {
-      alert('Please enter student full name.');
+      setStudentFormError('Tafadhali weka Jina Kamili la Mwanafunzi.');
       return;
     }
     if (selectedSubjects.length === 0) {
-      alert('Please select at least one subject.');
+      setStudentFormError('Tafadhali chagua angalau somo moja la mwanafunzi.');
       return;
+    }
+
+    // Check if customRegNo is already used by another student (strict restriction)
+    if (customRegNo.trim()) {
+      const regExists = students.find(
+        s => String(s.regNo || '').trim().toLowerCase() === customRegNo.trim().toLowerCase()
+      );
+      if (regExists) {
+        setStudentFormError(
+          `ZUIO LA USAJILI: Namba ya Usajili "${customRegNo.trim()}" tayari inatumiwa na mwanafunzi "${regExists.name}" (${regExists.className}). Huwezi kusajili wanafunzi wawili wenye Namba ya Usajili inayofanana.`
+        );
+        return;
+      }
     }
 
     const isPrimarySection = level === 'PRIMARY' || level === 'PRE_PRIMARY' || 
@@ -864,34 +937,22 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
       division: '-'
     };
 
-    if (parentPhone.trim()) {
-      saveParentPin(parentPhone.trim(), parentPin.trim() || DEFAULT_PARENT_PIN);
+    // Check if any existing student has the exact same name
+    const targetNormName = normalizePersonName(name);
+    const existingNameMatches = students.filter(s => normalizePersonName(s.name) === targetNormName);
+
+    if (existingNameMatches.length > 0) {
+      // Trigger restriction & permission modal
+      setAllowDuplicateStudentPermission(false);
+      setDuplicateStudentModal({
+        existingMatches: existingNameMatches,
+        pendingStudent: newStudent,
+        activeStream
+      });
+      return;
     }
 
-    onAddStudent(newStudent);
-
-    // Auto-sync class and stream into streamSettings registry
-    if (onUpdateStreamSettings) {
-      const { updatedSettings, wasChanged } = syncClassAndStreamToSettings(
-        className,
-        activeStream,
-        streamSettings
-      );
-      if (wasChanged) {
-        onUpdateStreamSettings(updatedSettings);
-      }
-    }
-
-    setName('');
-    setCustomRegNo('');
-    setParentPhone('');
-    setParentName('');
-    setParentPin(DEFAULT_PARENT_PIN);
-    setPassportPhoto('');
-    // After Student Create, show all students in Student button list immediately
-    setActiveTab('register_list');
-    setStudentCreatedNotice(`Student ${newStudent.name} (${newStudent.regNo}) registered successfully! Class ${className} (${activeStream}) updated across system.`);
-    setTimeout(() => setStudentCreatedNotice(null), 6000);
+    commitStudentRegistration(newStudent, activeStream);
   };
 
   const exportTemplate = () => {
@@ -1124,11 +1185,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
     if (sortBy === 'name_asc') {
       return a.name.localeCompare(b.name);
     }
-    // Default smart sorting based on level: Primary -> Boys first, Secondary -> Girls first, then name alphabetical
+    // Default smart sorting (Requirement: Secondary -> Girls first, Primary -> Boys first)
     if (isPrimaryA) {
+      // Primary: Boys (M) then Girls (F)
       if (!isGirlA && isGirlB) return -1;
       if (isGirlA && !isGirlB) return 1;
     } else {
+      // Secondary: Girls (F) then Boys (M)
       if (isGirlA && !isGirlB) return -1;
       if (!isGirlA && isGirlB) return 1;
     }
@@ -1615,6 +1678,13 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
             </div>
           </div>
           
+          {studentFormError && (
+            <div className="p-3.5 bg-rose-50 border border-rose-300 text-rose-900 rounded-xl text-xs font-bold flex items-center gap-2 shadow-2xs">
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+              <span>{studentFormError}</span>
+            </div>
+          )}
+          
           <form onSubmit={handleRegister} className="space-y-5">
             <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
               {/* Passport Photo Upload Box */}
@@ -1702,9 +1772,21 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
                     placeholder="e.g. Amina Selemani"
                     value={name}
                     onChange={e => setName(e.target.value)}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 bg-white"
+                    className={`w-full px-3 py-2 text-sm border rounded-lg focus:ring-2 bg-white ${
+                      matchingExistingStudentsByName.length > 0
+                        ? 'border-amber-500 focus:ring-amber-500 bg-amber-50/30'
+                        : 'border-slate-300 focus:ring-blue-500'
+                    }`}
                     required
                   />
+                  {matchingExistingStudentsByName.length > 0 && (
+                    <div className="mt-1.5 p-2 bg-amber-50 border border-amber-300 rounded-lg text-[11px] text-amber-900 flex items-start gap-1.5">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="font-bold">Tahadhari ya Jina Kujirudia:</span> Mwanafunzi mwenye jina <strong>"{name.trim()}"</strong> tayari yupo ({matchingExistingStudentsByName.map(m => `${m.className} - ${m.regNo}`).join(', ')}). Ukibofya sajili utaulizwa ruhusa maalum kama majina yanafanana.
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -4583,6 +4665,117 @@ export const StudentsView: React.FC<StudentsViewProps> = ({
               >
                 <Check className="w-4 h-4" />
                 <span>Zalisha &amp; Hifadhi Database</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DUPLICATE STUDENT REGISTRATION RESTRICTION & PERMISSION MODAL */}
+      {duplicateStudentModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-xs p-4">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border-2 border-amber-400 space-y-4 animate-in zoom-in-95 duration-200">
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-300 flex items-center justify-center shrink-0">
+                  <AlertTriangle className="w-5 h-5 text-amber-700" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 uppercase tracking-tight">
+                    Tahadhari: Usajili wa Mwanafunzi Unajirudia!
+                  </h3>
+                  <p className="text-[11px] text-amber-800 font-semibold">
+                    Mfumo umezuia usajili wa moja kwa moja kwa sababu jina hili tayari lipo kwenye mfumo.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setDuplicateStudentModal(null);
+                  setAllowDuplicateStudentPermission(false);
+                }}
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                <div className="font-black text-slate-700 uppercase text-[10px] tracking-wider">
+                  Mwanafunzi Mpya Unayetaka Kumsajili:
+                </div>
+                <div className="flex items-center justify-between font-bold text-slate-900">
+                  <span>{duplicateStudentModal.pendingStudent.name}</span>
+                  <span className="px-2 py-0.5 bg-blue-100 text-blue-800 rounded text-[11px]">
+                    {duplicateStudentModal.pendingStudent.className} ({duplicateStudentModal.activeStream})
+                  </span>
+                </div>
+              </div>
+
+              <div className="p-3 bg-amber-50/90 border border-amber-200 rounded-xl space-y-2">
+                <div className="font-black text-amber-900 uppercase text-[10px] tracking-wider">
+                  Wanafunzi Waliopo Tayari Wenye Jina Linalofanana ({duplicateStudentModal.existingMatches.length}):
+                </div>
+                <div className="space-y-1.5 max-h-36 overflow-y-auto">
+                  {duplicateStudentModal.existingMatches.map((ex) => (
+                    <div
+                      key={ex.id}
+                      className="p-2 bg-white border border-amber-200 rounded-lg flex items-center justify-between text-[11px]"
+                    >
+                      <div>
+                        <div className="font-bold text-slate-900">{ex.name}</div>
+                        <div className="text-slate-500">
+                          Reg No: <strong className="font-mono text-blue-700">{ex.regNo}</strong> • Jinsia: {ex.gender}
+                        </div>
+                      </div>
+                      <span className="px-2 py-0.5 bg-amber-100 text-amber-900 font-bold rounded border border-amber-300">
+                        {ex.className} ({ex.stream || ex.combination || 'A'})
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <label className="flex items-start gap-2.5 p-3 bg-emerald-50 border border-emerald-300 rounded-xl cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={allowDuplicateStudentPermission}
+                  onChange={e => setAllowDuplicateStudentPermission(e.target.checked)}
+                  className="mt-0.5 w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="text-[11px] font-bold text-emerald-950 leading-snug">
+                  Ninathibitisha na kutoa ruhusa kuwa huyu ni mwanafunzi mwingine tofauti ingawa majina yao yanafanana (Ruhusu Usajili).
+                </span>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-slate-200">
+              <button
+                type="button"
+                onClick={() => {
+                  setDuplicateStudentModal(null);
+                  setAllowDuplicateStudentPermission(false);
+                }}
+                className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl cursor-pointer"
+              >
+                Sitisha Usajili (Ghairi)
+              </button>
+              <button
+                type="button"
+                disabled={!allowDuplicateStudentPermission}
+                onClick={() => {
+                  if (!allowDuplicateStudentPermission || !duplicateStudentModal) return;
+                  commitStudentRegistration(
+                    duplicateStudentModal.pendingStudent,
+                    duplicateStudentModal.activeStream
+                  );
+                }}
+                className="px-5 py-2 text-xs font-black text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-xl shadow-md flex items-center gap-1.5 cursor-pointer transition-all"
+              >
+                <Check className="w-4 h-4" />
+                <span>Ruhusu &amp; Sajili Mwanafunzi</span>
               </button>
             </div>
           </div>

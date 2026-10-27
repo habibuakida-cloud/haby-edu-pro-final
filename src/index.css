@@ -104,6 +104,7 @@
     #student-id-print-area,
     #teaching-tracker-print,
     #parent-report-print,
+    #necta-official-a4-report-printable,
     .printable-modal-content {
       position: static !important;
       display: block !important;

@@ -9,7 +9,11 @@ interface RoleGuardProps {
 }
 
 const ALLOWED_TEACHER_VIEWS = [
+  'dashboard',
   'teacherportal',
+  'teachers',
+  'monitordashboard',
+  'journalreport',
   'markentry',
   'classjournal',
   'lessonplans',
@@ -26,7 +30,11 @@ const ALLOWED_TEACHER_VIEWS = [
   'discipline',
   'sms',
   'officialletters',
-  'sittingplan'
+  'sittingplan',
+  'nectaexamreports',
+  'jointexams',
+  'envelope-cover',
+  'invigilation-calendar'
 ];
 
 const RESTRICTED_SUPER_ADMIN_VIEWS = ['network', 'github', 'backup', 'multischool'];
@@ -37,24 +45,30 @@ export const RoleGuard: React.FC<RoleGuardProps> = ({
   onRedirect,
   children
 }) => {
-  const role = (currentUser?.role || 'TEACHER').toUpperCase();
-  const isSuperAdmin = currentUser?.isSuperAdmin || role === 'SUPER_ADMIN' || currentUser?.email === 'habibuakida@gmail.com';
+  const rawRole = String(currentUser?.role || 'TEACHER').trim().toUpperCase().replace(/[\s_-]+/g, '_');
+  const isSuperAdmin = currentUser?.isSuperAdmin || rawRole === 'SUPER_ADMIN' || currentUser?.email === 'habibuakida@gmail.com';
+  const isTeacher = !isSuperAdmin && (rawRole.includes('TEACHER') || rawRole === 'MWALIMU');
+  const isMonitor = !isSuperAdmin && (rawRole.includes('MONITOR') || rawRole.includes('MONITRESS'));
 
-  const shouldRedirectTeacher = role === 'TEACHER' && !isSuperAdmin && !ALLOWED_TEACHER_VIEWS.includes(currentView);
-  const shouldRedirectAdmin = (role === 'HEADMASTER' || role === 'ACADEMIC') && !isSuperAdmin && RESTRICTED_SUPER_ADMIN_VIEWS.includes(currentView);
+  const ALLOWED_MONITOR_VIEWS = ['monitordashboard', 'journalreport'];
+  const shouldRedirectMonitor = isMonitor && !ALLOWED_MONITOR_VIEWS.includes(currentView);
+  const shouldRedirectTeacher = isTeacher && !ALLOWED_TEACHER_VIEWS.includes(currentView);
+  const shouldRedirectAdmin = (rawRole === 'HEADMASTER' || rawRole === 'ACADEMIC') && !isSuperAdmin && RESTRICTED_SUPER_ADMIN_VIEWS.includes(currentView);
 
   useEffect(() => {
-    if (shouldRedirectTeacher) {
+    if (shouldRedirectMonitor) {
+      onRedirect('monitordashboard');
+    } else if (shouldRedirectTeacher) {
       onRedirect('teacherportal');
     } else if (shouldRedirectAdmin) {
       onRedirect('dashboard');
     }
-  }, [shouldRedirectTeacher, shouldRedirectAdmin, onRedirect]);
+  }, [shouldRedirectMonitor, shouldRedirectTeacher, shouldRedirectAdmin, onRedirect]);
 
-  if (shouldRedirectTeacher || shouldRedirectAdmin) {
+  // Never return blank null permanently; allow child view to render cleanly
+  if (shouldRedirectMonitor || shouldRedirectTeacher || shouldRedirectAdmin) {
     return null;
   }
 
   return <>{children}</>;
 };
-

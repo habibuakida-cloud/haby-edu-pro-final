@@ -40,7 +40,7 @@ export const EditReportCardModal: React.FC<EditReportCardModalProps> = ({
   const [passportPhoto, setPassportPhoto] = useState<string>(student.passportPhoto || '');
 
   // Marks state
-  const [marks, setMarks] = useState<Record<string, number>>(() => ({
+  const [marks, setMarks] = useState<Record<string, number | string>>(() => ({
     ...(student.marks && Object.keys(student.marks).length > 0
       ? student.marks
       : {
@@ -70,7 +70,7 @@ export const EditReportCardModal: React.FC<EditReportCardModalProps> = ({
     : 96;
 
   const [characterAssessment, setCharacterAssessment] = useState<{
-    overallConductGrade: 'A' | 'B' | 'C' | 'D' | 'F';
+    overallConductGrade: 'A' | 'B' | 'C' | 'D' | 'F' | 'E' | 'ABS';
     overallConductRemark: string;
     traits: CharacterTrait[];
   }>(() => {

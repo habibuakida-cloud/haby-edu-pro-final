@@ -35,7 +35,8 @@ export const SubjectPerformanceTrendsWidget: React.FC<SubjectPerformanceTrendsWi
         if (!aggregation[period][subject]) {
           aggregation[period][subject] = { totalMarks: 0, count: 0 };
         }
-        aggregation[period][subject].totalMarks += info.marks;
+        const numericMarks = typeof info.marks === 'number' ? info.marks : 0;
+        aggregation[period][subject].totalMarks += numericMarks;
         aggregation[period][subject].count += 1;
       });
     });

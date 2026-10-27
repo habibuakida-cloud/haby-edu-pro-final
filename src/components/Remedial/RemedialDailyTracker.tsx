@@ -20,21 +20,23 @@ import {
 } from 'lucide-react';
 import { getRemedialTimetable, markRemedialAttendance, getRemedialAttendance } from '../../lib/remedialService';
 import { RemedialDashboardSummary } from './RemedialDashboardSummary';
-import { Student } from '../../types';
+import { Student, Teacher } from '../../types';
 import { isSameClass } from '../../utils/reportCardUtils';
 
 interface RemedialDailyTrackerProps {
   schoolId: string;
   currentUser: any;
   students?: Student[];
+  teachers?: Teacher[];
 }
 
-export const RemedialDailyTracker: React.FC<RemedialDailyTrackerProps> = ({ schoolId, currentUser, students = [] }) => {
+export const RemedialDailyTracker: React.FC<RemedialDailyTrackerProps> = ({ schoolId, currentUser, students = [], teachers = [] }) => {
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [timetable, setTimetable] = useState<any[]>([]);
   const [attendance, setAttendance] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
   const [markingId, setMarkingId] = useState<string | null>(null);
+  const [substituteTeachers, setSubstituteTeachers] = useState<Record<string, string>>({});
 
   // Student Attendance Recording Modal State
   const [selectedSessionForStudentAtt, setSelectedSessionForStudentAtt] = useState<any | null>(null);
@@ -59,11 +61,16 @@ export const RemedialDailyTracker: React.FC<RemedialDailyTrackerProps> = ({ scho
       // 2. Fetch existing attendance for this specific date
       const { data: att } = await getRemedialAttendance(schoolId, selectedDate);
       const attMap: Record<string, any> = {};
+      const subMap: Record<string, string> = {};
       (att || []).forEach(record => {
         const key = `${record.period_time}_${record.class_name}`;
         attMap[key] = record;
+        if (record.substitute_teacher) {
+          subMap[key] = record.substitute_teacher;
+        }
       });
       setAttendance(attMap);
+      setSubstituteTeachers(subMap);
     } catch (err) {
       console.error(err);
     } finally {
@@ -76,6 +83,7 @@ export const RemedialDailyTracker: React.FC<RemedialDailyTrackerProps> = ({ scho
     setMarkingId(key);
     
     const existing = attendance[key] || {};
+    const subTeacher = substituteTeachers[key] || existing.substitute_teacher || period.teacher_name;
     const record = {
       ...existing,
       date: selectedDate,
@@ -84,6 +92,7 @@ export const RemedialDailyTracker: React.FC<RemedialDailyTrackerProps> = ({ scho
       class_name: period.class_name,
       subject: period.subject,
       teacher_name: period.teacher_name,
+      substitute_teacher: subTeacher,
       stream: period.stream || 'A',
       status,
       marked_by: currentUser?.fullName || 'Academic',
@@ -357,6 +366,26 @@ export const RemedialDailyTracker: React.FC<RemedialDailyTrackerProps> = ({ scho
                         </div>
                       </div>
                     )}
+
+                    {/* Override Teacher Selector (Mbadala / Substitute) */}
+                    <div className="mb-3 p-3 bg-slate-50 border border-slate-200 rounded-xl space-y-1">
+                      <label className="block text-[10px] font-black uppercase text-slate-600">
+                        Override Teacher / Mwalimu Mbadala (Kama mwalimu wa awali alikuwa na dharura):
+                      </label>
+                      <select
+                        value={substituteTeachers[key] || record?.substitute_teacher || period.teacher_name}
+                        onChange={e => {
+                          const val = e.target.value;
+                          setSubstituteTeachers(prev => ({ ...prev, [key]: val }));
+                        }}
+                        className="w-full p-2 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500"
+                      >
+                        <option value={period.teacher_name}>{period.teacher_name} (Mwalimu Mteule - Asili)</option>
+                        {teachers.filter(t => t.name !== period.teacher_name).map(t => (
+                          <option key={t.id} value={t.name}>{t.name} (Mwalimu Mbadala / Substitute)</option>
+                        ))}
+                      </select>
+                    </div>
 
                     <div className="grid grid-cols-2 gap-3 mb-2.5">
                       <button
